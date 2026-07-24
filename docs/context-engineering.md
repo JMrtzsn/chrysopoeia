@@ -4,6 +4,55 @@ This design applies Google's *Context Engineering: Sessions, Memory* (May
 2026), stored in `docs/reference/2025_Day_3_Rewrite_v1_ContextEngineering.pdf`,
 to Chrysopoeia.
 
+## Context Engineering Principles
+
+This design also applies Birgitta Böckeler's *Context Engineering for Coding
+Agents* (Thoughtworks, 5 February 2026): context engineering means curating what
+the model sees to improve results. Although the article focuses on coding
+agents, the same principles apply to Chrysopoeia's trading agents.
+
+- Separate reusable **instructions** for a task from persistent **guidance** and
+  safety policy.
+- Treat tools, MCP servers, and skills as **context interfaces**: concise
+  descriptions of how an agent can obtain more context when needed.
+- Keep always-loaded context small. More context can reduce effectiveness and
+  increases latency and cost, even when the model has a large context window.
+- Decide deliberately who loads context: an LLM may discover it on demand, a
+  user may request it, or deterministic workflow code may inject it at a known
+  lifecycle point.
+- Use sub-agents for independent histories, specialized models and tools, and
+  parallel work rather than placing every capability in one context.
+- Build context configuration iteratively from observed needs. Avoid copied,
+  speculative, duplicated, or contradictory rules.
+- Measure context composition, token use, cost, retrieval quality, and outcomes;
+  context has no value merely because it was supplied.
+- Context improves probabilities, not guarantees. LLM instructions cannot
+  enforce safety, authorization, risk, or execution invariants; deterministic
+  controls and appropriate oversight must do that.
+
+### Capability Taxonomy
+
+| Capability | Who activates it | Chrysopoeia use |
+| --- | --- | --- |
+| Guidance and rules | Runtime, always or by scope | Minimal role, output, safety, and strategy policy |
+| Instructions | User or workflow | A bounded task such as research or review |
+| Skills | Agent or workflow, on demand | Versioned algorithms, procedures, schemas, examples, and source guidance |
+| Sub-agents | Orchestrator or user | Isolated researcher, trader, reviewer, context, lifecycle, and post-trade review roles |
+| Typed tools/functions | Agent | Validated market queries and read-only operations exposed by role |
+| MCP servers | Agent through an allowlist | External APIs, documents, market data, and knowledge services |
+| RAG and memory | Agent or workflow retrieval | Source-linked evidence and validated lessons, loaded within a context budget |
+| Hooks | Deterministic lifecycle events | Audit, validation, metrics, cost recording, and policy checks before or after calls |
+| Plugins | Deployment configuration | Package related skills, tools, MCP adapters, and hooks; never silently grant permissions |
+| User commands | User | Explicit configuration, inspection, pause, resume, and kill-switch actions |
+
+Skills describe how to work; tools and MCP servers provide capabilities; hooks
+run deterministic reactions; plugins distribute these components; sub-agents
+isolate their context and permissions. These categories may be packaged
+together but remain separate in authorization and audit records.
+
+Source: Birgitta Böckeler, *Context Engineering for Coding Agents*, Thoughtworks,
+5 February 2026.
+
 ## Context Types
 
 Keep these stores distinct. More context is not better context.
@@ -197,15 +246,26 @@ allowed to change agent policy or request additional permissions.
   skill IDs and versions with every proposal or review.
 - Each agent version has an allowlist and per-cycle skill budget. Skills are
   loaded only when relevant; never inject the full catalog into every prompt.
-- Trader agents receive two stable context interfaces: `discover_context(task)`
-  lists permitted sources and `call_context(request)` loads one source on demand.
-  Source-specific web, RAG, MCP, or skill tools remain behind `call_context` so
-  adding a source does not add every tool description to each trader prompt.
-- An agent version may explicitly opt into ADK's built-in Google Search when
-  direct model-grounded search is useful. It is disabled by default because it
-  cannot be invoked through an ordinary dispatch function; the agent version
-  must declare it directly, and normal cost, provenance, and tool-permission
-  gates still apply.
+- Target construction policy requires each sub-agent version to declare its
+  role-specific tools explicitly. The orchestrator constructs each role with
+  only those tools; tools are not inherited globally, and not every role needs
+  direct MCP access.
+- Tool boundaries validate inputs, authorize every call, enforce time, result,
+  token, and cost limits, and record the agent version, cycle, tool, arguments,
+  result reference, latency, and cost. Returned content is untrusted context.
+- Search, web, RAG, MCP, and source-specific capabilities remain behind the
+  dedicated context broker by default. A role receives direct access only when
+  its version deliberately declares and allowlists that direct tool.
+- The workflow may supply reviewers with the validated structured proposal and
+  cited evidence. Reviewers may also retrieve independent read-only context
+  through the broker. Risk and execution functions are never exposed to
+  research or reviewer agents; the deterministic workflow invokes them directly.
+- The target context broker provides `discover_context(task)` to list permitted
+  sources and `call_context(request)` to load one source on demand, so adding a
+  source does not add every tool description to each role's prompt.
+- ADK Google Search is enabled only on the dedicated context broker by default.
+  Direct role access requires deliberate allowlisting, and normal cost,
+  provenance, and tool-permission gates still apply.
 - Keep the most recent interaction turns, not the complete transcript.
 - Persist structured cycle state instead of repeatedly sending tool outputs.
 - Summarize completed cycles asynchronously and retain covered event IDs.

@@ -1,10 +1,12 @@
+from collections.abc import Mapping
 from dataclasses import asdict
 
 from google.adk.agents import Agent
 from google.adk.tools import AgentTool, ToolContext, google_search
 
 from chrysopoeia.context import discover_context
-from chrysopoeia.trading import OperatingConfig
+from chrysopoeia.polymarket import PolymarketError, load_market_snapshot
+from chrysopoeia.trading import MarketSnapshot, OperatingConfig
 
 
 def configure_operation(
@@ -29,6 +31,46 @@ def configure_operation(
     )
     tool_context.state["operating_config"] = configuration
     return configuration
+
+
+def capture_market_snapshot(market: str, tool_context: ToolContext) -> dict[str, object]:
+    """Capture and store a validated public market snapshot using authoritative session configuration."""
+    state = tool_context.state
+    if not isinstance(state, Mapping):
+        raise ValueError("session state is invalid")
+    configuration = state.get("operating_config")
+    if not isinstance(configuration, Mapping):
+        raise ValueError("operating configuration is missing or invalid")
+    try:
+        config = OperatingConfig(**dict(configuration))
+    except (TypeError, ValueError):
+        raise ValueError("operating configuration is missing or invalid") from None
+
+    if "portfolio_exposure" not in state:
+        market_exposure = total_exposure = 0
+    elif isinstance(exposure := state["portfolio_exposure"], Mapping) and set(exposure) == {
+        "market_exposure",
+        "total_exposure",
+    }:
+        market_exposure = exposure["market_exposure"]
+        total_exposure = exposure["total_exposure"]
+    else:
+        raise ValueError("portfolio exposure is invalid")
+    try:
+        MarketSnapshot("validation", "validation", 0.5, config.bankroll, market_exposure, total_exposure)
+    except ValueError:
+        raise ValueError("portfolio exposure is invalid") from None
+
+    try:
+        snapshot = load_market_snapshot(market, config.bankroll, market_exposure, total_exposure)
+    except PolymarketError:
+        raise
+    except Exception:
+        raise ValueError("market snapshot capture failed") from None
+    result = asdict(snapshot)
+    tool_context.state["market_snapshot"] = result
+    return result
+
 
 context_agent = Agent(
     name="call_context",
@@ -71,11 +113,12 @@ root_agent = Agent(
     instruction=(
         "Own onboarding and operation for paper trading. Ask only for missing user limits, then call configure_operation. "
         "Default to a $1,000 bankroll and one trader when the user does not specify them. Treat bankroll, exposure, "
-        "maximum loss, agent count, and cloud-cost budget as hard user controls. After configuration, coordinate market "
+        "maximum loss, agent count, and cloud-cost budget as hard user controls. After configuration, capture the requested "
+        "market snapshot before coordinating market "
         "research and independent review with minimal user input. Agents may propose or review, but deterministic Python "
         "owns risk, cost gates, simulated execution, accounting, pausing, and versioned replacement. Report net performance "
         "as trading profit and loss minus trading and cloud costs."
     ),
-    tools=[configure_operation],
+    tools=[configure_operation, capture_market_snapshot],
     sub_agents=[trader_agent, reviewer_agent],
 )

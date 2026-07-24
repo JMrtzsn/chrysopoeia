@@ -7,6 +7,8 @@ Context and memory boundaries are defined in `docs/context-engineering.md`.
 The managed RAG and deployment design is defined in `docs/gcp-architecture.md`.
 Graph ownership, state, scheduling, and cost gates are defined in
 `docs/agent-graphs.md`.
+The product specification is `.agents-cli-spec.md`; development and release
+gates are defined in `docs/development-lifecycle.md`.
 
 ## Stack
 

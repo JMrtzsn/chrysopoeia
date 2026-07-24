@@ -93,6 +93,9 @@ lifecycle, and learning workflows are separate versioned ADK graphs. See
 - Provide a versioned skill catalog that agents discover and load on demand;
   keep permanent agent instructions minimal rather than injecting every trading
   method into every prompt.
+- In the target architecture, construct each sub-agent with an explicit
+  role-specific tool allowlist; expose MCP only where that role requires it, and
+  never give research or reviewer agents execution tools.
 - Retain citations with forecasts and reviews.
 - Use RAG and vector retrieval for official documentation, external research,
   and validated procedural lessons.
@@ -128,6 +131,11 @@ lifecycle, and learning workflows are separate versioned ADK graphs. See
   execution tool, hard limits, a kill switch, and explicit ADK confirmation.
 
 ## Development
+
+Development follows `specify -> study -> scaffold -> build -> evaluate -> deploy
+-> publish -> observe`. See `.agents-cli-spec.md` for the product specification
+and `docs/development-lifecycle.md` for gates. This repository is currently a
+hand-built prototype and has not yet been enhanced by Agents CLI.
 
 ```sh
 uv sync
