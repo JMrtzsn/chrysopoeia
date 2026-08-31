@@ -1,10 +1,20 @@
+import asyncio
+from collections.abc import AsyncGenerator
 import copy
 import unittest
 from dataclasses import asdict
+import json
 import math
 from types import SimpleNamespace
 
-from pydantic import ValidationError
+from google.adk.models import BaseLlm
+from google.adk.models.llm_request import LlmRequest
+from google.adk.models.llm_response import LlmResponse
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.workflow import Workflow
+from google.genai import types
+from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
     PAPER_CYCLE_DECISION_KEY,
@@ -24,7 +34,7 @@ from chrysopoeia.agent import (
     root_agent,
     trader_agent,
 )
-from chrysopoeia.cost import after_model_cost, before_model_cost, on_model_cost_error
+from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.trading import MarketSnapshot, OperatingConfig
 
 
@@ -45,6 +55,38 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
             "reason": "supported" if approved else "weak evidence",
         },
     }
+
+
+class StructuredFakeLlm(BaseLlm):
+    calls: SkipValidation[list[str]]
+    response: dict[str, object]
+    agent_name: str
+
+    async def generate_content_async(
+        self, llm_request: LlmRequest, stream: bool = False,
+    ) -> AsyncGenerator[LlmResponse, None]:
+        if stream or self.agent_name in self.calls:
+            raise AssertionError(f"unexpected {self.agent_name} model request")
+        self.calls.append(self.agent_name)
+        if self.agent_name == trader_agent.name:
+            if llm_request.config.response_schema is not None or "set_model_response" not in llm_request.tools_dict:
+                raise AssertionError("trader request did not use set_model_response")
+            parts = [types.Part(function_call=types.FunctionCall(
+                id="trader-response",
+                name="set_model_response",
+                args=self.response,
+            ))]
+        else:
+            if llm_request.config.response_schema is None or llm_request.tools_dict:
+                raise AssertionError("reviewer request did not use native structured output")
+            parts = [types.Part(text=json.dumps(self.response))]
+        yield LlmResponse(
+            content=types.Content(role="model", parts=parts),
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=11,
+                candidates_token_count=7,
+            ),
+        )
 
 
 class PaperCycleTests(unittest.TestCase):
@@ -91,6 +133,77 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(report.status, "filled")
         self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["amount"], 10)
         self.assertEqual(state[REVIEW_KEY], review.model_dump())
+
+    def test_runner_executes_paper_cycle_offline_with_structured_models(self) -> None:
+        calls = []
+        fake_trader = StructuredFakeLlm(
+            model="gemini-flash-latest",
+            agent_name=trader_agent.name,
+            calls=calls,
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "probability": 0.46, "amount": 10},
+        )
+        fake_reviewer = StructuredFakeLlm(
+            model="gemini-flash-latest",
+            agent_name=reviewer_agent.name,
+            calls=calls,
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "approved": True, "reason": "supported"},
+        )
+        test_trader = trader_agent.clone(update={"model": fake_trader})
+        test_reviewer = reviewer_agent.clone(update={"model": fake_reviewer})
+        workflow = Workflow(
+            name=paper_cycle_workflow.name,
+            description=paper_cycle_workflow.description,
+            input_schema=PaperCycleRequest,
+            output_schema=paper_cycle_workflow.output_schema,
+            edges=[
+                ("START", prepare_trader_input),
+                (prepare_trader_input, test_trader),
+                (test_trader, prepare_reviewer_input),
+                (prepare_reviewer_input, test_reviewer),
+                (test_reviewer, complete_paper_cycle),
+            ],
+        )
+        state = {
+            "operating_config": asdict(OperatingConfig()),
+            "market_snapshot": asdict(MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0)),
+            "model_cost_policy": DEFAULT_COST_POLICY.copy(),
+            "cycle_id": "cycle-1",
+        }
+        authoritative = copy.deepcopy(state)
+
+        async def run_cycle() -> tuple[dict[str, object], list[object]]:
+            sessions = InMemorySessionService()
+            await sessions.create_session(app_name="test", user_id="user", session_id="session", state=state)
+            runner = Runner(app_name="test", node=workflow, session_service=sessions)
+            events = []
+            async for event in runner.run_async(
+                user_id="user",
+                session_id="session",
+                new_message=types.Content(role="user", parts=[types.Part(text=PaperCycleRequest().model_dump_json())]),
+            ):
+                events.append(event)
+            session = await sessions.get_session(app_name="test", user_id="user", session_id="session")
+            self.assertIsNotNone(session)
+            return session.state, events
+
+        result, events = asyncio.run(run_cycle())
+
+        self.assertEqual(calls, [trader_agent.name, reviewer_agent.name])
+        self.assertTrue(any(event.author == trader_agent.name and event.actions.state_delta.get(PROPOSAL_KEY) == fake_trader.response for event in events))
+        self.assertTrue(any(event.author == reviewer_agent.name and event.actions.state_delta.get(REVIEW_KEY) == fake_reviewer.response for event in events))
+        self.assertEqual(result[PROPOSAL_KEY], fake_trader.response)
+        self.assertEqual(result[REVIEW_KEY], fake_reviewer.response)
+        self.assertEqual(
+            [(record["agent"], record["status"], record["actual_input_tokens"], record["actual_output_tokens"])
+             for record in result["model_cost_ledger"]],
+            [(trader_agent.name, "completed", 11, 7), (reviewer_agent.name, "completed", 11, 7)],
+        )
+        self.assertTrue(result[PAPER_CYCLE_DECISION_KEY]["allowed"])
+        self.assertEqual(result[PAPER_CYCLE_FILL_KEY]["snapshot_id"], "snapshot-1")
+        self.assertEqual(result[PAPER_CYCLE_FILL_KEY]["market_id"], "market-1")
+        self.assertEqual(result[PAPER_CYCLE_REPORT_KEY]["status"], "filled")
+        for key, value in authoritative.items():
+            self.assertEqual(result[key], value)
 
     def test_reviewer_rejection_records_no_fill_and_explicit_reason(self) -> None:
         state = cycle_state(approved=False)
