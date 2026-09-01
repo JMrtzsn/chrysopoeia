@@ -32,7 +32,12 @@ from chrysopoeia.agent import (
     trader_agent,
 )
 from chrysopoeia.cost import LEDGER_KEY, CostPolicy
-from chrysopoeia.trading import MarketSnapshot, OperatingConfig, SimulatedFill
+from chrysopoeia.trading import (
+    BookLevel,
+    MarketSnapshot,
+    OperatingConfig,
+    SimulatedFill,
+)
 
 SNAPSHOT_ID = "paper-eval-snapshot-1"
 MARKET_ID = "paper-eval-market-1"
@@ -80,7 +85,24 @@ def setup_state() -> dict[str, object]:
         "model_cost_policy": COST_POLICY.copy(),
         "cycle_id": "paper-cycle-evaluation-1",
         "market_snapshot": asdict(
-            MarketSnapshot(SNAPSHOT_ID, MARKET_ID, 0.4, 1_000, 0, 0)
+            MarketSnapshot(
+                SNAPSHOT_ID,
+                MARKET_ID,
+                0.4,
+                1_000,
+                0,
+                0,
+                question="Will the fixed evaluation event resolve Yes?",
+                resolution_rules="Resolves Yes under the fixed evaluation fixture rules.",
+                end_time="2027-01-01T00:00:00+00:00",
+                captured_at="2026-09-01T00:00:00+00:00",
+                source_url="https://polymarket.com/event/fixed-evaluation-event",
+                yes_token_id="fixed-evaluation-yes-token",
+                asks=(BookLevel(0.4, 25), BookLevel(0.42, 25)),
+                fee_rate=0.02,
+                fee_source="paper-assumption:flat-2pct-v1",
+                book_captured_at="2026-09-01T00:00:00+00:00",
+            )
         ),
     }
 

@@ -81,7 +81,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     "market_id": evaluation.MARKET_ID,
                     "action": "trade",
                     "probability": 0.46,
-                    "amount": 10,
+                    "amount": 9,
                 },
             ),
             FakeLlm(

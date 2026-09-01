@@ -29,14 +29,7 @@ class MarketSnapshotToolTests(unittest.TestCase):
         with patch("chrysopoeia.agent.load_market_snapshot", load):
             result = capture_market_snapshot("12345", context)
 
-        expected = {
-            "snapshot_id": "snapshot-1",
-            "market_id": "12345",
-            "price": 0.42,
-            "bankroll": 1_000,
-            "market_exposure": 4,
-            "total_exposure": 20,
-        }
+        expected = asdict(MarketSnapshot("snapshot-1", "12345", 0.42, 1_000, 4, 20))
         self.assertEqual(calls, [("12345", 1_000, 4, 20)])
         self.assertEqual(result, expected)
         self.assertEqual(state["market_snapshot"], expected)

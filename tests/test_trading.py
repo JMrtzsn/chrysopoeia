@@ -3,7 +3,7 @@ import unittest
 
 from chrysopoeia.agent import context_agent, reviewer_agent, root_agent, trader_agent
 from chrysopoeia.context import discover_context
-from chrysopoeia.trading import MarketSnapshot, OperatingConfig, Proposal, Review, run_decision_cycle
+from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig, Proposal, Review, run_decision_cycle
 
 
 class DecisionCycleTests(unittest.TestCase):
@@ -11,6 +11,19 @@ class DecisionCycleTests(unittest.TestCase):
         self.snapshot = MarketSnapshot("snapshot-1", "market-1", 0.40, 1_000, 0, 0)
         self.proposal = Proposal("snapshot-1", "market-1", 0.46, 10)
         self.review = Review("snapshot-1", "market-1", True, "Thesis is supported.")
+
+    def rich_snapshot(self, **changes: object) -> MarketSnapshot:
+        values = {
+            "question": "Will it rain?",
+            "resolution_rules": "Resolves Yes if rain is measured.",
+            "end_time": "2026-09-02T00:00:00+00:00",
+            "captured_at": "2026-09-01T00:00:00+00:00",
+            "source_url": "https://polymarket.com/event/will-it-rain",
+            "yes_token_id": "yes-token",
+            "book_captured_at": "2026-09-01T00:00:00+00:00",
+        }
+        values.update(changes)
+        return MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0, **values)
 
     def test_approved_proposal_produces_fill_and_report(self) -> None:
         report = run_decision_cycle(self.snapshot, self.proposal, self.review)
@@ -20,6 +33,48 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertEqual(report.fill.price, 0.40)
         self.assertIn("snapshot-1", report.summary)
         self.assertIn("market-1", report.summary)
+
+    def test_depth_and_fee_produce_exact_vwap_shares_and_total_cost(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 10), BookLevel(0.5, 20)),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+
+        report = run_decision_cycle(snapshot, Proposal("snapshot-1", "market-1", 0.56, 9), self.review)
+
+        self.assertTrue(report.decision.allowed)
+        self.assertAlmostEqual(report.fill.shares, 20)
+        self.assertAlmostEqual(report.fill.price, 0.45)
+        self.assertEqual(report.fill.amount, 9)
+        self.assertEqual(report.fill.fee, 0.18)
+        self.assertEqual(report.fill.total_cost, 9.18)
+        self.assertEqual(report.fill.levels_consumed, 2)
+        for value in ("VWAP 0.45", "gross 9", "fee 0.18", "total 9.18", "shares 20"):
+            self.assertIn(value, report.summary)
+
+    def test_insufficient_depth_rejects_without_partial_fill(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 10),),
+        )
+
+        report = run_decision_cycle(snapshot, self.proposal, self.review)
+
+        self.assertFalse(report.decision.allowed)
+        self.assertIsNone(report.fill)
+        self.assertIn("insufficient executable YES depth", report.decision.reason)
+
+    def test_risk_limits_include_fee_at_the_boundary(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 100),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+
+        report = run_decision_cycle(snapshot, self.proposal, self.review)
+
+        self.assertFalse(report.decision.allowed)
+        self.assertIn("per-market exposure", report.decision.reason)
 
     def test_policy_rejections_produce_no_fill_and_reason(self) -> None:
         cases = (
@@ -44,6 +99,8 @@ class DecisionCycleTests(unittest.TestCase):
             lambda: MarketSnapshot("s", "m", 0.4, 1_000, 2, 1),
             lambda: Proposal("s", "m", math.inf, 10),
             lambda: Proposal("s", "m", 0.5, 0),
+            lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), fee_rate=0.01),
+            lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), source_url="https://user:pass@polymarket.com/event/x"),
         )
         for call in invalid_calls:
             with self.subTest(call=call), self.assertRaises(ValueError):

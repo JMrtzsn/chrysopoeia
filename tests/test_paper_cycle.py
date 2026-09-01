@@ -37,7 +37,7 @@ from chrysopoeia.agent import (
     trader_agent,
 )
 from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
-from chrysopoeia.trading import MarketSnapshot, OperatingConfig
+from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 
 def cycle_state(*, approved: bool = True) -> dict[str, object]:
@@ -148,6 +148,35 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(report.status, "filled")
         self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["amount"], 10)
         self.assertEqual(state[REVIEW_KEY], review.model_dump())
+
+    def test_serialized_rich_snapshot_rehydrates_and_reaches_both_agents(self) -> None:
+        snapshot = MarketSnapshot(
+            "snapshot-1", "market-1", 0.4, 1_000, 0, 0,
+            question="Will it rain?",
+            resolution_rules="Resolves Yes if rain is measured.",
+            end_time="2026-09-02T00:00:00+00:00",
+            captured_at="2026-09-01T00:00:00+00:00",
+            source_url="https://polymarket.com/event/will-it-rain",
+            yes_token_id="yes-token",
+            asks=tuple(BookLevel(0.4 + index / 1000, 10) for index in range(50)),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+            book_captured_at="2026-09-01T00:00:00+00:00",
+        )
+        state = cycle_state()
+        state["market_snapshot"] = json.loads(json.dumps(asdict(snapshot)))
+        ctx = SimpleNamespace(state=state)
+
+        trader_input = prepare_trader_input(ctx, PaperCycleRequest())
+        reviewer_input = prepare_reviewer_input(
+            ctx,
+            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10),
+        )
+
+        self.assertEqual(trader_input["question"], "Will it rain?")
+        self.assertEqual(reviewer_input.market_snapshot["fee_rate"], 0.02)
+        self.assertEqual(len(trader_input["asks"]), 50)
+        self.assertEqual(trader_input, reviewer_input.market_snapshot)
 
     def test_runner_executes_paper_cycle_offline_with_structured_models(self) -> None:
         calls = []

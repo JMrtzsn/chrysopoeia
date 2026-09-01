@@ -9,12 +9,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from chrysopoeia.trading import MarketSnapshot
+from chrysopoeia.trading import BookLevel, MarketSnapshot
 
 
 API_HOST = "gamma-api.polymarket.com"
+CLOB_HOST = "clob.polymarket.com"
 WEB_HOSTS = {"polymarket.com", "www.polymarket.com"}
 MAX_AGE = timedelta(minutes=5)
+MAX_BOOK_LEVELS = 50
+PAPER_FEE_RATE = 0.02
+PAPER_FEE_SOURCE = "paper-assumption:flat-2pct-v1"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 256_000
 Fetch = Callable[[str, float, int], bytes]
@@ -85,6 +89,72 @@ def _timestamp(value: object) -> datetime:
     return timestamp.astimezone(timezone.utc)
 
 
+def _text(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PolymarketError(f"Polymarket adapter {name} is missing or invalid")
+    return value.strip()
+
+
+def _json_body(body: object, max_bytes: int) -> dict[str, object]:
+    if not isinstance(body, bytes):
+        raise PolymarketError("Polymarket adapter fetch returned invalid data")
+    if len(body) > max_bytes:
+        raise PolymarketError("Polymarket adapter response is too large")
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        raise PolymarketError("Polymarket adapter response is not valid JSON") from None
+    if not isinstance(data, dict):
+        raise PolymarketError("Polymarket adapter response has invalid schema")
+    return data
+
+
+def _fetch_json(url: str, timeout: float, max_bytes: int, fetch: Fetch) -> dict[str, object]:
+    host = urlparse(url).hostname
+    if host not in {API_HOST, CLOB_HOST}:
+        raise PolymarketError("Polymarket adapter endpoint is not allowlisted")
+    try:
+        body = fetch(url, timeout, max_bytes)
+    except PolymarketError:
+        raise
+    except (HTTPError, URLError, TimeoutError, OSError):
+        raise PolymarketError("Polymarket adapter could not fetch public market data") from None
+    return _json_body(body, max_bytes)
+
+
+def _book_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or not value.isdigit():
+        raise PolymarketError("Polymarket adapter book timestamp is missing or invalid")
+    try:
+        return datetime.fromtimestamp(int(value) / 1_000, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        raise PolymarketError("Polymarket adapter book timestamp is missing or invalid") from None
+
+
+def _levels(value: object, name: str, *, required: bool) -> tuple[BookLevel, ...]:
+    if not isinstance(value, list):
+        raise PolymarketError(f"Polymarket adapter {name} list is malformed")
+    if required and not value:
+        raise PolymarketError("Polymarket adapter book has empty asks")
+    if len(value) > MAX_BOOK_LEVELS:
+        raise PolymarketError("Polymarket adapter book has too many levels")
+    levels = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"price", "size"}
+            or not isinstance(item["price"], str)
+            or not isinstance(item["size"], str)
+        ):
+            raise PolymarketError("Polymarket adapter book level is malformed")
+        try:
+            level = BookLevel(float(item["price"]), float(item["size"]))
+        except (TypeError, ValueError):
+            raise PolymarketError("Polymarket adapter book level is malformed") from None
+        levels.append(level)
+    return tuple(levels)
+
+
 def load_market_snapshot(
     market: str,
     bankroll: float,
@@ -97,7 +167,7 @@ def load_market_snapshot(
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     fetch: Fetch = _fetch,
 ) -> MarketSnapshot:
-    """Load one active binary market's executable YES ask into a validated snapshot."""
+    """Load metadata and YES depth; identity excludes capture time but includes source timestamps, levels, fee assumption, and account state."""
     endpoint, expected, uses_slug = _endpoint(market)
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 10:
         raise PolymarketError("Polymarket adapter timeout must be between 0 and 10 seconds")
@@ -109,22 +179,7 @@ def load_market_snapshot(
     if snapshot_id is not None and (not isinstance(snapshot_id, str) or not snapshot_id.strip()):
         raise PolymarketError("Polymarket adapter snapshot ID must be a non-blank string")
 
-    try:
-        body = fetch(endpoint, float(timeout), max_response_bytes)
-    except PolymarketError:
-        raise
-    except (HTTPError, URLError, TimeoutError, OSError):
-        raise PolymarketError("Polymarket adapter could not fetch public market data") from None
-    if not isinstance(body, bytes):
-        raise PolymarketError("Polymarket adapter fetch returned invalid data")
-    if len(body) > max_response_bytes:
-        raise PolymarketError("Polymarket adapter response is too large")
-    try:
-        data = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
-        raise PolymarketError("Polymarket adapter response is not valid JSON") from None
-    if not isinstance(data, dict):
-        raise PolymarketError("Polymarket adapter response has invalid schema")
+    data = _fetch_json(endpoint, float(timeout), max_response_bytes, fetch)
 
     identifier = data.get("id")
     if isinstance(identifier, bool) or not isinstance(identifier, (str, int)) or not str(identifier).isdigit():
@@ -152,16 +207,48 @@ def load_market_snapshot(
     age = current.astimezone(timezone.utc) - updated
     if age < timedelta(0) or age > MAX_AGE:
         raise PolymarketError("Polymarket adapter market data is stale")
-    try:
-        price = float(data.get("bestAsk"))
-    except (TypeError, ValueError):
-        raise PolymarketError("Polymarket adapter executable YES price is missing or invalid") from None
-    if isinstance(data.get("bestAsk"), bool) or not isfinite(price) or not 0 < price < 1:
-        raise PolymarketError("Polymarket adapter executable YES price is missing or invalid")
+    question = _text(data.get("question"), "question")
+    rules = _text(data.get("description"), "resolution rules")
+    end = _timestamp(data.get("endDateIso") or data.get("endDate"))
+    current_utc = current.astimezone(timezone.utc)
+    if end <= current_utc:
+        raise PolymarketError("Polymarket adapter end time must be in the future")
+    event_slug = _text(data.get("eventSlug"), "event slug")
+    if not event_slug.replace("-", "").isalnum():
+        raise PolymarketError("Polymarket adapter event slug is invalid")
+    source_url = f"https://polymarket.com/event/{event_slug}"
+    yes_token = tokens[0]
+    book_endpoint = f"https://{CLOB_HOST}/book?token_id={quote(yes_token, safe='')}"
+    book = _fetch_json(book_endpoint, float(timeout), max_response_bytes, fetch)
+    if book.get("asset_id") != yes_token:
+        raise PolymarketError("Polymarket adapter book token does not match the YES token")
+    book_time = _book_timestamp(book.get("timestamp"))
+    book_age = current_utc - book_time
+    if book_age < timedelta(0) or book_age > MAX_AGE:
+        raise PolymarketError("Polymarket adapter book is stale")
+    asks = tuple(sorted(_levels(book.get("asks"), "asks", required=True), key=lambda level: level.price))
+    bids = _levels(book.get("bids", []), "bids", required=False)
+    if bids and max(level.price for level in bids) >= asks[0].price:
+        raise PolymarketError("Polymarket adapter book is crossed")
+    price = asks[0].price
 
-    identity = f"{market_id}|{updated.isoformat()}|{price}|{bankroll}|{market_exposure}|{total_exposure}"
+    # captured_at is excluded: identity covers immutable source metadata, book data, fee assumption, and account state.
+    identity = json.dumps({
+        "market_id": market_id, "question": question, "rules": rules,
+        "end": end.isoformat(), "updated": updated.isoformat(), "source_url": source_url,
+        "yes_token": yes_token, "book_time": book_time.isoformat(),
+        "asks": [(level.price, level.size) for level in asks],
+        "fee_rate": PAPER_FEE_RATE, "fee_source": PAPER_FEE_SOURCE,
+        "bankroll": bankroll, "market_exposure": market_exposure,
+        "total_exposure": total_exposure,
+    }, sort_keys=True, separators=(",", ":"))
     generated_id = "polymarket-" + sha256(identity.encode()).hexdigest()[:24]
     try:
-        return MarketSnapshot(snapshot_id if snapshot_id is not None else generated_id, market_id, price, bankroll, market_exposure, total_exposure)
+        return MarketSnapshot(
+            snapshot_id if snapshot_id is not None else generated_id,
+            market_id, price, bankroll, market_exposure, total_exposure,
+            question, rules, end.isoformat(), current_utc.isoformat(), source_url,
+            yes_token, asks, PAPER_FEE_RATE, PAPER_FEE_SOURCE, book_time.isoformat(),
+        )
     except ValueError as exc:
         raise PolymarketError(f"Polymarket adapter cannot create snapshot: {exc}") from exc
