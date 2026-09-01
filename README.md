@@ -134,8 +134,8 @@ lifecycle, and learning workflows are separate versioned ADK graphs. See
 
 Development follows `specify -> study -> scaffold -> build -> evaluate -> deploy
 -> publish -> observe`. See `.agents-cli-spec.md` for the product specification
-and `docs/development-lifecycle.md` for gates. This repository is currently a
-hand-built prototype and has not yet been enhanced by Agents CLI.
+and `docs/development-lifecycle.md` for gates. This repository is an Agents CLI
+prototype with a manifest and no deployment target.
 
 ```sh
 uv sync
