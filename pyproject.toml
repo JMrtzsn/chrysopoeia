@@ -3,9 +3,10 @@ name = "chrysopoeia"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "a2a-sdk[http-server]~=0.3.22",
+    "a2a-sdk[http-server]>=1.0,<2",
     "aiohttp>=3.13.4",
-    "google-adk[gcp]>=2.0.0,<3.0.0",
+    "gcsfs>=2024.11.0",
+    "google-adk[gcp]>=2.6.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -15,7 +16,7 @@ lint = [
     "codespell>=2.2.0,<3.0.0",
 ]
 eval = [
-    "google-adk[eval]>=2.0.0,<3.0.0",
+    "google-adk[eval]>=2.6.0,<3.0.0",
     "google-cloud-aiplatform[evaluation]>=1.156.0",
 ]
 

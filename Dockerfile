@@ -24,9 +24,6 @@ COPY ./chrysopoeia ./chrysopoeia
 
 RUN uv sync --frozen
 
-ARG COMMIT_SHA=""
-ENV COMMIT_SHA=${COMMIT_SHA}
-
 ARG AGENT_VERSION=0.0.0
 ENV AGENT_VERSION=${AGENT_VERSION}
 
