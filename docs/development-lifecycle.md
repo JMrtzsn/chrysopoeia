@@ -30,8 +30,18 @@ authoritative enforcement point.
 5. **Evaluate:** maintain small behavioral datasets. `agents-cli eval generate`
    invokes the agent and model; `agents-cli eval grade --config
    tests/eval/eval_config.yaml` runs the current deterministic metrics, though
-   the CLI may initialize Vertex services. Compare scores after changes and
-   block deployment on regressions or unmet thresholds.
+   the CLI may initialize Vertex services. Run the project-owned complete
+   paper-cycle harness offline with `uv run python -m unittest
+   tests.test_paper_cycle_evaluation`. After workflow, schema, prompt, cost,
+   risk, or model changes, manually run `RUN_PAPER_CYCLE_EVALUATION=1 uv run
+   python -m tests.eval.paper_cycle_evaluation` with Vertex ADC,
+   `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, and
+   `GOOGLE_CLOUD_LOCATION`; API keys are rejected. It allows at most two model
+   calls: trader abstention reserves `$0.011264`; trade review reserves at most
+   `$0.022528` (`2 × $0.011264`). Live evaluation is
+   always explicit and manual. Operators own API enablement, disablement, ADC,
+   quota, and billing; the harness never runs `gcloud` or changes APIs. Compare
+   scores after changes and block deployment on regressions or unmet thresholds.
 6. **Deploy:** only after deterministic checks and behavioral evaluation pass,
    and only with explicit approval. Choose Agent Runtime, Cloud Run, or GKE based
    on measured requirements rather than scaffolding all three.

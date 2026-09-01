@@ -1,14 +1,17 @@
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
-from typing import TypeVar
+from math import isfinite
+from typing import Literal, TypeVar
 
 from google.adk.agents import Agent
 from google.adk.agents.context import Context
 from google.adk.apps import App
+from google.adk.events.event import Event
+from google.adk.events.event_actions import EventActions
 from google.adk.sessions.state import State
 from google.adk.tools import AgentTool, ToolContext, google_search
 from google.adk.workflow import Workflow
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from chrysopoeia.context import discover_context
 from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
@@ -30,8 +33,19 @@ class StrictOutput(BaseModel):
 class ProposalOutput(StrictOutput):
     snapshot_id: str = Field(min_length=1)
     market_id: str = Field(min_length=1)
+    action: Literal["trade", "abstain"]
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
-    amount: float = Field(gt=0, allow_inf_nan=False, strict=True)
+    amount: float = Field(strict=True)
+
+    @model_validator(mode="after")
+    def validate_action_amount(self) -> "ProposalOutput":
+        if not isfinite(self.amount):
+            raise ValueError("amount must be finite")
+        if self.action == "trade" and self.amount <= 0:
+            raise ValueError("trade amount must be positive")
+        if self.action == "abstain" and self.amount != 0:
+            raise ValueError("abstain amount must be zero")
+        return self
 
 
 class ReviewOutput(StrictOutput):
@@ -77,7 +91,9 @@ def finalize_paper_cycle(state: StateMap) -> dict[str, object]:
     snapshot = _record(state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
     proposal_output = _record(state.get(PROPOSAL_KEY), ProposalOutput, "paper proposal is missing or invalid")
     review_output = _record(state.get(REVIEW_KEY), ReviewOutput, "paper review is missing or invalid")
-    proposal = Proposal(**proposal_output.model_dump())
+    if proposal_output.action != "trade":
+        raise ValueError("paper proposal is not a trade")
+    proposal = Proposal(**proposal_output.model_dump(exclude={"action"}))
     review = Review(**review_output.model_dump())
     try:
         cycle = run_decision_cycle(snapshot, proposal, review)
@@ -108,10 +124,32 @@ def prepare_trader_input(ctx: Context, node_input: PaperCycleRequest) -> dict[st
 
 def prepare_reviewer_input(ctx: Context, node_input: ProposalOutput) -> ReviewerInput:
     snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
-    proposal = Proposal(**node_input.model_dump())
+    if node_input.action != "trade":
+        raise ValueError("paper proposal is not a trade")
+    proposal = Proposal(**node_input.model_dump(exclude={"action"}))
     if (snapshot.snapshot_id, snapshot.market_id) != (proposal.snapshot_id, proposal.market_id):
         raise ValueError("paper cycle snapshot identity is inconsistent")
     return ReviewerInput(market_snapshot=asdict(snapshot), proposal=node_input)
+
+
+def route_proposal(ctx: Context, node_input: ProposalOutput) -> Event:
+    snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
+    if (snapshot.snapshot_id, snapshot.market_id) != (node_input.snapshot_id, node_input.market_id):
+        raise ValueError("paper cycle snapshot identity is inconsistent")
+    return Event(output=node_input.model_dump(), actions=EventActions(route=node_input.action))
+
+
+def complete_abstention(ctx: Context, node_input: ProposalOutput) -> PaperCycleReportOutput:
+    if node_input.action != "abstain":
+        raise ValueError("paper proposal is not an abstention")
+    report = PaperCycleReportOutput(
+        status="abstained", reason="trader_abstained",
+        summary=f"{node_input.snapshot_id}/{node_input.market_id}: no fill: trader abstained",
+    )
+    ctx.state[PAPER_CYCLE_DECISION_KEY] = {"allowed": False, "reason": "trader_abstained"}
+    ctx.state[PAPER_CYCLE_FILL_KEY] = None
+    ctx.state[PAPER_CYCLE_REPORT_KEY] = report.model_dump()
+    return report
 
 
 def complete_paper_cycle(ctx: Context, node_input: ReviewOutput) -> PaperCycleReportOutput:
@@ -203,8 +241,10 @@ trader_agent = Agent(
     model="gemini-flash-latest",
     description="Researches prediction markets and proposes structured paper trades.",
     instruction=(
-        "Research the supplied market snapshot and propose a trade or no trade. Discover context interfaces only when "
+        "Research the supplied market snapshot and propose a trade or abstain. Discover context interfaces only when "
         "more evidence is needed, then call the selected interface with a focused query. "
+        'Return action="abstain" and amount=0 when evidence or edge does not justify a trade; otherwise return '
+        'action="trade" with a positive amount within deterministic limits. Do not force trading. '
         "Use only the supplied canonical snapshot. Return only its structured proposal with the same snapshot and market "
         "IDs; never approve, review, execute orders, or claim authority over risk controls."
     ),
@@ -243,7 +283,8 @@ paper_cycle_workflow = Workflow(
     edges=[
         ("START", prepare_trader_input),
         (prepare_trader_input, trader_agent),
-        (trader_agent, prepare_reviewer_input),
+        (trader_agent, route_proposal),
+        (route_proposal, {"trade": prepare_reviewer_input, "abstain": complete_abstention}),
         (prepare_reviewer_input, reviewer_agent),
         (reviewer_agent, complete_paper_cycle),
     ],

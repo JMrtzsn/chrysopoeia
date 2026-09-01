@@ -14,6 +14,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.workflow import Workflow
 from google.genai import types
+from google.genai._transformers import process_schema
 from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
@@ -32,6 +33,7 @@ from chrysopoeia.agent import (
     prepare_trader_input,
     reviewer_agent,
     root_agent,
+    route_proposal,
     trader_agent,
 )
 from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
@@ -45,6 +47,7 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
         PROPOSAL_KEY: {
             "snapshot_id": "snapshot-1",
             "market_id": "market-1",
+            "action": "trade",
             "probability": 0.46,
             "amount": 10,
         },
@@ -90,6 +93,17 @@ class StructuredFakeLlm(BaseLlm):
 
 
 class PaperCycleTests(unittest.TestCase):
+    def test_model_output_schemas_are_vertex_compatible_and_validate_actions(self) -> None:
+        for output_schema in (ProposalOutput, ReviewOutput):
+            schema = output_schema.model_json_schema()
+            process_schema(schema, None)
+            with self.subTest(schema=output_schema.__name__):
+                types.Schema.model_validate(schema)
+        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0).action, "abstain")
+        for action, amount in (("trade", 0), ("abstain", 1), ("invalid", 0), ("trade", math.nan), ("trade", math.inf), ("trade", True), ("trade", "1")):
+            with self.subTest(action=action, amount=amount), self.assertRaises(ValidationError):
+                ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount)
+
     def test_approved_state_cycle_fills_and_records_outputs(self) -> None:
         state = cycle_state()
         state["model_cost_policy"] = {"version": "test"}
@@ -113,16 +127,17 @@ class PaperCycleTests(unittest.TestCase):
         del state[REVIEW_KEY]
         ctx = SimpleNamespace(state=state)
         expected_order = [
-            "__START__", "prepare_trader_input", trader_agent.name, "prepare_reviewer_input",
+            "__START__", "prepare_trader_input", trader_agent.name, "route_proposal", "prepare_reviewer_input",
             reviewer_agent.name, "complete_paper_cycle",
         ]
 
         order = ["__START__"]
         while order[-1] != expected_order[-1]:
-            order.extend(paper_cycle_workflow.graph.get_next_pending_nodes(order[-1], None))
+            route = "trade" if order[-1] == "route_proposal" else None
+            order.extend(paper_cycle_workflow.graph.get_next_pending_nodes(order[-1], route))
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         self.assertEqual(trader_input, state["market_snapshot"])
-        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", probability=0.46, amount=10)
+        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10)
         state[PROPOSAL_KEY] = proposal.model_dump()
         reviewer_input = prepare_reviewer_input(ctx, proposal)
         self.assertEqual(reviewer_input.market_snapshot, state["market_snapshot"])
@@ -140,7 +155,7 @@ class PaperCycleTests(unittest.TestCase):
             model="gemini-flash-latest",
             agent_name=trader_agent.name,
             calls=calls,
-            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "probability": 0.46, "amount": 10},
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10},
         )
         fake_reviewer = StructuredFakeLlm(
             model="gemini-flash-latest",
@@ -158,7 +173,8 @@ class PaperCycleTests(unittest.TestCase):
             edges=[
                 ("START", prepare_trader_input),
                 (prepare_trader_input, test_trader),
-                (test_trader, prepare_reviewer_input),
+                (test_trader, route_proposal),
+                (route_proposal, {"trade": prepare_reviewer_input}),
                 (prepare_reviewer_input, test_reviewer),
                 (test_reviewer, complete_paper_cycle),
             ],
@@ -282,7 +298,7 @@ class PaperCycleTests(unittest.TestCase):
             self.assertTrue(forbidden.isdisjoint(schema.model_fields))
             with self.assertRaises(ValidationError):
                 schema.model_validate({
-                    "snapshot_id": "snapshot-1", "market_id": "market-1", "probability": 0.5, "amount": 1,
+                    "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.5, "amount": 1,
                     "approved": True, "reason": "ok", "execute": True,
                 })
         for agent in (trader_agent, reviewer_agent, root_agent):
