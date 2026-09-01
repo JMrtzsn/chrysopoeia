@@ -13,6 +13,10 @@ source of truth for money and lifecycle decisions.
 
 ## Gates
 
+Enable the checked-in local pre-commit gates with `git config core.hooksPath
+.githooks`. This is clone-local configuration; future CI remains the
+authoritative enforcement point.
+
 1. **Specify:** keep `.agents-cli-spec.md` aligned with approved product intent,
    safety boundaries, data sources, and measurable success criteria.
 2. **Study:** reuse relevant official samples before implementing ambient

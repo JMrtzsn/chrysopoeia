@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)
+cd "$repo_root"
+
+uv lock --check
+agents-cli lint
+uv run python -m unittest discover
+uv run python -c "import chrysopoeia; import chrysopoeia.agent"
+uv run python -m compileall -q chrysopoeia tests
