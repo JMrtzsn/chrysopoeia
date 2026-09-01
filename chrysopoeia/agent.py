@@ -1,7 +1,10 @@
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
+from datetime import datetime
+from hashlib import sha256
 from math import isfinite
-from typing import Literal, TypeVar
+import re
+from typing import Annotated, Literal, TypeVar
 
 from google.adk.agents import Agent
 from google.adk.agents.context import Context
@@ -11,16 +14,17 @@ from google.adk.events.event_actions import EventActions
 from google.adk.sessions.state import State
 from google.adk.tools import AgentTool, ToolContext, google_search
 from google.adk.workflow import Workflow
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from chrysopoeia.context import discover_context
 from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.polymarket import PolymarketError, load_market_snapshot
-from chrysopoeia.trading import MarketSnapshot, OperatingConfig, Proposal, Review, run_decision_cycle
+from chrysopoeia.trading import MarketSnapshot, OperatingConfig, Proposal, Review, run_decision_cycle, validate_polymarket_event_url
 
 
 PROPOSAL_KEY = "paper_cycle_proposal"
 REVIEW_KEY = "paper_cycle_review"
+EVIDENCE_KEY = "paper_cycle_evidence"
 PAPER_CYCLE_DECISION_KEY = "paper_cycle_decision"
 PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
@@ -30,12 +34,59 @@ class StrictOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class EvidenceRecord(StrictOutput):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    evidence_id: str = Field(min_length=1, max_length=128)
+    url: str = Field(min_length=1, max_length=2048)
+    title: str = Field(min_length=1, max_length=500)
+    retrieved_at: str = Field(min_length=1)
+    source_kind: Literal["market_snapshot"]
+    snapshot_id: str = Field(min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        try:
+            return validate_polymarket_event_url(value)
+        except ValueError:
+            raise ValueError("url must be a canonical Polymarket HTTPS event URL")
+
+    @field_validator("retrieved_at")
+    @classmethod
+    def validate_retrieved_at(cls, value: str) -> str:
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+            value,
+        ):
+            raise ValueError("retrieved_at must be an RFC3339 timestamp")
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("retrieved_at must be an RFC3339 timestamp") from None
+        if timestamp.tzinfo is None:
+            raise ValueError("retrieved_at must include a UTC offset")
+        return value
+
+
+def _validate_unique_citations(citations: list[str]) -> list[str]:
+    if len(citations) != len(set(citations)):
+        raise ValueError("citations must be unique")
+    return citations
+
+
+CitationId = Annotated[str, Field(min_length=1, max_length=128)]
+
+
 class ProposalOutput(StrictOutput):
     snapshot_id: str = Field(min_length=1)
     market_id: str = Field(min_length=1)
     action: Literal["trade", "abstain"]
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
     amount: float = Field(strict=True)
+    citations: list[CitationId] = Field(max_length=10)
+
+    _unique_citations = field_validator("citations")(_validate_unique_citations)
 
     @model_validator(mode="after")
     def validate_action_amount(self) -> "ProposalOutput":
@@ -43,6 +94,8 @@ class ProposalOutput(StrictOutput):
             raise ValueError("amount must be finite")
         if self.action == "trade" and self.amount <= 0:
             raise ValueError("trade amount must be positive")
+        if self.action == "trade" and not self.citations:
+            raise ValueError("trade requires a citation")
         if self.action == "abstain" and self.amount != 0:
             raise ValueError("abstain amount must be zero")
         return self
@@ -53,6 +106,15 @@ class ReviewOutput(StrictOutput):
     market_id: str = Field(min_length=1)
     approved: bool = Field(strict=True)
     reason: str = Field(min_length=1, max_length=500)
+    citations: list[CitationId] = Field(max_length=10)
+
+    _unique_citations = field_validator("citations")(_validate_unique_citations)
+
+    @model_validator(mode="after")
+    def validate_approval_citations(self) -> "ReviewOutput":
+        if self.approved and not self.citations:
+            raise ValueError("approval requires a citation")
+        return self
 
 
 class PaperCycleRequest(StrictOutput):
@@ -62,6 +124,7 @@ class PaperCycleRequest(StrictOutput):
 class ReviewerInput(StrictOutput):
     market_snapshot: dict[str, object]
     proposal: ProposalOutput
+    evidence: list[EvidenceRecord] = Field(max_length=20)
 
 
 class PaperCycleReportOutput(StrictOutput):
@@ -83,18 +146,67 @@ def _record(value: object, record_type: type[Record], error: str) -> Record:
         raise ValueError(error) from None
 
 
-def finalize_paper_cycle(state: StateMap) -> dict[str, object]:
+def _canonical_evidence(snapshot: MarketSnapshot) -> list[EvidenceRecord]:
+    if not all((snapshot.question, snapshot.captured_at, snapshot.source_url)):
+        return []
+    evidence_id = f"market_snapshot:{snapshot.snapshot_id}"
+    if len(evidence_id) > 128:
+        evidence_id = "market_snapshot:" + sha256(snapshot.snapshot_id.encode()).hexdigest()
+    return [EvidenceRecord(
+        evidence_id=evidence_id,
+        url=snapshot.source_url,
+        title=snapshot.question,
+        retrieved_at=snapshot.captured_at,
+        source_kind="market_snapshot",
+        snapshot_id=snapshot.snapshot_id,
+    )]
+
+
+def _evidence(state: StateMap, snapshot: MarketSnapshot) -> list[EvidenceRecord]:
+    expected = _canonical_evidence(snapshot)
+    value = state.get(EVIDENCE_KEY)
+    if not isinstance(value, list) or len(value) > 20:
+        raise ValueError("paper cycle evidence is missing or invalid")
+    try:
+        actual = [EvidenceRecord.model_validate(record) for record in value]
+    except (TypeError, ValueError):
+        raise ValueError("paper cycle evidence is missing or invalid") from None
+    if actual != expected:
+        raise ValueError("paper cycle evidence does not match the canonical snapshot")
+    return actual
+
+
+def _validate_citations(citations: list[str], evidence: list[EvidenceRecord]) -> None:
+    available = {record.evidence_id for record in evidence}
+    if any(citation not in available for citation in citations):
+        raise ValueError("citation does not resolve to canonical snapshot evidence")
+
+
+def finalize_paper_cycle(state: StateMap, review_output: ReviewOutput) -> dict[str, object]:
     """Validate cycle state, run deterministic policy and paper fill, and store the report."""
     if not isinstance(state, (MutableMapping, State)):
         raise ValueError("session state is invalid")
     _record(state.get("operating_config"), OperatingConfig, "operating configuration is missing or invalid")
     snapshot = _record(state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
     proposal_output = _record(state.get(PROPOSAL_KEY), ProposalOutput, "paper proposal is missing or invalid")
-    review_output = _record(state.get(REVIEW_KEY), ReviewOutput, "paper review is missing or invalid")
+    if not isinstance(review_output, ReviewOutput):
+        raise ValueError("paper review is missing or invalid")
+    evidence = _evidence(state, snapshot)
+    _validate_citations(proposal_output.citations, evidence)
+    _validate_citations(review_output.citations, evidence)
     if proposal_output.action != "trade":
         raise ValueError("paper proposal is not a trade")
-    proposal = Proposal(**proposal_output.model_dump(exclude={"action"}))
-    review = Review(**review_output.model_dump())
+    if (snapshot.snapshot_id, snapshot.market_id) != (
+        proposal_output.snapshot_id,
+        proposal_output.market_id,
+    ) or (proposal_output.snapshot_id, proposal_output.market_id) != (
+        review_output.snapshot_id,
+        review_output.market_id,
+    ):
+        raise ValueError("paper cycle snapshot identity is inconsistent")
+    state[REVIEW_KEY] = review_output.model_dump()
+    proposal = Proposal(**proposal_output.model_dump(exclude={"action", "citations"}))
+    review = Review(**review_output.model_dump(exclude={"citations"}))
     try:
         cycle = run_decision_cycle(snapshot, proposal, review)
     except ValueError:
@@ -119,21 +231,26 @@ def prepare_trader_input(ctx: Context, node_input: PaperCycleRequest) -> dict[st
     del node_input
     _record(ctx.state.get("operating_config"), OperatingConfig, "operating configuration is missing or invalid")
     snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
-    return asdict(snapshot)
+    evidence = _canonical_evidence(snapshot)
+    ctx.state[EVIDENCE_KEY] = [record.model_dump() for record in evidence]
+    return {"market_snapshot": asdict(snapshot), "evidence": ctx.state[EVIDENCE_KEY]}
 
 
 def prepare_reviewer_input(ctx: Context, node_input: ProposalOutput) -> ReviewerInput:
     snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
     if node_input.action != "trade":
         raise ValueError("paper proposal is not a trade")
-    proposal = Proposal(**node_input.model_dump(exclude={"action"}))
+    evidence = _evidence(ctx.state, snapshot)
+    _validate_citations(node_input.citations, evidence)
+    proposal = Proposal(**node_input.model_dump(exclude={"action", "citations"}))
     if (snapshot.snapshot_id, snapshot.market_id) != (proposal.snapshot_id, proposal.market_id):
         raise ValueError("paper cycle snapshot identity is inconsistent")
-    return ReviewerInput(market_snapshot=asdict(snapshot), proposal=node_input)
+    return ReviewerInput(market_snapshot=asdict(snapshot), proposal=node_input, evidence=evidence)
 
 
 def route_proposal(ctx: Context, node_input: ProposalOutput) -> Event:
     snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
+    _validate_citations(node_input.citations, _evidence(ctx.state, snapshot))
     if (snapshot.snapshot_id, snapshot.market_id) != (node_input.snapshot_id, node_input.market_id):
         raise ValueError("paper cycle snapshot identity is inconsistent")
     return Event(output=node_input.model_dump(), actions=EventActions(route=node_input.action))
@@ -142,6 +259,8 @@ def route_proposal(ctx: Context, node_input: ProposalOutput) -> Event:
 def complete_abstention(ctx: Context, node_input: ProposalOutput) -> PaperCycleReportOutput:
     if node_input.action != "abstain":
         raise ValueError("paper proposal is not an abstention")
+    snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
+    _validate_citations(node_input.citations, _evidence(ctx.state, snapshot))
     report = PaperCycleReportOutput(
         status="abstained", reason="trader_abstained",
         summary=f"{node_input.snapshot_id}/{node_input.market_id}: no fill: trader abstained",
@@ -153,8 +272,9 @@ def complete_abstention(ctx: Context, node_input: ProposalOutput) -> PaperCycleR
 
 
 def complete_paper_cycle(ctx: Context, node_input: ReviewOutput) -> PaperCycleReportOutput:
-    ctx.state[REVIEW_KEY] = node_input.model_dump()
-    return PaperCycleReportOutput.model_validate(finalize_paper_cycle(ctx.state))
+    snapshot = _record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
+    _validate_citations(node_input.citations, _evidence(ctx.state, snapshot))
+    return PaperCycleReportOutput.model_validate(finalize_paper_cycle(ctx.state, node_input))
 
 
 def configure_operation(
@@ -245,7 +365,9 @@ trader_agent = Agent(
         "more evidence is needed, then call the selected interface with a focused query. "
         'Return action="abstain" and amount=0 when evidence or edge does not justify a trade; otherwise return '
         'action="trade" with a positive amount within deterministic limits. Do not force trading. '
-        "Use only the supplied canonical snapshot. Return only its structured proposal with the same snapshot and market "
+        "Use only the supplied canonical snapshot. Cite supplied evidence IDs only; Google Search context is unverified "
+        "and cannot be cited unless a future deterministic normalizer adds it to evidence. Return only its structured "
+        "proposal with the same snapshot and market "
         "IDs; never approve, review, execute orders, or claim authority over risk controls."
     ),
     tools=[discover_context, AgentTool(agent=context_agent, propagate_grounding_metadata=True)],
@@ -263,8 +385,10 @@ reviewer_agent = Agent(
     model="gemini-flash-latest",
     description="Independently reviews structured paper-trade proposals.",
     instruction=(
-        "Review only the supplied canonical snapshot and validated proposal. Return only approval or rejection tied to "
-        "their snapshot and market IDs. Never alter the proposal or size, execute orders, or override deterministic policy."
+        "Review only the supplied canonical snapshot, evidence list, and validated proposal. Cite supplied evidence IDs "
+        "only; search context is unverified unless deterministically normalized. Approval requires a citation. Return only "
+        "approval or rejection tied to their snapshot and market IDs. Never alter the proposal or size, execute orders, "
+        "or override deterministic policy."
     ),
     mode="single_turn",
     include_contents="none",

@@ -2,12 +2,39 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from math import isfinite
+import re
 from urllib.parse import urlparse
 
 
 MINIMUM_NET_EDGE = 0.05
 MAXIMUM_MARKET_EXPOSURE = 0.01
 MAXIMUM_TOTAL_EXPOSURE = 0.10
+
+
+def validate_polymarket_event_url(value: str) -> str:
+    """Return an exact canonical public Polymarket event URL or raise ValueError."""
+    if not isinstance(value, str) or not value.isascii():
+        raise ValueError("source URL must be a canonical public Polymarket HTTPS event URL")
+    parsed = urlparse(value)
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    parts = [part for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "polymarket.com"
+        or port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or len(parts) != 2
+        or parts[0] != "event"
+        or not re.fullmatch(r"[A-Za-z0-9-]+", parts[1])
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("source URL must be a canonical public Polymarket HTTPS event URL")
+    return value
 
 
 @dataclass(frozen=True)
@@ -145,13 +172,7 @@ class MarketSnapshot:
                 raise ValueError("end_time must be after captured_at")
             if book_captured > captured:
                 raise ValueError("book_captured_at cannot be after captured_at")
-            parsed = urlparse(self.source_url)
-            try:
-                port = parsed.port
-            except ValueError:
-                port = -1
-            if parsed.scheme != "https" or parsed.hostname not in {"polymarket.com", "www.polymarket.com"} or port is not None or parsed.username is not None or parsed.password is not None or not parsed.path.startswith("/event/") or parsed.query or parsed.fragment:
-                raise ValueError("source_url must be a canonical public Polymarket HTTPS event URL")
+            validate_polymarket_event_url(self.source_url)
 
 
 @dataclass(frozen=True)

@@ -101,6 +101,9 @@ class DecisionCycleTests(unittest.TestCase):
             lambda: Proposal("s", "m", 0.5, 0),
             lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), fee_rate=0.01),
             lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), source_url="https://user:pass@polymarket.com/event/x"),
+            lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), source_url="https://www.polymarket.com/event/will-it-rain"),
+            lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), source_url="https://polymarket.com/event/weather/will-it-rain"),
+            lambda: self.rich_snapshot(asks=(BookLevel(0.4, 1),), source_url="https://polymarket.com/event/will_it_rain"),
         )
         for call in invalid_calls:
             with self.subTest(call=call), self.assertRaises(ValueError):

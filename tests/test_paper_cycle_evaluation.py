@@ -82,6 +82,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     "action": "trade",
                     "probability": 0.46,
                     "amount": 9,
+                    "citations": [evaluation.EVIDENCE_ID],
                 },
             ),
             FakeLlm(
@@ -93,6 +94,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     "market_id": evaluation.MARKET_ID,
                     "approved": approved,
                     "reason": "supported" if approved else "weak evidence",
+                    "citations": [evaluation.EVIDENCE_ID] if approved else [],
                 },
             ),
             calls,
@@ -134,6 +136,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "action": "abstain",
             "probability": 0.4,
             "amount": 0,
+            "citations": [],
         }
 
         state, function_calls, available_tools = asyncio.run(
@@ -175,6 +178,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "action": "abstain",
             "probability": 0.4,
             "amount": 0,
+            "citations": [],
         }
 
         asyncio.run(
@@ -201,6 +205,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 "action": "abstain",
                 "probability": 0.4,
                 "amount": 0,
+                "citations": [],
             },
             close_failure=cleanup,
         )
@@ -265,9 +270,17 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         malformed = copy.deepcopy(state)
         malformed["model_cost_ledger"][0]["actual_cost_usd"] = "0"
         cases.append(malformed)
+        malformed = copy.deepcopy(state)
+        malformed[evaluation.EVIDENCE_KEY][0]["url"] = "https://example.com/forged"
+        cases.append(malformed)
+        malformed = copy.deepcopy(state)
+        malformed["paper_cycle_proposal"]["citations"] = ["https://example.com/forged"]
+        cases.append(malformed)
         for malformed in cases:
             with self.subTest(), self.assertRaises(ValueError):
                 evaluation.grade(malformed, function_calls, available_tools)
+        self.assertNotIn("url", state["paper_cycle_proposal"])
+        self.assertNotIn("url", state["paper_cycle_review"])
         with self.assertRaises(ValueError):
             evaluation.grade(state, ["execute_order"], available_tools)
         with self.assertRaises(ValueError):

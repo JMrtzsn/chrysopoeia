@@ -18,20 +18,24 @@ from google.genai._transformers import process_schema
 from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
+    EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
     REVIEW_KEY,
+    EvidenceRecord,
     ProposalOutput,
     ReviewOutput,
     PaperCycleRequest,
     complete_paper_cycle,
+    complete_abstention,
     finalize_paper_cycle,
     paper_cycle_workflow,
     prepare_reviewer_input,
     prepare_trader_input,
     reviewer_agent,
+    ReviewerInput,
     root_agent,
     route_proposal,
     trader_agent,
@@ -40,22 +44,49 @@ from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 
+EVIDENCE_ID = "market_snapshot:snapshot-1"
+
+
+def rich_snapshot(snapshot_id: str = "snapshot-1") -> MarketSnapshot:
+    return MarketSnapshot(
+        snapshot_id, "market-1", 0.4, 1_000, 0, 0,
+        question="Will it rain?",
+        resolution_rules="Resolves Yes if rain is measured.",
+        end_time="2026-09-02T00:00:00+00:00",
+        captured_at="2026-09-01T00:00:00+00:00",
+        source_url="https://polymarket.com/event/will-it-rain",
+        yes_token_id="yes-token",
+        asks=(BookLevel(0.4, 100),),
+        book_captured_at="2026-09-01T00:00:00+00:00",
+    )
+
+
 def cycle_state(*, approved: bool = True) -> dict[str, object]:
     return {
         "operating_config": asdict(OperatingConfig()),
-        "market_snapshot": asdict(MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0)),
+        "market_snapshot": asdict(rich_snapshot()),
+        EVIDENCE_KEY: [{
+            "evidence_id": EVIDENCE_ID,
+            "url": "https://polymarket.com/event/will-it-rain",
+            "title": "Will it rain?",
+            "retrieved_at": "2026-09-01T00:00:00+00:00",
+            "source_kind": "market_snapshot",
+            "snapshot_id": "snapshot-1",
+        }],
         PROPOSAL_KEY: {
             "snapshot_id": "snapshot-1",
             "market_id": "market-1",
             "action": "trade",
             "probability": 0.46,
             "amount": 10,
+            "citations": [EVIDENCE_ID],
         },
         REVIEW_KEY: {
             "snapshot_id": "snapshot-1",
             "market_id": "market-1",
             "approved": approved,
             "reason": "supported" if approved else "weak evidence",
+            "citations": [EVIDENCE_ID] if approved else [],
         },
     }
 
@@ -94,15 +125,154 @@ class StructuredFakeLlm(BaseLlm):
 
 class PaperCycleTests(unittest.TestCase):
     def test_model_output_schemas_are_vertex_compatible_and_validate_actions(self) -> None:
-        for output_schema in (ProposalOutput, ReviewOutput):
+        for output_schema in (ProposalOutput, ReviewOutput, EvidenceRecord, ReviewerInput):
             schema = output_schema.model_json_schema()
             process_schema(schema, None)
             with self.subTest(schema=output_schema.__name__):
                 types.Schema.model_validate(schema)
-        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0).action, "abstain")
+        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0, citations=[]).action, "abstain")
         for action, amount in (("trade", 0), ("abstain", 1), ("invalid", 0), ("trade", math.nan), ("trade", math.inf), ("trade", True), ("trade", "1")):
             with self.subTest(action=action, amount=amount), self.assertRaises(ValidationError):
-                ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount)
+                ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount, citations=[EVIDENCE_ID] if action == "trade" else [])
+
+        evidence = EvidenceRecord(
+            evidence_id=EVIDENCE_ID,
+            url="https://polymarket.com/event/will-it-rain",
+            title="Will it rain?",
+            retrieved_at="2026-09-01T00:00:00Z",
+            source_kind="market_snapshot",
+            snapshot_id="snapshot-1",
+        )
+        with self.assertRaises(ValidationError):
+            evidence.title = "changed"
+        for changes in (
+            {"evidence_id": "x" * 129},
+            {"url": "http://polymarket.com/event/will-it-rain"},
+            {"url": "https://polymarket.com/event/will-it-rain?forged=1"},
+            {"title": "x" * 501},
+            {"retrieved_at": "2026-09-01"},
+            {"source_kind": "google_search"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                EvidenceRecord.model_validate({**evidence.model_dump(), **changes})
+
+    def test_rich_snapshot_prepares_one_canonical_evidence_record_for_both_agents(self) -> None:
+        state = cycle_state()
+        state[EVIDENCE_KEY] = [{"evidence_id": "injected"}]
+        ctx = SimpleNamespace(state=state)
+
+        trader_input = prepare_trader_input(ctx, PaperCycleRequest())
+        proposal = ProposalOutput(
+            snapshot_id="snapshot-1", market_id="market-1", action="trade",
+            probability=0.55, amount=10, citations=[EVIDENCE_ID],
+        )
+        reviewer_input = prepare_reviewer_input(ctx, proposal)
+
+        expected = [EvidenceRecord(
+            evidence_id=EVIDENCE_ID,
+            url="https://polymarket.com/event/will-it-rain",
+            title="Will it rain?",
+            retrieved_at="2026-09-01T00:00:00+00:00",
+            source_kind="market_snapshot",
+            snapshot_id="snapshot-1",
+        ).model_dump()]
+        self.assertEqual(state[EVIDENCE_KEY], expected)
+        self.assertEqual(trader_input["evidence"], expected)
+        self.assertEqual(reviewer_input.evidence, [EvidenceRecord.model_validate(expected[0])])
+        self.assertEqual(reviewer_input.market_snapshot, state["market_snapshot"])
+        self.assertEqual(
+            EvidenceRecord.model_validate(expected[0]).url,
+            rich_snapshot().source_url,
+        )
+
+    def test_proposal_citations_reject_invalid_trade_and_allow_empty_abstention(self) -> None:
+        state = cycle_state()
+        ctx = SimpleNamespace(state=state)
+        prepare_trader_input(ctx, PaperCycleRequest())
+        base = {
+            "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade",
+            "probability": 0.55, "amount": 10,
+        }
+        for citations in ([], ["unknown"], [EVIDENCE_ID, EVIDENCE_ID]):
+            with self.subTest(citations=citations), self.assertRaises((ValidationError, ValueError)):
+                route_proposal(ctx, ProposalOutput.model_validate({**base, "citations": citations}))
+            self.assertNotIn(PAPER_CYCLE_FILL_KEY, state)
+
+        state[EVIDENCE_KEY] = [{
+            **state[EVIDENCE_KEY][0],
+            "evidence_id": "market_snapshot:other",
+            "snapshot_id": "other",
+        }]
+        with self.assertRaises(ValueError):
+            route_proposal(ctx, ProposalOutput.model_validate({
+                **base, "citations": ["market_snapshot:other"],
+            }))
+        abstain = ProposalOutput.model_validate({
+            **base, "action": "abstain", "amount": 0, "citations": [],
+        })
+        report = complete_abstention(SimpleNamespace(state=cycle_state()), abstain)
+        self.assertEqual(report.status, "abstained")
+
+        legacy = cycle_state()
+        legacy["market_snapshot"] = asdict(
+            MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0)
+        )
+        legacy_ctx = SimpleNamespace(state=legacy)
+        prepare_trader_input(legacy_ctx, PaperCycleRequest())
+        self.assertEqual(legacy[EVIDENCE_KEY], [])
+        self.assertEqual(complete_abstention(legacy_ctx, abstain).status, "abstained")
+
+    def test_reviewer_citations_reject_invalid_approval_and_allow_empty_rejection(self) -> None:
+        with self.assertRaises(ValidationError):
+            ReviewOutput(
+                snapshot_id="snapshot-1", market_id="market-1", approved=True,
+                reason="supported", citations=[],
+            )
+        state = cycle_state()
+        state[REVIEW_KEY] = {
+            **state[REVIEW_KEY], "citations": ["unknown"],
+        }
+        with self.assertRaises(ValueError):
+            finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
+        state = cycle_state(approved=False)
+        preserved = copy.deepcopy(state[EVIDENCE_KEY])
+        report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
+        self.assertEqual(report["reason"], "review_rejected")
+        self.assertEqual(state[EVIDENCE_KEY], preserved)
+
+    def test_complete_cycle_uses_exact_routed_review_over_stored_replacement(self) -> None:
+        injected = {
+            "snapshot_id": "snapshot-1",
+            "market_id": "market-1",
+            "approved": False,
+            "reason": "injected replacement",
+            "citations": [],
+        }
+
+        class ReplacingReviewState(dict[str, object]):
+            replace_next_read = True
+
+            def get(self, key: str, default: object = None) -> object:
+                if key == REVIEW_KEY and self.replace_next_read:
+                    self.replace_next_read = False
+                    return injected
+                return super().get(key, default)
+
+        state = ReplacingReviewState(cycle_state())
+        state[REVIEW_KEY] = injected
+        routed = ReviewOutput(
+            snapshot_id="snapshot-1",
+            market_id="market-1",
+            approved=True,
+            reason="routed approval",
+            citations=[EVIDENCE_ID],
+        )
+
+        report = complete_paper_cycle(SimpleNamespace(state=state), routed)
+
+        self.assertEqual(report.status, "filled")
+        self.assertTrue(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
+        self.assertEqual(state[REVIEW_KEY], routed.model_dump())
 
     def test_approved_state_cycle_fills_and_records_outputs(self) -> None:
         state = cycle_state()
@@ -112,7 +282,7 @@ class PaperCycleTests(unittest.TestCase):
             "operating_config", "market_snapshot", "model_cost_policy", "model_cost_ledger",
         )})
 
-        report = finalize_paper_cycle(state)
+        report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
 
         self.assertEqual(report["status"], "filled")
         self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["price"], 0.4)
@@ -136,12 +306,12 @@ class PaperCycleTests(unittest.TestCase):
             route = "trade" if order[-1] == "route_proposal" else None
             order.extend(paper_cycle_workflow.graph.get_next_pending_nodes(order[-1], route))
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
-        self.assertEqual(trader_input, state["market_snapshot"])
-        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10)
+        self.assertEqual(trader_input["market_snapshot"], state["market_snapshot"])
+        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10, citations=[EVIDENCE_ID])
         state[PROPOSAL_KEY] = proposal.model_dump()
         reviewer_input = prepare_reviewer_input(ctx, proposal)
         self.assertEqual(reviewer_input.market_snapshot, state["market_snapshot"])
-        review = ReviewOutput(snapshot_id="snapshot-1", market_id="market-1", approved=True, reason="supported")
+        review = ReviewOutput(snapshot_id="snapshot-1", market_id="market-1", approved=True, reason="supported", citations=[EVIDENCE_ID])
         report = complete_paper_cycle(ctx, review)
 
         self.assertEqual(order, expected_order)
@@ -170,13 +340,14 @@ class PaperCycleTests(unittest.TestCase):
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         reviewer_input = prepare_reviewer_input(
             ctx,
-            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10),
+            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10, citations=[EVIDENCE_ID]),
         )
 
-        self.assertEqual(trader_input["question"], "Will it rain?")
+        self.assertEqual(trader_input["market_snapshot"]["question"], "Will it rain?")
         self.assertEqual(reviewer_input.market_snapshot["fee_rate"], 0.02)
-        self.assertEqual(len(trader_input["asks"]), 50)
-        self.assertEqual(trader_input, reviewer_input.market_snapshot)
+        self.assertEqual(len(trader_input["market_snapshot"]["asks"]), 50)
+        self.assertEqual(trader_input["market_snapshot"], reviewer_input.market_snapshot)
+        self.assertEqual(trader_input["evidence"], [record.model_dump() for record in reviewer_input.evidence])
 
     def test_runner_executes_paper_cycle_offline_with_structured_models(self) -> None:
         calls = []
@@ -184,13 +355,13 @@ class PaperCycleTests(unittest.TestCase):
             model="gemini-flash-latest",
             agent_name=trader_agent.name,
             calls=calls,
-            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10},
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID]},
         )
         fake_reviewer = StructuredFakeLlm(
             model="gemini-flash-latest",
             agent_name=reviewer_agent.name,
             calls=calls,
-            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "approved": True, "reason": "supported"},
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "approved": True, "reason": "supported", "citations": [EVIDENCE_ID]},
         )
         test_trader = trader_agent.clone(update={"model": fake_trader})
         test_reviewer = reviewer_agent.clone(update={"model": fake_reviewer})
@@ -210,7 +381,7 @@ class PaperCycleTests(unittest.TestCase):
         )
         state = {
             "operating_config": asdict(OperatingConfig()),
-            "market_snapshot": asdict(MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0)),
+            "market_snapshot": asdict(rich_snapshot()),
             "model_cost_policy": DEFAULT_COST_POLICY.copy(),
             "cycle_id": "cycle-1",
         }
@@ -253,7 +424,7 @@ class PaperCycleTests(unittest.TestCase):
     def test_reviewer_rejection_records_no_fill_and_explicit_reason(self) -> None:
         state = cycle_state(approved=False)
 
-        report = finalize_paper_cycle(state)
+        report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
 
         self.assertEqual(report["status"], "rejected")
         self.assertEqual(report["reason"], "review_rejected")
@@ -271,7 +442,7 @@ class PaperCycleTests(unittest.TestCase):
             state[PROPOSAL_KEY] = {**state[PROPOSAL_KEY], **proposal_changes}
             state["market_snapshot"] = {**state["market_snapshot"], **snapshot_changes}
             with self.subTest(reason=reason):
-                report = finalize_paper_cycle(state)
+                report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
                 self.assertEqual(report, {"status": "rejected", "reason": reason, "summary": state[PAPER_CYCLE_REPORT_KEY]["summary"]})
                 self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
 
@@ -297,14 +468,14 @@ class PaperCycleTests(unittest.TestCase):
             invalid_states.append(state)
         for state in invalid_states:
             with self.subTest(state=state), self.assertRaises(ValueError):
-                finalize_paper_cycle(state)
+                finalize_paper_cycle(state, ReviewOutput.model_validate(state.get(REVIEW_KEY)))
             self.assertNotIn(PAPER_CYCLE_FILL_KEY, state)
 
         for key in (PROPOSAL_KEY, REVIEW_KEY):
             state = cycle_state()
             state[key] = {**state[key], "market_id": "other"}
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "identity"):
-                finalize_paper_cycle(state)
+                finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
             self.assertNotIn(PAPER_CYCLE_FILL_KEY, state)
 
     def test_structured_wiring_and_tool_boundaries(self) -> None:
@@ -321,14 +492,14 @@ class PaperCycleTests(unittest.TestCase):
         self.assertIn(reviewer_agent.name, node_names)
         self.assertTrue(any(getattr(tool, "name", None) == paper_cycle_workflow.name for tool in root_agent.tools))
         for schema, forbidden in (
-            (ProposalOutput, {"approved", "reason", "execute"}),
-            (ReviewOutput, {"probability", "amount", "execute"}),
+            (ProposalOutput, {"approved", "reason", "execute", "url"}),
+            (ReviewOutput, {"probability", "amount", "execute", "url"}),
         ):
             self.assertTrue(forbidden.isdisjoint(schema.model_fields))
             with self.assertRaises(ValidationError):
                 schema.model_validate({
                     "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.5, "amount": 1,
-                    "approved": True, "reason": "ok", "execute": True,
+                    "approved": True, "reason": "ok", "execute": True, "citations": [EVIDENCE_ID],
                 })
         for agent in (trader_agent, reviewer_agent, root_agent):
             tools = " ".join(str(tool).lower() for tool in agent.tools)
@@ -348,7 +519,7 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(ReviewOutput.model_fields["reason"].metadata[1].max_length, 500)
         with self.assertRaises(ValidationError):
             ReviewOutput(
-                snapshot_id="snapshot-1", market_id="market-1", approved=False, reason="x" * 501,
+                snapshot_id="snapshot-1", market_id="market-1", approved=False, reason="x" * 501, citations=[],
             )
 
 

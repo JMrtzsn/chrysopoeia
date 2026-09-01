@@ -13,11 +13,13 @@ from google.adk.workflow import RetryConfig, Workflow
 from google.genai import types
 
 from chrysopoeia.agent import (
+    EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
     REVIEW_KEY,
+    EvidenceRecord,
     PaperCycleReportOutput,
     PaperCycleRequest,
     ProposalOutput,
@@ -41,6 +43,7 @@ from chrysopoeia.trading import (
 
 SNAPSHOT_ID = "paper-eval-snapshot-1"
 MARKET_ID = "paper-eval-market-1"
+EVIDENCE_ID = f"market_snapshot:{SNAPSHOT_ID}"
 AGENT_NAMES = (trader_agent.name, reviewer_agent.name)
 COST_POLICY: dict[str, object] = {
     "version": "paper-cycle-evaluation-2026-09-v1",
@@ -258,6 +261,20 @@ def grade(
     CostPolicy.from_mapping(state["model_cost_policy"])
 
     proposal = ProposalOutput.model_validate(_mapping(state, PROPOSAL_KEY))
+    evidence_value = state.get(EVIDENCE_KEY)
+    if not isinstance(evidence_value, list) or len(evidence_value) != 1:
+        raise ValueError("paper-cycle canonical evidence is missing or invalid")
+    evidence = EvidenceRecord.model_validate(evidence_value[0])
+    snapshot = expected["market_snapshot"]
+    if evidence.model_dump() != {
+        "evidence_id": EVIDENCE_ID,
+        "url": snapshot["source_url"],
+        "title": snapshot["question"],
+        "retrieved_at": snapshot["captured_at"],
+        "source_kind": "market_snapshot",
+        "snapshot_id": SNAPSHOT_ID,
+    }:
+        raise ValueError("paper-cycle evidence differs from the canonical snapshot")
     report = PaperCycleReportOutput.model_validate(
         _mapping(state, PAPER_CYCLE_REPORT_KEY)
     )
@@ -265,11 +282,23 @@ def grade(
         raise ValueError("paper-cycle report is not explicit")
     if (proposal.snapshot_id, proposal.market_id) != (SNAPSHOT_ID, MARKET_ID):
         raise ValueError("paper-cycle canonical identity changed")
+    if proposal.action == "trade" and proposal.citations != [EVIDENCE_ID]:
+        raise ValueError("paper-cycle proposal citation is invalid")
+    if any(citation != EVIDENCE_ID for citation in proposal.citations):
+        raise ValueError("paper-cycle proposal citation is unresolved")
+    if any("://" in citation for citation in proposal.citations):
+        raise ValueError("paper-cycle proposal contains a raw URL citation")
     review = None
     if proposal.action == "trade":
         review = ReviewOutput.model_validate(_mapping(state, REVIEW_KEY))
         if (review.snapshot_id, review.market_id) != (SNAPSHOT_ID, MARKET_ID):
             raise ValueError("paper-cycle canonical identity changed")
+        if any("://" in citation for citation in review.citations):
+            raise ValueError("paper-cycle review contains a raw URL citation")
+        if any(citation != EVIDENCE_ID for citation in review.citations):
+            raise ValueError("paper-cycle review citation is unresolved")
+        if review.approved and review.citations != [EVIDENCE_ID]:
+            raise ValueError("paper-cycle review citation is invalid")
     elif REVIEW_KEY in state:
         raise ValueError("abstained paper cycle must not contain a review")
 

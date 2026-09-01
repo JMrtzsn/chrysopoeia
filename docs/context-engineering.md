@@ -80,6 +80,9 @@ allows reviewers to form an independent judgment.
 
 Every cycle uses one canonical market snapshot. All proposals and reviews refer
 to its ID so agents cannot unknowingly reason from different prices.
+The current workflow validates citations only against one bounded evidence
+record derived from that snapshot. Search and RAG results remain unverified
+context until a deterministic grounding-metadata normalizer is implemented.
 
 ## Cycle Separation
 
