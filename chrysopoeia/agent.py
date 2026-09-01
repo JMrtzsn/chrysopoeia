@@ -4,6 +4,7 @@ from typing import TypeVar
 
 from google.adk.agents import Agent
 from google.adk.agents.context import Context
+from google.adk.apps import App
 from google.adk.sessions.state import State
 from google.adk.tools import AgentTool, ToolContext, google_search
 from google.adk.workflow import Workflow
@@ -266,3 +267,4 @@ root_agent = Agent(
     after_model_callback=after_model_cost,
     on_model_error_callback=on_model_cost_error,
 )
+app = App(root_agent=root_agent, name="chrysopoeia")

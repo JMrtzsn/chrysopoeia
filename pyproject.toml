@@ -2,7 +2,70 @@
 name = "chrysopoeia"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["google-adk>=1.0"]
+dependencies = [
+    "a2a-sdk[http-server]~=0.3.22",
+    "aiohttp>=3.13.4",
+    "google-adk[gcp]>=2.0.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+lint = [
+    "ruff>=0.4.6,<1.0.0",
+    "ty>=0.0.1a0",
+    "codespell>=2.2.0,<3.0.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = [
+    "chrysopoeia/agent.py",
+    "chrysopoeia/cost.py",
+    "chrysopoeia/polymarket.py",
+    "chrysopoeia/trading.py",
+    "tests/test_market_snapshot_tool.py",
+    "tests/test_model_cost.py",
+    "tests/test_paper_cycle.py",
+    "tests/test_polymarket.py",
+    "tests/test_trading.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "C", "B", "UP", "RUF"]
+ignore = ["E501", "C901", "B006"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["chrysopoeia"]
+
+[tool.codespell]
+skip = "./docs/reference/*.pdf"
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.src]
+exclude = [
+    ".venv/**",
+    "chrysopoeia/agent.py",
+    "chrysopoeia/cost.py",
+    "chrysopoeia/polymarket.py",
+    "chrysopoeia/trading.py",
+    "tests/test_market_snapshot_tool.py",
+    "tests/test_model_cost.py",
+    "tests/test_paper_cycle.py",
+    "tests/test_polymarket.py",
+    "tests/test_trading.py",
+]
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+invalid-return-type = "ignore"
+possibly-missing-attribute = "ignore"
+not-subscriptable = "ignore"
+deprecated = "ignore"
 
 [build-system]
 requires = ["hatchling"]

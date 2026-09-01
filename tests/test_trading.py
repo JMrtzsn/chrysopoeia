@@ -62,7 +62,7 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIn("propose", trader_agent.instruction.lower())
         self.assertIn("review", reviewer_agent.instruction.lower())
         for agent in (trader_agent, reviewer_agent):
-            self.assertFalse(any("execut" in str(tool).lower() for tool in agent.tools))
+            self.assertFalse(any("execute" in str(tool).lower() for tool in agent.tools))
 
     def test_orchestrator_owns_validated_operating_configuration(self) -> None:
         configuration = OperatingConfig(bankroll=1_000, trader_agents=3)
