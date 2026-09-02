@@ -12,12 +12,24 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.sessions.state import State
 from google.adk.workflow import Workflow
 from google.genai import types
 from google.genai._transformers import process_schema
 from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
+    complete_paper_cycle,
+    complete_abstention,
+    paper_cycle_workflow,
+    prepare_reviewer_input,
+    prepare_trader_input,
+    reviewer_agent,
+    root_agent,
+    route_proposal,
+    trader_agent,
+)
+from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
@@ -28,17 +40,8 @@ from chrysopoeia.agent import (
     ProposalOutput,
     ReviewOutput,
     PaperCycleRequest,
-    complete_paper_cycle,
-    complete_abstention,
     finalize_paper_cycle,
-    paper_cycle_workflow,
-    prepare_reviewer_input,
-    prepare_trader_input,
-    reviewer_agent,
     ReviewerInput,
-    root_agent,
-    route_proposal,
-    trader_agent,
 )
 from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
@@ -124,6 +127,38 @@ class StructuredFakeLlm(BaseLlm):
 
 
 class PaperCycleTests(unittest.TestCase):
+    def test_finalizer_accepts_real_adk_state(self) -> None:
+        values = cycle_state()
+        state = State(values, {})
+
+        report = finalize_paper_cycle(state, ReviewOutput.model_validate(values[REVIEW_KEY]))
+
+        self.assertEqual(report["status"], "filled")
+        self.assertEqual(state[PAPER_CYCLE_REPORT_KEY], report)
+
+    def test_finalizer_rejects_malformed_partial_state_shape(self) -> None:
+        class BadGetter:
+            def get(self) -> object:
+                return cycle_state()
+
+            def __setitem__(self, key: str, value: object) -> None:
+                del key, value
+
+        class BadSetter:
+            def __init__(self) -> None:
+                self.values = cycle_state()
+
+            def get(self, key: str, default: object = None) -> object:
+                return self.values.get(key, default)
+
+            def __setitem__(self, key: str) -> None:
+                del key
+
+        review = ReviewOutput.model_validate(cycle_state()[REVIEW_KEY])
+        for state in (BadGetter(), BadSetter()):
+            with self.subTest(state=type(state).__name__), self.assertRaisesRegex(ValueError, "^session state is invalid$"):
+                finalize_paper_cycle(state, review)
+
     def test_model_output_schemas_are_vertex_compatible_and_validate_actions(self) -> None:
         for output_schema in (ProposalOutput, ReviewOutput, EvidenceRecord, ReviewerInput):
             schema = output_schema.model_json_schema()
