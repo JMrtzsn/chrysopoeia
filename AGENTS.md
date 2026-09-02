@@ -3,19 +3,20 @@
 The product scope and safety contract are defined in `README.md`. Preserve those
 boundaries unless the user explicitly changes them.
 
-Context and memory boundaries are defined in `docs/context-engineering.md`.
-The managed RAG and deployment design is defined in `docs/gcp-architecture.md`.
-Graph ownership, state, scheduling, and cost gates are defined in
-`docs/agent-graphs.md`.
+Context and evidence boundaries are defined in `docs/context-engineering.md`.
+The optional managed deployment profile is defined in
+`docs/gcp-architecture.md`. Current graph ownership, state, and cost gates plus
+future graph prerequisites are defined in `docs/agent-graphs.md`.
 The product specification is `.agents-cli-spec.md`; development and release
 gates are defined in `docs/development-lifecycle.md`.
 
 ## Stack
 
 - Python 3.10 or later.
-- Google Agent Development Kit for Python.
+- Google Agent Development Kit for Python as the current agent-runtime adapter.
 - `uv` for dependency and environment management.
-- Gemini through `GOOGLE_API_KEY` by default; other providers may use ADK model connectors.
+- Gemini through `GOOGLE_API_KEY` by default; configure alternatives only through
+  connectors supplied by the selected runtime adapter (ADK today).
 
 ## Commands
 
@@ -26,28 +27,43 @@ gates are defined in `docs/development-lifecycle.md`.
 
 ## Architecture
 
+- Keep core canonical snapshots/evidence, proposals/reviews, risk/cost policy,
+  paper quote/fill, workflow transitions, and audit/evaluation requirements
+  runtime-neutral.
 - Keep the root agent in `chrysopoeia/agent.py` while the application is small.
+- Treat ADK `Agent`, `Workflow`, callbacks, ToolContext/session state, and Agents
+  CLI/A2A/eval tooling as current runtime-edge integration details. The current
+  Python layout is not fully isolated; the next internal-boundary refactor is to
+  move deterministic orchestration/domain behavior out of `agent.py`.
 - Separate trader and reviewer agents because their responsibilities and tool
   permissions differ; keep order execution outside both.
 - Use ordinary typed Python functions for discrete tools.
-- Use an ADK graph workflow for the deterministic propose, review, risk-check,
-  execute, evaluate, and lifecycle sequence.
-- Use ADK session state for conversation-scoped data; add persistent storage only when required.
-- Store durable agent versions, trading records, metrics, lifecycle events, and
-  lessons in Cloud SQL for PostgreSQL.
-- Use Agent Platform RAG Engine with its default `RagManagedDb` for vector
-  retrieval over documents, research, and validated procedural lessons.
-- Use Agent Platform Memory Bank for extracted and consolidated long-term
-  memories; do not treat it as authoritative trading storage.
+- Use the current ADK adapter to integrate the bounded core workflow and hold
+  conversation-scoped state; add persistent storage only when required.
+- Treat Cloud SQL, RAG Engine, and Memory Bank as future platform options, not
+  local harness requirements. If adopted, keep Cloud SQL authoritative and RAG
+  or memory non-authoritative.
 - Keep session state, authoritative trading records, external evidence, and
   curated memory distinct. Never use memory as the source of truth for money or
   lifecycle decisions.
 - Give trader and reviewer agents separate histories. Exchange only validated,
   structured proposals and reviews tied to one canonical snapshot ID.
-- Generate and consolidate memories after completed cycles or resolutions, not
-  on the trading hot path. Persist provenance and invalidate stale lessons.
-- Prefer the standard library, then existing ADK features. Do not add frameworks around ADK.
-- Configure providers at the agent model boundary. Do not spread provider-specific logic through tools.
+- If memory is later added, generate it after completed cycles or resolutions,
+  persist provenance, and invalidate stale lessons; never put it on the trading
+  hot path.
+- Prefer the standard library, then current runtime features. Do not add a
+  runtime abstraction until a second concrete runtime is required.
+- Configure a model through the selected agent-runtime adapter. The current ADK
+  adapter supplies model connectors. Do not build a parallel model-provider
+  framework or spread provider-specific logic through tools.
+- Keep venue market-data and paper-execution capabilities separate. Market-data
+  configuration must never grant authenticated execution authority.
+- Normalize venue adapter output into canonical domain values before agents or
+  policy consume it. Use direct configured adapters now; add external plugin
+  discovery only for a real separately packaged adapter.
+- Keep authenticated execution out of the current harness. Any future live
+  venue adapter must be isolated behind confirmation, IAM, hard limits, a kill
+  switch, and reconciliation.
 
 ## Agent And Tool Rules
 

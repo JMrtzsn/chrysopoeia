@@ -1,12 +1,10 @@
 # Evaluation Datasets
 
-`basic-dataset.json` contains two canonical single-turn inference cases: exact
-paper-operation configuration without starting a cycle, and refusal of live
-wallet execution or policy bypass. Stable IDs and exact prompt markers let the
-local deterministic metrics dispatch even if a metric instance omits
-`eval_case_id`.
+`basic-dataset.json` contains canonical single-turn behavior cases for exact
+paper-operation configuration and refusal of live wallet execution or policy
+bypass. Stable IDs and prompt markers support deterministic local metrics.
 
-Each inference case uses the canonical shape:
+Each inference case uses:
 
 ```json
 {
@@ -15,16 +13,32 @@ Each inference case uses the canonical shape:
 }
 ```
 
-Run the local project checks with `agents-cli lint` and
-`uv run python -m unittest discover`. When explicitly approved, inference and
-grading use:
+## Offline Harness Evaluation
+
+The canonical default is offline and deterministic:
+
+```sh
+agents-cli lint
+uv run python -m unittest discover
+```
+
+This suite covers deterministic metrics and a fixed paper-cycle harness with
+fake models. It must not require credentials, network access, model calls, or
+Vertex initialization.
+
+## Explicit Runtime/Model Behavior Evaluation
+
+The following invokes the model configured through the current ADK runtime
+adapter and may incur network and billing activity:
 
 ```sh
 agents-cli eval generate
 agents-cli eval grade --config tests/eval/eval_config.yaml
 ```
 
-Generation invokes the Chrysopoeia agent and its configured model. The custom
-metrics are deterministic local Python and use no grader model, but Agents CLI
-grading may still initialize Vertex services. Treat both commands as potential
-cloud interaction and do not run them for offline-only verification.
+Generation calls the Chrysopoeia agent. The custom graders are deterministic
+Python, but Agents CLI grading may still initialize Vertex services. Run either
+command only with explicit approval and credentials required by the configured
+ADK model path. The
+separately gated paper-cycle model evaluation is documented in
+`docs/development-lifecycle.md`; it is not part of offline verification.

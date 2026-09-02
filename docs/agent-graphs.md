@@ -1,211 +1,131 @@
 # Agent Graphs
 
-ADK `Workflow` graphs own execution order and routing. A scheduler only creates
-idempotent triggers; it never contains trading logic and never invokes an LLM
-directly.
+## Current Harness Graph
 
-## Graphs
-
-Keep three graphs separate because they run at different times and have
-different failure semantics.
-
-### DAC Boundaries
-
-Use two independent decision-action cycles (DACs):
-
-1. **Research DAC:** discover -> research -> propose -> paper trade -> evaluate
-   agents and strategies. Evaluation may approve an immutable proposal for the
-   execution DAC, but this DAC cannot perform live execution.
-2. **Execution DAC:** consume only an approved execution request, revalidate its
-   snapshot and expiry, apply a deterministic risk check, execute through the
-   isolated boundary, reconcile the result, and run an independent post-trade
-   review.
-
-The execution DAC never researches or invents a trade. Its post-execution
-review checks authorization, expected versus actual price and size, fees,
-policy compliance, and reconciliation. A failed review pauses further
-execution when a deterministic stop condition is met; an LLM cannot weaken a
-limit or authorize a retry. Live execution remains outside the initial scope
-and must retain hard limits and a kill switch.
-
-### Decision Graph
-
-Runs from a user command or scheduled trigger.
+The current graph is one explicit, bounded core workflow integrated through the
+ADK runtime adapter. It does not schedule itself, scan markets, manage agent
+lifecycles, or persist durable records.
 
 ```text
-START
-  -> claim_trigger
-  -> load_configuration
-  -> scan_markets
-  -> opportunity_gate
-       no_change -> record_heartbeat -> END
-       candidate -> capture_snapshot
-                 -> retrieve_context
-                 -> run_traders
-                 -> proposal_gate
-                      no_trade -> persist_no_trade -> report -> END
-                      proposed -> run_reviewers
-                                -> review_gate
-                                     rejected -> persist_rejection -> report -> END
-                                     approved -> risk_check
-                                                -> risk_gate
-                                                     blocked -> persist_block -> report -> END
-                                                     allowed -> paper_execute
-                                                              -> reconcile
-                                                              -> persist_cycle
-                                                              -> report
-                                                              -> enqueue_learning
-                                                              -> END
+START (operator already configured and captured one market)
+  -> prepare canonical snapshot evidence
+  -> trader
+       abstain -> record no-fill decision -> report -> evaluate -> END
+       trade -> validate proposal identity/citations
+             -> reviewer
+             -> validate review identity/citations
+             -> deterministic risk and depth/fee quote
+                  blocked -> record reason -> report -> evaluate -> END
+                  allowed -> local paper fill -> report -> evaluate -> END
 ```
 
-`scan_markets`, all gates, snapshotting, risk, execution, reconciliation, and
-persistence are ordinary Python functions. Only `retrieve_context`,
-`run_traders`, and `run_reviewers` can incur model or vector-retrieval cost.
+Configuration and capture precede the workflow in the root coordinator:
+
+```text
+configuration -> Polymarket market-data adapter -> canonical snapshot
+              -> current harness graph
+```
+
+The workflow processes one binary market. The trader and reviewer are
+single-turn, role-isolated LLM agents. Abstention terminates before reviewer
+invocation. Paper execution consumes the captured YES ask depth, computes VWAP
+and the explicit paper fee assumption, and rejects insufficient depth without a
+partial fill.
+
+## Ownership
+
+| Concern | Owner |
+| --- | --- |
+| Model reasoning, proposal/abstention | Trader LLM through the configured agent-runtime adapter |
+| Independent proposal critique | Reviewer LLM through the configured agent-runtime adapter |
+| Configuration and input validation | Deterministic Python |
+| Snapshot/evidence identity and citation resolution | Deterministic Python |
+| Canonical workflow transitions | Runtime-neutral deterministic contracts |
+| Risk, exposure, quote, fee, fill, and cost gates | Deterministic Python |
+| Terminal report and evaluation assertions | Deterministic Python |
+
+LLM output is validated structured data. An LLM cannot choose arbitrary nodes,
+grant permissions, weaken limits, or invoke paper execution directly. Search
+results are unverified context and cannot become citations until deterministic
+normalization adds them to the evidence set.
+
+## Current State And Cost Contract
+
+The core state contract contains validated operating configuration, one canonical
+snapshot, its evidence record, proposal/review when applicable, deterministic
+decision, optional simulated fill, report, and model-cost ledger. The current ADK
+adapter carries these values in in-memory session state. Snapshot and market IDs
+must remain consistent across every record.
+
+Model callbacks reserve a bounded estimated cost before each call, reject calls
+outside policy, settle actual token usage, and fail closed when settlement is
+invalid. Cost exhaustion skips reasoning; it never weakens trading policy.
+
+ADK `Agent`, `Workflow`, callbacks, ToolContext/session state, and Agents
+CLI/A2A/eval tooling are current runtime-edge details. The Python layout still
+mixes some deterministic orchestration/domain behavior into `agent.py`; moving
+that behavior to runtime-neutral functions is the next internal-boundary
+refactor. Do not introduce an abstract runtime interface until a second concrete
+runtime is required.
+
+## Future Platform Graphs
+
+The following graphs are retained as future design, not current behavior. They
+require durable authoritative records, idempotent triggers, explicit operating
+approval, and contract-tested adapter/configuration choices before implementation.
+
+### Scheduled Decision Graph
+
+```text
+idempotent trigger -> deterministic scan/opportunity gate
+  -> capture canonical snapshot -> bounded harness decision graph
+  -> durable audit/reconciliation
+```
+
+A scheduler may emit triggers but must contain no trading logic or invoke an LLM
+directly. Cheap scans and cooldown/model-call budgets gate expensive reasoning.
+Duplicate triggers must not duplicate records or fills; graph versions remain
+fixed for active cycles.
 
 ### Lifecycle Graph
 
-Runs daily or after a hard policy violation.
-
 ```text
-START
-  -> load_agent_metrics
-  -> eligibility_gate
-       insufficient_sample -> record_defer -> END
-       eligible -> reviewer_evaluation
-                -> deterministic_lifecycle_rules
-                -> persist_promote_pause_retire
-                -> successor_gate
-                     none -> report -> END
-                     needed -> propose_successor
-                             -> validate_new_version
-                             -> activate_paper_version
-                             -> report
-                             -> END
+load authoritative metrics -> minimum-sample eligibility
+  -> optional reviewer analysis -> deterministic promote/pause/retire decision
+  -> optional validated successor version
 ```
 
-Reviewer evaluation supplies analysis. Deterministic lifecycle rules make the
-decision from authoritative metrics and versioned thresholds.
+Lifecycle automation requires durable versioned metrics and thresholds.
+Reviewer analysis may explain but never make or override the state transition.
 
 ### Learning Graph
 
-Runs after a completed cycle or market resolution. It is asynchronous and may
-be retried without blocking the decision graph.
-
 ```text
-START
-  -> claim_learning_trigger
-  -> load_immutable_sources
-  -> extraction_gate
-       nothing_eligible -> END
-       eligible -> extract_candidate_lessons
-                -> validate_provenance
-                -> consolidate_memories
-                -> update_memory_bank
-                -> update_rag_corpus
-                -> record_learning_cycle
-                -> END
+completed/resolved records -> extract candidate lesson
+  -> validate provenance and resolution -> consolidate/invalidate
+  -> optional RAG/Memory publication
 ```
 
-Only resolved outcomes can create validated strategy lessons. Completed but
-unresolved cycles can create observations.
+Learning runs outside the trading path. Only resolved outcomes may produce
+validated strategy lessons; unresolved cycles may produce observations. Memory
+cannot alter authoritative records, policy, or lifecycle state.
 
-## Scheduled Cost Gates
-
-Use different cadences for cheap checks and expensive reasoning:
-
-| Trigger | Default cadence | LLM by default |
-| --- | --- | --- |
-| Market scan | Every 5 minutes | No |
-| Decision reasoning | At most hourly and only after `opportunity_gate` | Yes |
-| Position review | Hourly when an open position changed materially | Yes |
-| Lifecycle evaluation | Daily or immediately after hard violation | Sometimes |
-| Memory consolidation | After completion or resolution | Yes |
-
-The deterministic opportunity gate opens when at least one configured event is
-true:
-
-- A market enters the eligible watchlist or discovery scope.
-- Best executable price moves by the configured threshold since the last
-  evaluated snapshot.
-- Spread, depth, or time-to-resolution crosses a configured threshold.
-- New approved evidence exists since the last evaluation.
-- An open position requires review.
-- The maximum reasoning interval has elapsed for an eligible market.
-
-Cooldowns and a per-day model-call budget prevent repeated reasoning over the
-same unchanged market. Budget exhaustion records a skip; it never weakens risk
-rules.
-
-## State Contract
-
-Each graph invocation carries a small typed envelope:
+### Authenticated Execution Graph
 
 ```text
-trigger_id
-trigger_type
-graph_name
-graph_version
-cycle_id
-session_id (optional for scheduled work)
-market_ids
-snapshot_id (after capture)
-trader_version_ids
-reviewer_version_ids
-policy_version_id
-started_at
+approved immutable request -> freshness/authorization/risk recheck
+  -> explicit confirmation -> isolated authenticated execution adapter
+  -> reconcile -> independent review -> deterministic stop handling
 ```
 
-Large documents, order books, transcripts, and model outputs are persisted and
-passed between nodes by immutable record ID. Do not copy them through ADK
-session state.
+This graph is not implemented. It must never research or invent a trade and must
+have least-privilege IAM, hard limits, a kill switch, idempotency, and safe
+reconciliation before retry. A market-data adapter cannot activate it.
 
-Node outputs are validated structured models. Routes are finite enums such as
-`NO_CHANGE`, `CANDIDATE`, `NO_TRADE`, `PROPOSED`, `REJECTED`, `APPROVED`,
-`BLOCKED`, and `ALLOWED`; an LLM never chooses arbitrary node names.
+## Future Reliability And Observability
 
-## Reliability
-
-- `trigger_id` is unique. `claim_trigger` atomically ignores duplicates.
-- Every external side effect uses an idempotency key derived from the cycle and
-  node name.
-- Persist node status as `pending`, `running`, `succeeded`, or `failed` with
-  attempt count and timestamps.
-- Retry reads, RAG retrieval, and model calls with bounded backoff.
-- Do not automatically retry an execution result unless reconciliation proves
-  no order or fill was created.
-- Resume from persisted node output, not from reconstructed conversation text.
-- A graph version is immutable for active cycles. New routing or prompts create
-  a new version; old cycles finish on their original version.
-- One market may have only one active decision cycle per policy version unless
-  explicit parallel strategy evaluation is configured.
-
-## Scheduling And Deployment
-
-Locally, a small process or manual command can emit triggers. On GCP, use Cloud
-Scheduler to invoke an authenticated Agent Platform or application endpoint.
-The endpoint writes the trigger first and then runs the graph.
-
-Schedules are configuration data:
-
-- `enabled`
-- cadence
-- market scope
-- reasoning cooldown
-- daily model-call and token budgets
-- graph version
-
-`Pause all trading` disables decision triggers and prevents execution nodes from
-starting. Scanning and reconciliation may continue so the system can report
-state safely.
-
-## Observability
-
-Record per node:
-
-- latency, retries, route, and error class
-- model, prompt, input, output, and token counts where applicable
-- RAG query, filters, result IDs, and retrieval scores
-- estimated and actual API cost
-- source and destination record IDs
-
-Reports aggregate skips by reason so cost gates can be tuned without guessing.
+When durable graphs exist, record unique trigger/cycle IDs, graph and policy
+versions, node status/attempts, immutable input/output references, routes,
+latency, bounded retries, model/token cost, and source provenance. Resume from
+persisted node output rather than reconstructed conversation text. Do not retry
+an execution result unless reconciliation proves no order or fill occurred.

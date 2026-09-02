@@ -1,98 +1,95 @@
-# Google Cloud Architecture
+# Optional Google Cloud Deployment Profile
 
-Chrysopoeia uses Google Cloud's Gemini Enterprise Agent Platform where managed
-context infrastructure is useful. ADK remains the application framework.
+Chrysopoeia's runtime-neutral core harness contracts require no Google Cloud
+infrastructure. The current ADK runtime adapter may use configured Gemini model
+access; using Vertex AI is a model access choice, not proof that runtime,
+storage, RAG, scheduling, or deployment infrastructure exists.
 
-## Services
+Application Default Credentials (ADC) provide authentication to configured
+Google APIs. ADC does not provision APIs, billing, IAM, databases, networks, or
+an agent runtime, and the harness must not run `gcloud` or change them.
 
-| Need | Google Cloud service | Chrysopoeia use |
+## Adoption Triggers
+
+Adopt this profile only with explicit approval and a measured requirement for
+one or more of:
+
+- durable authoritative trading/audit records;
+- idempotent remote triggers or managed scheduling;
+- managed runtime identity, scaling, tracing, or recovery;
+- provenance-filtered document retrieval or consolidated long-term memories;
+- controlled behavior evaluation against a managed model endpoint.
+
+No service below is a Phase 1 harness requirement. Select only the services
+needed; do not scaffold the entire profile preemptively.
+
+## Candidate Services
+
+| Future need | Candidate service | Boundary |
 | --- | --- | --- |
-| Agent orchestration | Agent Development Kit (ADK) | Trader, reviewer, and deterministic workflow |
-| Runtime | Agent Platform Runtime | Managed deployment, identity, tracing, and scaling |
-| Scheduling | Cloud Scheduler | Emit authenticated, idempotent graph triggers |
-| Session state | Agent Platform Sessions | Interactive and scheduled cycle histories |
-| Authoritative data | Cloud SQL for PostgreSQL | Trading records, metrics, lifecycle events, and lesson provenance |
-| RAG and vector search | Agent Platform RAG Engine with `RagManagedDb` | PDFs, official documentation, market research, and procedural playbooks |
-| Long-term memory | Agent Platform Memory Bank | Extracted and consolidated agent lessons and user preferences |
-| Embeddings | Vertex AI text embeddings | Semantic indexing and retrieval through RAG Engine |
-| Evaluation | Agent Platform Evaluation and Example Store | Compare agent versions and memory-enabled behavior |
-| Untrusted code | Agent Platform Sandbox | Later strategy experiments, never order execution |
-| Secrets | Secret Manager | Later live-trading credentials |
+| Managed agent runtime | Agent Platform Runtime | Deployment, identity, tracing, scaling |
+| Scheduled triggers | Cloud Scheduler | Emits authenticated idempotent triggers; no trading logic |
+| Conversation sessions | Agent Platform Sessions | Working history, never authoritative ledger |
+| Authoritative records | Cloud SQL for PostgreSQL | Snapshots, decisions, fills, metrics, versions, provenance |
+| Document retrieval | Agent Platform RAG Engine with `RagManagedDb` | Source-linked context, never balances or policy |
+| Long-term memory | Agent Platform Memory Bank | Consolidated lessons/preferences, never authority |
+| Evaluation | Agent Platform Evaluation/Example Store | Optional managed behavior comparison |
+| Secrets | Secret Manager | Future service credentials; never prompts/session state |
 
-There is no separate current Google product called ADP in this design. The two
-relevant names are ADK, the open-source framework, and Gemini Enterprise Agent
-Platform, the managed Google Cloud platform.
+ADK remains the current agent-runtime adapter. The optional platform may still
+use ADK and Google Cloud, but neither is mandated by core harness contracts.
+Configure models through the selected runtime adapter; the current ADK adapter
+supplies its supported model connectors.
 
 ## Data Boundaries
 
-Use two complementary storage paths:
+If durable platform capabilities are approved, keep these paths distinct:
 
-1. **Authoritative relational data:** Cloud SQL for PostgreSQL stores snapshots,
-   proposals, reviews, orders, fills, positions, resolutions, metrics, and
-   lifecycle decisions.
-2. **Semantic context:** RAG Engine and Memory Bank. These retrieve documents and
-   lessons but never determine balances, exposure, fills, or agent retirement.
+1. **Authoritative relational data:** Cloud SQL stores immutable or versioned
+   snapshots, proposals, reviews, decisions, orders/fills, positions,
+   resolutions, metrics, lifecycle events, and lesson provenance.
+2. **Semantic context:** RAG Engine and Memory Bank retrieve documents or
+   lessons. A vector match is evidence, not truth, and never determines balance,
+   exposure, fill, execution authorization, or lifecycle state.
+3. **Session state:** ADK session storage holds conversation-scoped working data,
+   not the trading ledger.
 
-Vector retrieval is required for this project, but a vector match is evidence,
-not truth.
+Vector retrieval is optional. Add it only when bounded canonical snapshot
+evidence no longer meets an approved use case and retrieval quality can be
+evaluated.
 
-## Corpora
+## Optional RAG And Memory Design
 
-Create separate RAG corpora so retrieval scope is explicit:
+If approved, separate corpora by trust and retention scope, for example:
 
-- `platform-reference`: ADK, Agent Platform, and Polymarket documentation.
-- `market-research`: approved external reports and captured research, with
-  source URL, publication time, market/category, and expiry metadata.
-- `strategy-lessons`: sanitized procedural playbooks derived only from resolved
-  outcomes and reviewed evaluations.
+- `platform-reference`: ADK, platform, and venue documentation;
+- `market-research`: approved reports with URL, publication time, category, and
+  expiry metadata;
+- `strategy-lessons`: sanitized procedures derived from resolved outcomes and
+  reviewed evaluations.
 
-The PDFs under `docs/reference/` belong in `platform-reference`. Upload source
-documents to Cloud Storage, then import them into RAG Engine. Keep the source
-files and corpus object IDs so every retrieved chunk remains traceable.
+Filter by source scope and date before a small vector retrieval, reject expired
+or provenance-free chunks, preserve citations/scores, and retrieve trader and
+reviewer context independently. Start with managed `RagManagedDb`; consider
+separate vector infrastructure only after measured scale, latency, or recall
+requires it.
 
-## Retrieval
+Memory generation occurs after completed cycles or resolutions. Persist lineage
+in the authoritative store before publishing sanitized content. RAG retrieves
+shared knowledge; Memory Bank consolidates evolving lessons/preferences. Neither
+can place trades or override deterministic policy.
 
-For each proposal or review:
+## Approved Setup Constraints
 
-1. Apply metadata filters for corpus, market/category, source date, and status.
-2. Run vector retrieval with a small result limit.
-3. Reject expired or provenance-free chunks.
-4. Preserve citations and retrieval scores in the cycle record.
-5. Give traders and reviewers independently retrieved context.
+If this profile is selected later:
 
-Use `RagManagedDb`, RAG Engine's default managed vector database, first. It
-requires no separate vector infrastructure and supports KNN and ANN. Move to
-Agent Platform Vector Search only when corpus scale or measured latency and
-recall require it.
-
-## Memory
-
-Memory Bank and RAG serve different jobs:
-
-- RAG retrieves shared external knowledge and versioned procedural playbooks.
-- Memory Bank extracts and consolidates evolving agent lessons and user
-  preferences across sessions.
-
-Memory generation happens after completed cycles or resolutions. Persist
-provenance in the relational ledger before sending sanitized material to Memory
-Bank or the `strategy-lessons` corpus.
-
-## Initial Cloud Setup
-
-- Select one supported region; `europe-west3` is GA for RAG Engine and is the
-  default European choice unless deployment requirements dictate otherwise.
-- Enable Agent Platform, Cloud Storage, and Cloud SQL Admin APIs.
-- Create a PostgreSQL Cloud SQL instance in the runtime region with private IP,
-  automated backups, point-in-time recovery, and encrypted connections.
-- Use Application Default Credentials locally and workload identity in runtime.
-- Grant the application service account only the required Agent Platform and
-  storage permissions, plus `roles/cloudsql.client` for database connectivity.
-- Read the database password or IAM database configuration from Secret Manager;
-  never place credentials in source, prompts, session state, or logs.
-- Use ADK's `DatabaseSessionService` with a PostgreSQL SQLAlchemy URL when
-  database-backed ADK sessions are required. Keep its session tables separate
-  from the authoritative trading schema; ADK session state is not the ledger.
-- Configure a RAG corpus using the default `RagManagedDb` and a Vertex AI text
-  embedding model.
-- Do not create standalone Vector Search, Spanner, queues, or Kubernetes for the
-  first implementation.
+- choose one supported region and least-privilege runtime identity;
+- obtain approval before enabling APIs, billing resources, networking, or paid
+  evaluations;
+- use private connectivity, encryption, backups, and point-in-time recovery for
+  authoritative storage where required;
+- keep ADK session tables separate from the authoritative trading schema;
+- keep credentials in Secret Manager or approved environment configuration,
+  never source, prompts, session state, traces, or logs;
+- add only the selected runtime/storage/retrieval services—no speculative
+  Kubernetes, queues, or vector infrastructure.

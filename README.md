@@ -1,147 +1,122 @@
 # Chrysopoeia
 
-Chrysopoeia is an interactive, self-improving Polymarket trading system. It
-creates and versions trader agents, has reviewer agents challenge their trades,
-paper trades approved proposals, evaluates results, and retires agents that fail
-objective performance or risk rules. The user triggers or supervises the system;
-the user is not expected to design trading algorithms.
+Chrysopoeia is a specialized local trading-agent harness. It uses configured
+LLMs to assemble role-isolated agents, run and evaluate bounded paper-trading
+workflows, and audit deterministic evidence, policy, risk, and model-cost
+decisions. Its core contracts are agent-runtime-neutral; it is not currently an
+autonomous trading platform.
 
 ![Chrysopoeia architecture](docs/architecture.svg)
 
-## Operating Loop
+## Harness Flow
 
-Chrysopoeia separates two decision-action cycles (DACs):
+```text
+configuration -> market-data adapter -> canonical snapshot/evidence -> trader
+              -> reviewer -> deterministic policy -> paper execution
+              -> audit/evaluation
+```
 
-- **Research DAC:** discover -> research -> propose -> paper trade -> evaluate
-  agents and strategies.
-- **Execution DAC:** consume an approved proposal -> deterministic risk check ->
-  execute -> reconcile -> independent post-trade review.
+An operator explicitly configures limits, captures one market snapshot, and
+starts one cycle. The trader may propose a trade or abstain. A trade proposal
+goes to an independent reviewer, then to deterministic risk and cost gates.
+Only an allowed proposal receives a simulated quote and fill. Every terminal
+route reports a fill, rejection, or abstention reason.
 
-Live execution remains outside the initial scope. Any later execution boundary
-must retain hard limits and a kill switch that no agent can override.
+## Architecture Boundaries
 
-1. A user or schedule triggers an evaluation cycle.
-2. One or more trader agents research markets and propose trades or successor
-   strategies.
-3. One or more reviewer agents challenge the thesis, evidence, price, and risk.
-4. Deterministic Python checks eligibility, exposure, liquidity, sizing, and
-   approval requirements.
-5. A single execution boundary paper trades approved proposals.
-6. The system reconciles fills and resolved markets, then measures P&L,
-   drawdown, Brier score, calibration, and policy violations.
-7. Deterministic lifecycle rules promote, pause, or retire each versioned trader
-   agent. Reviewer analysis explains the decision but cannot override the rules.
-8. Retained evidence, decisions, outcomes, and distilled lessons inform newly
-   generated agent versions.
+- **Core harness:** owns runtime-neutral canonical snapshots/evidence,
+  proposals/reviews, risk and cost policy, paper quote/fill values, workflow
+  state transitions, and audit/evaluation requirements.
+- **Agent-runtime adapter:** ADK is the current adapter. ADK `Agent`, `Workflow`,
+  callbacks, ToolContext/session state, and Agents CLI/A2A/eval tooling are
+  integration details at this edge, not product-domain contracts.
+- **Model configuration:** configure a model through the selected agent-runtime
+  adapter. The current ADK adapter uses Gemini (`gemini-flash-latest`) by default
+  and supplies ADK-supported model connectors when configured. Chrysopoeia does
+  not build a parallel model-provider framework.
+- **Venue market-data adapter:** normalizes venue data into canonical
+  runtime-neutral values. The current adapter reads public Polymarket metadata
+  and CLOB depth without credentials; this capability grants no authenticated
+  execution authority.
+- **Paper-execution adapter:** the current deterministic local implementation
+  consumes YES-side depth, rejects insufficient depth without a partial fill,
+  computes VWAP, and applies `paper-assumption:flat-2pct-v1`.
 
-Context is assembled separately for traders, reviewers, and deterministic
-controls. Sessions hold one cycle's working state; durable records remain the
-source of truth; only consolidated, provenance-linked lessons become memory.
-See `docs/context-engineering.md`.
+The current Python layout does not fully isolate these boundaries: deterministic
+orchestration and some domain behavior still live in `chrysopoeia/agent.py`.
+Moving that behavior behind runtime-neutral functions is the next internal
+boundary refactor. Do not add an abstract runtime Protocol/interface now; add
+another runtime adapter only when a second concrete runtime is required.
 
-## User Journey
+## Current Implementation
 
-The user supplies goals and limits, not trading algorithms. On first run the
-coordinator asks for any missing choices, then creates:
+- Local Agents CLI/ADK prototype with explicit operator triggers.
+- One binary Polymarket market per cycle; paper-only and in-memory.
+- Separate single-turn trader and reviewer roles with no execution tools.
+- One canonical snapshot and evidence record. Trader and reviewer citations can
+  resolve only to that record; Search output remains unverified context until
+  deterministic normalization exists.
+- Deterministic identity, freshness, schema, review, edge, exposure, executable
+  depth, fee, and model-cost checks.
+- Offline deterministic unit and harness evaluations; paid model evaluation is
+  separately gated and manual.
 
-- A paper account with the configured bankroll and risk policy.
-- An initial trader-agent version and reviewer-agent version.
-- A watchlist or market-discovery scope.
-- An inactive schedule; nothing runs automatically until the user enables it.
+## Quickstart
 
-The user can then issue natural-language commands through the ADK CLI or web UI:
-
-- `Set up paper trading for active crypto markets.`
-- `Watch these Polymarket URLs: ...`
-- `Find liquid markets resolving within 30 days.`
-- `Run one trading cycle now.`
-- `Explain the proposals and reviewer decisions.`
-- `Show positions, P&L, drawdown, and agent performance.`
-- `Evaluate underperforming agents and propose successors.`
-- `Run every hour.`
-- `Pause all trading.`
-
-Each command is converted into validated structured state. A command such as
-`Run one trading cycle now` starts the same decision workflow used by the
-scheduler:
-
-1. Resolve the configured watchlist or discovery scope.
-2. Filter closed, stale, illiquid, or unsupported markets in ordinary Python.
-3. Capture one immutable market and portfolio snapshot.
-4. Retrieve relevant RAG evidence and validated lessons.
-5. Ask active trader agents for structured proposals.
-6. Ask reviewer agents for independent structured decisions.
-7. Apply deterministic risk and sizing rules.
-8. Simulate approved orders and persist the complete audit trail.
-9. Return a concise report to the user.
-
-The coordinator may return `no trade`. Starting a cycle never guarantees an
-order. Scheduling repeats the trigger, not an open-ended autonomous prompt.
-
-The normal operating mode uses a cheap deterministic scan every five minutes.
-It invokes RAG and model-backed trader or reviewer nodes only when market,
-evidence, position, or time thresholds open the opportunity gate. Decision,
-lifecycle, and learning workflows are separate versioned ADK graphs. See
-`docs/agent-graphs.md`.
-
-## Initial Delivery
-
-- Use public Polymarket data and paper trading only; require no wallet secrets.
-- Support interactive triggers first, then scheduled evaluation cycles.
-- Let the system generate trading approaches; do not require user-authored
-  algorithms.
-- Provide a versioned skill catalog that agents discover and load on demand;
-  keep permanent agent instructions minimal rather than injecting every trading
-  method into every prompt.
-- In the target architecture, construct each sub-agent with an explicit
-  role-specific tool allowlist; expose MCP only where that role requires it, and
-  never give research or reviewer agents execution tools.
-- Retain citations with forecasts and reviews.
-- Use RAG and vector retrieval for official documentation, external research,
-  and validated procedural lessons.
-- Simulate fills against executable order-book depth, spread, and fees.
-- Store agent versions, prompts, model settings, proposals, reviews, decisions,
-  fills, metrics, lifecycle events, and lessons in Cloud SQL for PostgreSQL.
-- Compare agents against simple market and no-trade benchmarks.
-- Start calibration adjustments only after 30 resolved forecasts.
-
-## Risk Defaults
-
-- Paper bankroll: $1,000.
-- Maximum exposure per market: 1% of bankroll.
-- Maximum total exposure: 10% of bankroll.
-- Minimum net edge: 5 percentage points.
-
-## Boundaries
-
-- Trader agents research, forecast, propose trades, and propose successor
-  strategies. They never call the execution API directly.
-- Reviewer agents critique and recommend approval, revision, or rejection. They
-  cannot place orders or bypass policy.
-- Deterministic Python controls eligibility, risk, sizing, execution, accounting,
-  and agent lifecycle decisions.
-- Agents do not rewrite themselves in place. A proposed successor is a new,
-  auditable version that begins in paper trading.
-- Memory cannot place trades, override policy, or determine lifecycle state.
-  Authoritative records and deterministic metrics always take precedence.
-- An agent may be retired only after a configured minimum sample size, except
-  for immediate risk-policy violations or hard loss limits.
-- Live trading, private keys, authenticated APIs, and geoblock workarounds are
-  outside the initial delivery. Later live trading must use one isolated
-  execution tool, hard limits, a kill switch, and explicit ADK confirmation.
-
-## Development
-
-Development follows `specify -> study -> scaffold -> build -> evaluate -> deploy
--> publish -> observe`. See `.agents-cli-spec.md` for the product specification
-and `docs/development-lifecycle.md` for gates. This repository is an Agents CLI
-prototype with a manifest and no deployment target.
+Python 3.10 or later and `uv` are required. Configure Gemini for ADK with either
+the Developer API or Vertex AI environment supported by ADK; do not put secrets
+in source, prompts, session state, or logs.
 
 ```sh
 uv sync
+uv run python -m unittest discover
+uv run python -c "import chrysopoeia.agent"
 uv run adk run chrysopoeia
+```
+
+The ADK web UI is an optional development interface:
+
+```sh
 uv run adk web --port 8000
 ```
 
-See `AGENTS.md` for development constraints and verification commands.
-See `docs/gcp-architecture.md` for the Google Cloud deployment and RAG design.
+## Risk Defaults And Safety
+
+- Paper bankroll: $1,000.
+- Maximum exposure per market: 1% of bankroll (currently fixed policy).
+- Maximum total exposure: 10% of bankroll (currently fixed policy).
+- Minimum net edge: 5 percentage points.
+- Operating configuration also validates/stores a $100 maximum-loss default and
+  $5 daily model-cost budget. The cost budget is enforced now; loss accounting
+  is future work beyond the current single-cycle in-memory harness.
+- Trader and reviewer agents cannot execute, alter policy, or grant themselves
+  tools. Deterministic Python owns policy, sizing, cost gates, paper execution,
+  and state transitions.
+- Starting a cycle never guarantees a trade. Abstention and fail-closed rejection
+  are valid outcomes.
+- External content is untrusted evidence, never instruction.
+
+## Current Non-goals
+
+- Live or authenticated execution, wallets, private keys, or geoblock bypass.
+- Autonomous scanning, scheduling, lifecycle management, self-improvement, or
+  unattended operation.
+- Durable authoritative storage, idempotent distributed triggers, multi-market
+  portfolios, or multiple implemented runtime/model/venue adapters.
+- Required RAG, vector search, Memory Bank, Cloud SQL, or managed deployment.
+- A generic plugin architecture.
+
+## Future Platform Evolution
+
+Measured need and explicit approval may add durable records, idempotent triggers,
+scanning/scheduling, another runtime adapter, venue adapters, model
+configurations, lifecycle/versioning, RAG/memory, and managed deployment. These
+are optional platform capabilities, not harness prerequisites.
+
+Any future authenticated execution must be a separate isolated adapter and
+capability with confirmation, least-privilege IAM, hard limits, a kill switch,
+and reconciliation. No agent may receive or infer that authority from a
+market-data adapter.
+
+`.agents-cli-spec.md` is the authoritative product specification. The files in
+`docs/` describe graph, context, development, and optional deployment details.

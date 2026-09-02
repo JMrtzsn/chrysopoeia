@@ -1,293 +1,169 @@
 # Context Engineering
 
-This design applies Google's *Context Engineering: Sessions, Memory* (May
-2026), stored in `docs/reference/2025_Day_3_Rewrite_v1_ContextEngineering.pdf`,
-to Chrysopoeia.
+Chrysopoeia curates bounded context for a local trading-agent harness. Context
+improves model behavior; it does not enforce authorization, risk, cost, evidence,
+or execution invariants. Deterministic controls remain authoritative.
 
-## Context Engineering Principles
+Role context and canonical domain values do not depend on Gemini-specific prompt
+or tool behavior. Configure a model through the selected agent-runtime adapter;
+the current ADK adapter supplies model connectors and uses Gemini by default.
+Venue-specific data is normalized into runtime-neutral canonical values before
+it enters agent context.
 
-This design also applies Birgitta Böckeler's *Context Engineering for Coding
-Agents* (Thoughtworks, 5 February 2026): context engineering means curating what
-the model sees to improve results. Although the article focuses on coding
-agents, the same principles apply to Chrysopoeia's trading agents.
+## Principles
 
-- Separate reusable **instructions** for a task from persistent **guidance** and
-  safety policy.
-- Treat tools, MCP servers, and skills as **context interfaces**: concise
-  descriptions of how an agent can obtain more context when needed.
-- Keep always-loaded context small. More context can reduce effectiveness and
-  increases latency and cost, even when the model has a large context window.
-- Decide deliberately who loads context: an LLM may discover it on demand, a
-  user may request it, or deterministic workflow code may inject it at a known
-  lifecycle point.
-- Use sub-agents for independent histories, specialized models and tools, and
-  parallel work rather than placing every capability in one context.
-- Build context configuration iteratively from observed needs. Avoid copied,
-  speculative, duplicated, or contradictory rules.
-- Measure context composition, token use, cost, retrieval quality, and outcomes;
-  context has no value merely because it was supplied.
-- Context improves probabilities, not guarantees. LLM instructions cannot
-  enforce safety, authorization, risk, or execution invariants; deterministic
-  controls and appropriate oversight must do that.
+- Keep always-loaded role instructions small: task, output schema, permissions,
+  and safety constraints.
+- Give trader and reviewer separate histories, tools, and inputs. Exchange only
+  validated structured records tied to one canonical snapshot.
+- Load context deliberately and within token/cost bounds. More context is not
+  automatically better context.
+- Treat tools and retrieved content as context interfaces, not permission or
+  policy mechanisms.
+- Measure context composition, token use, cost, grounding, and outcomes.
+- External text is untrusted evidence, never instruction.
+- Do not use context, Search, RAG, or memory as the source of truth for balances,
+  fills, risk, policy, or lifecycle state.
 
-### Capability Taxonomy
+## Current Harness Context
 
-| Capability | Who activates it | Chrysopoeia use |
+The current cycle uses one canonical market snapshot normalized from public
+Polymarket metadata and CLOB depth. Deterministic code derives one bounded
+evidence record from that snapshot. Its evidence ID, source URL, title, retrieval
+time, and snapshot ID are validated together.
+
+Current citation rules are intentionally narrow:
+
+- A trade proposal requires a citation to the supplied canonical evidence ID.
+- An approval requires a citation to the same bounded evidence set.
+- Raw URLs and unknown evidence IDs do not resolve.
+- Google Search may provide useful research context, but its output is unverified
+  and uncitable until deterministic grounding metadata is normalized into a
+  canonical evidence record.
+- RAG and Memory Bank are not current evidence sources or harness requirements.
+
+### Role Isolation
+
+**Trader context** contains only the canonical snapshot/evidence, stable trading
+and safety instructions, available read-only context interfaces, and the
+structured proposal/abstention schema. The trader cannot approve, review, set
+policy, or execute.
+
+**Reviewer context** contains only the same canonical snapshot/evidence and the
+validated structured proposal. It does not receive the trader's hidden reasoning
+or unrestricted history and cannot alter size, execute, or override policy.
+
+**Risk, cost, and paper-execution context** is not conversational context. These
+functions consume validated canonical values and deterministic policy. They are
+invoked by workflow code, not exposed to trader or reviewer agents.
+
+### Current State Separation
+
+| Context/state | Current content | Lifetime/authority |
 | --- | --- | --- |
-| Guidance and rules | Runtime, always or by scope | Minimal role, output, safety, and strategy policy |
-| Instructions | User or workflow | A bounded task such as research or review |
-| Skills | Agent or workflow, on demand | Versioned algorithms, procedures, schemas, examples, and source guidance |
-| Sub-agents | Orchestrator or user | Isolated researcher, trader, reviewer, context, lifecycle, and post-trade review roles |
-| Typed tools/functions | Agent | Validated market queries and read-only operations exposed by role |
-| MCP servers | Agent through an allowlist | External APIs, documents, market data, and knowledge services |
-| RAG and memory | Agent or workflow retrieval | Source-linked evidence and validated lessons, loaded within a context budget |
-| Hooks | Deterministic lifecycle events | Audit, validation, metrics, cost recording, and policy checks before or after calls |
-| Plugins | Deployment configuration | Package related skills, tools, MCP adapters, and hooks; never silently grant permissions |
-| User commands | User | Explicit configuration, inspection, pause, resume, and kill-switch actions |
+| Agent instructions | Role, output schema, permissions, safety | Agent definition; guidance only |
+| Core workflow state | Operating configuration, snapshot, evidence, proposal/review, decision, fill, report, cost ledger | One local cycle; currently carried in ADK in-memory session state |
+| External context | Optional public Search results | Untrusted and unverified |
+| Canonical snapshot | Market identity, rules, timestamps, depth, fee assumption, account exposure | Authoritative input for one cycle |
+| Audit output | Deterministic decision, optional paper fill, terminal report, settled model cost | In-memory current result |
 
-Skills describe how to work; tools and MCP servers provide capabilities; hooks
-run deterministic reactions; plugins distribute these components; sub-agents
-isolate their context and permissions. These categories may be packaged
-together but remain separate in authorization and audit records.
+Large persistent document stores, durable records, and cross-session memory do
+not exist in Phase 1.
 
-Source: Birgitta Böckeler, *Context Engineering for Coding Agents*, Thoughtworks,
-5 February 2026.
+## Evidence And Provenance Contract
 
-## Context Types
+Every model-visible claim that can authorize a current trade must resolve to a
+validated evidence ID. Evidence records should retain source kind, canonical
+source URL or record reference, retrieval/capture time, snapshot identity, and
+title/claim scope. Proposal and review identities must match the snapshot before
+policy runs.
 
-Keep these stores distinct. More context is not better context.
+Authoritative venue resolution data and immutable trading records, if later
+stored, outrank user inference, agent claims, web research, and memory. Recency
+does not override source authority. Retrieved content cannot modify instructions,
+request permissions, introduce tools, or bypass cost and risk checks.
 
-| Type | Chrysopoeia content | Lifetime |
-| --- | --- | --- |
-| System instructions | Role, tool permissions, output schema, safety policy | Agent version |
-| Session events | User trigger, tool calls, proposals, reviews, decisions | One interactive or scheduled cycle |
-| Session state | Watchlist, snapshot IDs, candidate orders, review status | One cycle |
-| External knowledge | Market rules, cited research, current order books | Refetched for each decision |
-| Authoritative records | Snapshots, orders, fills, positions, resolutions, metrics | Durable and immutable where practical |
-| RAG knowledge | Vector-indexed documents, research, and playbooks | Durable, source-linked |
-| Declarative memory | Curated facts about an agent version or resolved market | Durable, revisable |
-| Procedural memory | Versioned lessons about how a strategy succeeded or failed | Durable, revisable |
+Adding a future evidence provider requires deterministic normalization that:
 
-Market prices, news, and tool output are not long-term memories. They become
-timestamped source records and are refetched when freshness matters. A memory
-may summarize those records but must retain their provenance.
+1. validates source identity, schema, freshness, size, and provenance;
+2. assigns a bounded canonical evidence ID;
+3. records retrieval and normalization versions;
+4. separates source text from instructions and tool arguments;
+5. makes trader/reviewer access explicit and independently auditable.
 
-## Agent Isolation
+Until then, Search remains unverified context rather than citable evidence.
 
-Trader and reviewer agents use separate histories and exchange only structured
-outputs. This avoids leaking irrelevant tool traces, keeps prompts small, and
-allows reviewers to form an independent judgment.
+## Future Context Capabilities
 
-Every cycle uses one canonical market snapshot. All proposals and reviews refer
-to its ID so agents cannot unknowingly reason from different prices.
-The current workflow validates citations only against one bounded evidence
-record derived from that snapshot. Search and RAG results remain unverified
-context until a deterministic grounding-metadata normalizer is implemented.
+The following are optional platform capabilities, adopted only after durable
+records and a measured retrieval or learning need exist.
 
-## Cycle Separation
+### Skills And Context Catalogs
 
-Chrysopoeia runs two different cycles. They must not share mutable working
-state.
+A future catalog may expose bounded, versioned procedures or source interfaces
+on demand rather than injecting every method into every prompt. Catalog entries
+cannot grant tools, execution permission, or authority over deterministic
+policy. Record any loaded entry and version with the resulting proposal/review.
 
-### Decision Cycle
+Do not implement a generic plugin framework now. Direct configured context
+adapters are enough; external discovery is justified only by a real separately
+packaged provider.
 
-A decision cycle begins with one user or scheduler trigger and ends after the
-proposal is rejected, skipped, or executed. Assign these identifiers before any
-model call:
+### RAG
 
-- `cycle_id`: one end-to-end decision attempt.
-- `session_id`: the interactive conversation that triggered it.
-- `snapshot_id`: the immutable market and portfolio inputs used for decisions.
-- `market_id`: the Polymarket market being evaluated.
-- `trader_version_id` and `reviewer_version_id`: immutable agent definitions.
-- `policy_version_id`: the deterministic risk rules applied.
+Future RAG may retrieve approved documents, external research, and validated
+procedural lessons. Retrieval must apply source/status/date/market metadata
+filters before vector similarity, preserve chunk provenance and scores, reject
+expired or provenance-free results, and enforce result/token/cost limits.
 
-The cycle follows four phases:
+Trader and reviewer retrieval should remain independent. A vector match is
+evidence, not truth, and is not citable by the harness until normalized into the
+canonical evidence contract. See `docs/gcp-architecture.md` for one optional
+managed profile; vector retrieval is not required.
 
-1. **Fetch:** Load the canonical snapshot, recent session events, scoped RAG
-   results, relevant memories, and exact portfolio state.
-2. **Prepare:** Validate freshness and provenance, enforce a context budget, and
-   construct separate trader and reviewer inputs.
-3. **Invoke:** Run trader, reviewer, and deterministic controls. Tool outputs are
-   cycle-local and tagged with `cycle_id` and `snapshot_id`.
-4. **Persist:** Atomically store proposals, reviews, decisions, and simulated
-   fills. Mark the cycle complete before scheduling memory work.
+### Memory
 
-Trader and reviewer invocations may use separate ADK sessions. Their only
-shared input is validated structured data tied to the same `cycle_id` and
-`snapshot_id`.
+Future memory runs after completed cycles or market resolutions, never on the
+trading hot path. Keep these scopes distinct:
 
-### Learning Cycle
+- user preferences and confirmation policy;
+- one immutable agent version's observed limitations;
+- market/category facts and resolution patterns;
+- sanitized application procedures.
 
-A learning cycle runs asynchronously after a decision cycle completes or a
-market resolves. It never changes the completed decision record.
+Every memory must retain source record IDs/types, market and agent/strategy
+versions where applicable, creation and validation timestamps, extraction model
+and prompt version, confidence/corroboration, and active/superseded/invalidated
+status. Retrieval starts with the narrowest scope and broadens only when needed;
+vector similarity never bypasses metadata scope.
 
-1. Select immutable source records by `cycle_id` or `market_id`.
-2. Create a `learning_cycle_id` and record the highest source event included.
-3. Extract only allowed memory topics.
-4. Validate provenance and resolution status.
-5. Consolidate candidates into scoped memories using create, update, or
-   invalidate operations.
-6. Publish sanitized lessons to Memory Bank or the RAG corpus.
+A future learning cycle should:
 
-Use `(trigger_type, source_id, extractor_version)` as an idempotency key so a
-retry cannot learn from the same event twice. A failed learning cycle is
-retryable and does not block trading.
+1. select completed immutable source records;
+2. extract only approved topics;
+3. validate provenance and resolution status;
+4. consolidate, supersede, or invalidate rather than append contradictions;
+5. persist authoritative lineage before publishing sanitized memory/RAG content.
 
-### Resolution Cycle
+Only resolved outcomes can produce validated strategy lessons. Unresolved cycles
+may produce observations. Successor agents inherit selected provenance-linked
+lessons, not predecessor transcripts. Memory cannot promote/retire an agent,
+place a trade, determine a balance, or override policy.
 
-Market resolution is a distinct learning trigger because it converts forecasts
-into outcomes. It computes authoritative P&L and calibration first, then permits
-procedural lesson extraction. Unresolved trades may produce observations but
-never validated strategy lessons.
+### Durable Cycle Separation
 
-### Memory Namespaces
-
-Every memory has exactly one primary scope:
-
-- `user/{user_id}` for explicit preferences and approval policy.
-- `agent/{agent_version_id}` for version-specific performance limitations.
-- `market/{market_id}` for facts unique to one market.
-- `category/{category}` for reusable domain lessons.
-- `application/chrysopoeia` for sanitized global procedures.
-
-Retrieval starts inside the narrowest applicable scope and broadens only when
-needed. Scope, source IDs, creation cycle, validation time, and invalidation
-status are mandatory metadata; vector similarity never crosses these filters.
-
-### Trader Context
-
-Provide only:
-
-- Stable trading and safety policy.
-- Current market snapshot and full resolution rules.
-- Fresh research with source URLs and timestamps.
-- The trader version's relevant performance summary.
-- A small set of relevant, recent, high-confidence procedural memories.
-- The required structured proposal schema.
-
-### Reviewer Context
-
-Provide only:
-
-- Stable review and safety policy.
-- The same canonical snapshot and resolution rules.
-- The trader's structured proposal and cited evidence.
-- Relevant contrary evidence and the trader version's performance summary.
-- The required structured approve, revise, or reject schema.
-
-Reviewers do not receive a trader's hidden reasoning or unrestricted session
-history. They review claims, evidence, prices, and observable results.
-
-### Risk And Execution Context
-
-Risk, sizing, lifecycle, and execution consume validated structured values, not
-LLM conversation context. Their decisions are deterministic and persisted with
-the policy version that produced them.
-
-## Memory Lifecycle
-
-Memory generation runs after a cycle or market resolution, never on the trading
-hot path.
-
-1. **Ingest:** Select completed proposals, reviews, fills, resolutions, and
-   metrics by immutable record ID.
-2. **Extract:** Create only predefined memory topics: thesis outcome, evidence
-   quality, resolution-rule interpretation, execution quality, calibration
-   error, risk violation, and reusable strategy lesson.
-3. **Consolidate:** Create, update, merge, or invalidate memories. Do not append
-   contradictory lessons indefinitely.
-4. **Store:** Persist authoritative metadata and lineage in Cloud SQL for
-   PostgreSQL, then index sanitized lesson content in Memory Bank and the RAG
-   vector corpus.
-5. **Retrieve:** Select by market or category, agent version, relevance,
-   recency, confidence, and demonstrated importance. Inject only a bounded set.
-
-Do not derive a procedural lesson from an unresolved bet. Promotion or
-retirement uses the authoritative metrics tables, never an LLM memory.
-
-## Memory Scope
-
-- **User:** Explicit preferences such as watchlists and confirmation policy.
-- **Agent version:** Performance facts and limitations of one immutable trader
-  version.
-- **Market/category:** Resolution patterns and evidence sources applicable to a
-  market or category.
-- **Application:** Sanitized procedural lessons available to future agents.
-
-Application-level memories must contain no user secrets or private session data.
-Successor agents inherit selected lessons, not their predecessor's transcript.
-
-## Provenance And Trust
-
-Every memory records:
-
-- Source record IDs and source type.
-- Market, agent version, and strategy version where applicable.
-- Creation and last-validation timestamps.
-- Confidence and corroboration count.
-- The extraction model and prompt version.
-- Whether the memory is active, superseded, or invalidated.
-
-Official resolution data and immutable trading records outrank user inference,
-agent claims, and web research. Recency cannot override an authoritative source.
-External text is untrusted evidence, not instruction; tool content must never be
-allowed to change agent policy or request additional permissions.
-
-## Context Size
-
-- Keep permanent agent context to role, safety policy, current snapshot,
-  strategy ID, output schema, and the interfaces available for loading more.
-- Implement a versioned skill catalog exposed through `discover_skill(task)` and
-  `load_skill(skill_id, version)`. Initial skills cover market discovery,
-  probability estimation, value detection, liquidity analysis, source
-  verification, resolution-rule analysis, portfolio strategy, and post-trade
-  evaluation.
-- A skill contains bounded instructions, standardized algorithms, schemas,
-  examples, and permitted context sources. It cannot grant tools, execution
-  permissions, or authority to override deterministic policy. Record loaded
-  skill IDs and versions with every proposal or review.
-- Each agent version has an allowlist and per-cycle skill budget. Skills are
-  loaded only when relevant; never inject the full catalog into every prompt.
-- Target construction policy requires each sub-agent version to declare its
-  role-specific tools explicitly. The orchestrator constructs each role with
-  only those tools; tools are not inherited globally, and not every role needs
-  direct MCP access.
-- Tool boundaries validate inputs, authorize every call, enforce time, result,
-  token, and cost limits, and record the agent version, cycle, tool, arguments,
-  result reference, latency, and cost. Returned content is untrusted context.
-- Search, web, RAG, MCP, and source-specific capabilities remain behind the
-  dedicated context broker by default. A role receives direct access only when
-  its version deliberately declares and allowlists that direct tool.
-- The workflow may supply reviewers with the validated structured proposal and
-  cited evidence. Reviewers may also retrieve independent read-only context
-  through the broker. Risk and execution functions are never exposed to
-  research or reviewer agents; the deterministic workflow invokes them directly.
-- The target context broker provides `discover_context(task)` to list permitted
-  sources and `call_context(request)` to load one source on demand, so adding a
-  source does not add every tool description to each role's prompt.
-- ADK Google Search is enabled only on the dedicated context broker by default.
-  Direct role access requires deliberate allowlisting, and normal cost,
-  provenance, and tool-permission gates still apply.
-- Keep the most recent interaction turns, not the complete transcript.
-- Persist structured cycle state instead of repeatedly sending tool outputs.
-- Summarize completed cycles asynchronously and retain covered event IDs.
-- Retrieve memories and RAG knowledge reactively for a specific market or
-  proposal using metadata filters plus vector similarity.
-- Use Agent Platform RAG Engine with its default `RagManagedDb`; keep Cloud SQL
-  for PostgreSQL as the authoritative relational store. See
-  `docs/gcp-architecture.md`.
+If a future platform adds durable decision, resolution, and learning cycles,
+give each immutable IDs and version references. Pass large snapshots, documents,
+transcripts, and outputs by record ID rather than copying them through session
+state. Complete the authoritative decision record before asynchronous learning,
+and make retries idempotent.
 
 ## Evaluation
 
-Memory is useful only if it improves observable decisions. Track:
-
-- Memory extraction precision against a small reviewed set.
-- Retrieval recall for known relevant lessons.
-- Context token count and retrieval latency.
-- Proposal calibration, Brier score, drawdown, and return with memory enabled
-  versus a no-memory baseline.
-- Reviewer disagreement and policy-violation rates.
-
-Disable or invalidate memories that reduce out-of-sample performance. Never
-promote a strategy because its retrospective explanation sounds persuasive.
+Current evaluation verifies canonical snapshot evidence, citation resolution,
+role/tool isolation, finite routing, terminal decisions, and model-cost
+settlement. Future RAG/memory evaluation should additionally compare retrieval
+precision/recall, context tokens/latency/cost, proposal calibration, Brier score,
+drawdown, return, reviewer disagreement, and policy violations against a
+no-retrieval/no-memory baseline. Disable context capabilities that reduce
+out-of-sample safety or performance.
