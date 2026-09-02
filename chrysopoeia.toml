@@ -1,0 +1,22 @@
+[runtime]
+adapter = "adk"
+mode = "paper"
+
+[venue]
+adapter = "polymarket"
+paper_fee_rate = 0.02
+paper_fee_source = "paper-assumption:flat-2pct-v1"
+
+[models]
+root = "gemini-flash-latest"
+context = "gemini-flash-latest"
+trader = "gemini-flash-latest"
+reviewer = "gemini-flash-latest"
+
+[cost]
+model = "gemini-flash-latest"
+input_usd_per_million_tokens = "1"
+output_usd_per_million_tokens = "3"
+maximum_input_tokens_per_call = 8192
+maximum_output_tokens_per_call = 1024
+maximum_model_calls_per_cycle = 12

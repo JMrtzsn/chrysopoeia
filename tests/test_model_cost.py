@@ -9,8 +9,8 @@ from google.adk.models.llm_response import LlmResponse
 from google.adk.sessions.state import State
 from google.genai import types
 
-from chrysopoeia.agent import configure_operation, context_agent, reviewer_agent, root_agent, trader_agent
-from chrysopoeia.cost import CostPolicy, after_model_cost, before_model_cost, on_model_cost_error
+from chrysopoeia.agent import DEFAULT_HARNESS_CONFIG, configure_operation, context_agent, reviewer_agent, root_agent, trader_agent
+from chrysopoeia.cost import CostPolicy, after_model_cost, before_model_cost, configured_before_model_cost, on_model_cost_error
 from chrysopoeia.cost import release_model_call, reserve_model_call, settle_model_call
 
 
@@ -31,6 +31,11 @@ def configured_state(budget: float = 1.0) -> dict[str, object]:
             "maximum_model_calls_per_cycle": 2,
         },
     }
+
+
+async def configured_before(context: object, request: LlmRequest, *, now: datetime = NOW):
+    callback = configured_before_model_cost(configured_state()["model_cost_policy"])
+    return await callback(context, request, now=now)
 
 
 def context(state: object, invocation: str = "invocation-1", agent: str = "paper_market_trader") -> SimpleNamespace:
@@ -104,12 +109,34 @@ class ModelCostLedgerTests(unittest.TestCase):
 
 
 class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_policy_allows_exactly_one_root_bootstrap_call(self) -> None:
+        state: dict[str, object] = {}
+        callback = configured_before_model_cost(DEFAULT_HARNESS_CONFIG.cost_policy)
+
+        self.assertIsNone(
+            await callback(
+                context(state, agent="chrysopoeia"),
+                LlmRequest(model=DEFAULT_HARNESS_CONFIG.models.root),
+                now=NOW,
+            )
+        )
+        record = state["model_cost_ledger"][0]
+        self.assertEqual(record["estimated_reserved_usd"], "0.011264")
+        self.assertEqual(record["date"], "2026-08-20")
+        self.assertNotIn("operating_config", state)
+        denied = await callback(
+            context(state, "invocation-2", "chrysopoeia"),
+            LlmRequest(model=DEFAULT_HARNESS_CONFIG.models.root),
+            now=NOW,
+        )
+        self.assertEqual(denied.error_code, "MODEL_COST_POLICY_DENIED")
+
     async def test_before_callback_denies_unhashable_ledger_status(self) -> None:
         state = configured_state()
         reserve_model_call(state, "chrysopoeia", "gemini-flash-latest", 1, 1, "call-1", NOW)
         state["model_cost_ledger"][0]["status"] = []
 
-        denied = await before_model_cost(context(state), LlmRequest(model="gemini-flash-latest"), now=NOW)
+        denied = await configured_before(context(state), LlmRequest(model="gemini-flash-latest"))
 
         self.assertEqual(denied.error_code, "MODEL_COST_POLICY_DENIED")
         self.assertEqual(denied.error_message, "Model call denied: model cost ledger is invalid.")
@@ -117,37 +144,37 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_reservation_settles_after_adk_state_round_trip(self) -> None:
         state = RoundTripState(configured_state())
         callback = context(state, "invocation-copy")
-        self.assertIsNone(await before_model_cost(callback, LlmRequest(model="gemini-flash-latest"), now=NOW))
+        self.assertIsNone(await configured_before(callback, LlmRequest(model="gemini-flash-latest")))
         persisted = copy.deepcopy(dict(state))
         self.assertIsNone(await after_model_cost(context(persisted, "invocation-copy"), usage()))
         self.assertEqual(persisted["model_cost_ledger"][0]["status"], "completed")
         delta: dict[str, object] = {}
         adk_state = State(configured_state(), delta)
-        self.assertIsNone(await before_model_cost(context(adk_state, "invocation-adk"), LlmRequest(model="gemini-flash-latest"), now=NOW))
+        self.assertIsNone(await configured_before(context(adk_state, "invocation-adk"), LlmRequest(model="gemini-flash-latest")))
         self.assertIn("model_cost_ledger", delta)
 
     async def test_bootstrap_is_root_only_bounded_and_not_operating_config(self) -> None:
         state: dict[str, object] = {}
-        self.assertIsNone(await before_model_cost(context(state, agent="chrysopoeia"), LlmRequest(model="gemini-flash-latest"), now=NOW))
+        self.assertIsNone(await configured_before(context(state, agent="chrysopoeia"), LlmRequest(model="gemini-flash-latest")))
         self.assertNotIn("operating_config", state)
         self.assertEqual(state["model_cost_ledger"][0]["cycle_id"], "bootstrap:invocation-1")
         for callback in (context({}, agent="paper_market_trader"), context(state, "invocation-2", "chrysopoeia")):
-            denied = await before_model_cost(callback, LlmRequest(model="gemini-flash-latest"), now=NOW)
+            denied = await configured_before(callback, LlmRequest(model="gemini-flash-latest"))
             self.assertEqual(denied.error_code, "MODEL_COST_POLICY_DENIED")
 
     async def test_callbacks_deny_limits_settle_and_release_provider_error(self) -> None:
         state = configured_state()
         request = LlmRequest(model="gemini-flash-latest")
-        self.assertIsNone(await before_model_cost(context(state), request, now=NOW))
+        self.assertIsNone(await configured_before(context(state), request))
         self.assertEqual(request.config.max_output_tokens, 50)
         self.assertIsNone(await after_model_cost(context(state), usage()))
         self.assertEqual(state["model_cost_ledger"][0]["status"], "completed")
         denied_state = configured_state(0)
-        denied = await before_model_cost(context(denied_state), LlmRequest(model="gemini-flash-latest"), now=NOW)
+        denied = await configured_before(context(denied_state), LlmRequest(model="gemini-flash-latest"))
         self.assertEqual(denied.error_code, "MODEL_COST_POLICY_DENIED")
         self.assertNotIn("model_cost_ledger", denied_state)
         error_state = configured_state()
-        await before_model_cost(context(error_state), LlmRequest(model="gemini-flash-latest"), now=NOW)
+        await configured_before(context(error_state), LlmRequest(model="gemini-flash-latest"))
         self.assertIsNone(await on_model_cost_error(context(error_state), LlmRequest(), RuntimeError("secret")))
         self.assertEqual(error_state["model_cost_ledger"][0]["status"], "released")
 
@@ -156,7 +183,7 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
         for number, response in enumerate(responses):
             state = configured_state()
             callback = context(state, f"invocation-{number}")
-            await before_model_cost(callback, LlmRequest(model="gemini-flash-latest"), now=NOW)
+            await configured_before(callback, LlmRequest(model="gemini-flash-latest"))
             denied = await after_model_cost(callback, response)
             record = state["model_cost_ledger"][0]
             self.assertEqual(denied.error_code, "MODEL_COST_USAGE_INVALID")
@@ -166,7 +193,7 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
 
     def test_all_model_agents_are_gated_and_configuration_installs_default_policy(self) -> None:
         for agent in (root_agent, trader_agent, reviewer_agent, context_agent):
-            self.assertIs(agent.before_model_callback, before_model_cost)
+            self.assertEqual(agent.before_model_callback.func, before_model_cost)
             self.assertIs(agent.after_model_callback, after_model_cost)
             self.assertIs(agent.on_model_error_callback, on_model_cost_error)
             self.assertFalse(any("cost_policy" in str(tool).lower() for tool in agent.tools))

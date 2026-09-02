@@ -14,7 +14,7 @@ from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 from pydantic import SkipValidation
 
-from chrysopoeia.agent import reviewer_agent, trader_agent
+from chrysopoeia.agent import DEFAULT_HARNESS_CONFIG, reviewer_agent, trader_agent
 from tests.eval import paper_cycle_evaluation as evaluation
 
 
@@ -73,7 +73,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         calls: list[str] = []
         return (
             FakeLlm(
-                model="gemini-flash-latest",
+                model=DEFAULT_HARNESS_CONFIG.models.trader,
                 agent_name=trader_agent.name,
                 calls=calls,
                 response={
@@ -86,7 +86,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 },
             ),
             FakeLlm(
-                model="gemini-flash-latest",
+                model=DEFAULT_HARNESS_CONFIG.models.reviewer,
                 agent_name=reviewer_agent.name,
                 calls=calls,
                 response={
@@ -116,7 +116,10 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 self.assertEqual(calls, [trader_agent.name, reviewer_agent.name])
                 self.assertEqual(summary["status"], expected_status)
                 self.assertTrue(summary["pass"])
-                self.assertEqual(summary["reserved_ceiling_usd"], "0.022528")
+                self.assertEqual(
+                    summary["reserved_ceiling_usd"],
+                    str(evaluation.reserved_ceiling(model_calls=2)),
+                )
                 self.assertEqual(summary["ledger_statuses"], ["completed", "completed"])
                 self.assertLessEqual(
                     evaluation.Decimal(summary["actual_estimated_cost_usd"]),

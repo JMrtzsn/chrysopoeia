@@ -7,6 +7,7 @@ from chrysopoeia.polymarket import PolymarketError, load_market_snapshot
 
 
 NOW = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
+FEE = {"paper_fee_rate": 0.02, "paper_fee_source": "paper-assumption:flat-2pct-v1"}
 
 
 def market(**changes: object) -> bytes:
@@ -62,6 +63,7 @@ class PolymarketAdapterTests(unittest.TestCase):
             snapshot_id="snapshot-1",
             now=NOW,
             fetch=fixture_fetch(calls),
+            **FEE,
         )
 
         self.assertEqual(snapshot.market_id, "12345")
@@ -91,8 +93,8 @@ class PolymarketAdapterTests(unittest.TestCase):
             urls.append(url)
             return book() if "clob.polymarket.com" in url else market()
 
-        first = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch)
-        second = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch)
+        first = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+        second = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
 
         self.assertEqual(urls, [
             "https://gamma-api.polymarket.com/markets/12345",
@@ -101,16 +103,31 @@ class PolymarketAdapterTests(unittest.TestCase):
         self.assertEqual(first.snapshot_id, second.snapshot_id)
         self.assertTrue(first.snapshot_id.startswith("polymarket-"))
 
+    def test_configured_fee_is_recorded_and_invalid_fee_rejects_before_io(self) -> None:
+        snapshot = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=fixture_fetch(),
+            paper_fee_rate=0.03, paper_fee_source="paper-assumption:test-v1",
+        )
+        self.assertEqual((snapshot.fee_rate, snapshot.fee_source), (0.03, "paper-assumption:test-v1"))
+
+        for fee, source in ((True, "source"), (float("nan"), "source"), (1, "source"), (0.1, "paper-assumption:no-fee-v1"), (0.1, "x" * 201)):
+            with self.subTest(fee=fee, source=source), self.assertRaises(PolymarketError):
+                load_market_snapshot(
+                    "12345", 1_000, 0, 0, now=NOW,
+                    fetch=lambda *_: self.fail("fetch must not be called"),
+                    paper_fee_rate=fee, paper_fee_source=source,
+                )
+
     def test_invalid_inputs_reject_before_io(self) -> None:
         def unexpected_fetch(url: str, timeout: float, max_bytes: int) -> bytes:
             self.fail("fetch must not be called")
 
         for value in ("", "../markets", "abc?x=1", "https://evil.example/event/x", "https://polymarket.com/", "https://polymarket.com:bad/event/x", "https://user:pass@polymarket.com/event/x"):
             with self.subTest(value=value), self.assertRaises(PolymarketError):
-                load_market_snapshot(value, 1_000, 0, 0, now=NOW, fetch=unexpected_fetch)
+                load_market_snapshot(value, 1_000, 0, 0, now=NOW, fetch=unexpected_fetch, **FEE)
 
         with self.assertRaises(PolymarketError):
-            load_market_snapshot("12345", 1_000, 0, 0, snapshot_id="", now=NOW, fetch=fixture_fetch())
+            load_market_snapshot("12345", 1_000, 0, 0, snapshot_id="", now=NOW, fetch=fixture_fetch(), **FEE)
 
     def test_invalid_market_responses_are_rejected(self) -> None:
         cases = (
@@ -130,7 +147,7 @@ class PolymarketAdapterTests(unittest.TestCase):
         )
         for body, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(PolymarketError, message):
-                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=lambda *_: body)
+                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=lambda *_: body, **FEE)
 
     def test_invalid_books_are_rejected_safely(self) -> None:
         cases = (
@@ -147,16 +164,16 @@ class PolymarketAdapterTests(unittest.TestCase):
             def fetch(url: str, *_: object, body: bytes = body) -> bytes:
                 return body if "clob.polymarket.com" in url else market()
             with self.subTest(message=message), self.assertRaisesRegex(PolymarketError, message):
-                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch)
+                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
 
         with self.assertRaisesRegex(PolymarketError, "too large"):
             def oversized(url: str, *_: object) -> bytes:
                 return b"x" * 101 if "clob.polymarket.com" in url else market()
-            load_market_snapshot("12345", 1_000, 0, 0, now=NOW, max_response_bytes=100, fetch=oversized)
+            load_market_snapshot("12345", 1_000, 0, 0, now=NOW, max_response_bytes=100, fetch=oversized, **FEE)
 
     def test_oversized_and_network_failures_are_safe(self) -> None:
         with self.assertRaisesRegex(PolymarketError, "too large"):
-            load_market_snapshot("12345", 1_000, 0, 0, now=NOW, max_response_bytes=20, fetch=fixture_fetch())
+            load_market_snapshot("12345", 1_000, 0, 0, now=NOW, max_response_bytes=20, fetch=fixture_fetch(), **FEE)
 
         secret = "super-secret-response"
         for failure in (TimeoutError(secret), URLError(secret)):
@@ -164,7 +181,7 @@ class PolymarketAdapterTests(unittest.TestCase):
                 raise failure
 
             with self.subTest(failure=failure), self.assertRaises(PolymarketError) as raised:
-                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fail)
+                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fail, **FEE)
             self.assertNotIn(secret, str(raised.exception))
             self.assertIsNone(raised.exception.__cause__)
 

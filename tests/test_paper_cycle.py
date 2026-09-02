@@ -43,7 +43,8 @@ from chrysopoeia.paper_cycle import (
     finalize_paper_cycle,
     ReviewerInput,
 )
-from chrysopoeia.cost import DEFAULT_COST_POLICY, after_model_cost, before_model_cost, on_model_cost_error
+from chrysopoeia.agent import DEFAULT_HARNESS_CONFIG
+from chrysopoeia.cost import after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 
@@ -417,7 +418,7 @@ class PaperCycleTests(unittest.TestCase):
         state = {
             "operating_config": asdict(OperatingConfig()),
             "market_snapshot": asdict(rich_snapshot()),
-            "model_cost_policy": DEFAULT_COST_POLICY.copy(),
+            "model_cost_policy": DEFAULT_HARNESS_CONFIG.cost_policy,
             "cycle_id": "cycle-1",
         }
         authoritative = copy.deepcopy(state)
@@ -541,11 +542,11 @@ class PaperCycleTests(unittest.TestCase):
             for forbidden in ("paper_execute", "run_decision_cycle", "check_risk", "finalize_paper_cycle"):
                 self.assertNotIn(forbidden, tools)
         for agent in (trader_agent, reviewer_agent, root_agent):
-            self.assertIs(agent.before_model_callback, before_model_cost)
+            self.assertEqual(agent.before_model_callback.func, before_model_cost)
             self.assertIs(agent.after_model_callback, after_model_cost)
             self.assertIs(agent.on_model_error_callback, on_model_cost_error)
         from chrysopoeia.agent import context_agent
-        self.assertIs(context_agent.before_model_callback, before_model_cost)
+        self.assertEqual(context_agent.before_model_callback.func, before_model_cost)
         self.assertIs(context_agent.after_model_callback, after_model_cost)
         self.assertIs(context_agent.on_model_error_callback, on_model_cost_error)
         self.assertFalse(hasattr(paper_cycle_workflow, "before_model_callback"))

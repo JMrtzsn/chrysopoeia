@@ -46,9 +46,9 @@ truth for paper decisions.
 
 The manual Vertex behavior evaluation remains explicitly gated by
 `RUN_PAPER_CYCLE_EVALUATION=1`, Vertex ADK configuration, project, and location.
-It rejects API-key credentials for that path, makes at most two model calls, and
-reserves at most `$0.011264` for trader abstention or `$0.022528` when review is
-needed. These are evaluation ceilings, not general operating guarantees.
+It rejects API-key credentials for that path and makes at most two model calls.
+Its reservation ceilings are derived from `chrysopoeia.toml`, not separate
+operating guarantees.
 
 ## Release Evidence
 

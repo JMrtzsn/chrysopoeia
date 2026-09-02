@@ -13,6 +13,7 @@ from google.adk.workflow import RetryConfig, Workflow
 from google.genai import types
 
 from chrysopoeia.agent import (
+    DEFAULT_HARNESS_CONFIG,
     complete_abstention,
     complete_paper_cycle,
     paper_cycle_workflow,
@@ -47,21 +48,24 @@ SNAPSHOT_ID = "paper-eval-snapshot-1"
 MARKET_ID = "paper-eval-market-1"
 EVIDENCE_ID = f"market_snapshot:{SNAPSHOT_ID}"
 AGENT_NAMES = (trader_agent.name, reviewer_agent.name)
-COST_POLICY: dict[str, object] = {
-    "version": "paper-cycle-evaluation-2026-09-v1",
-    "model": "gemini-flash-latest",
-    "input_usd_per_million_tokens": "1",
-    "output_usd_per_million_tokens": "3",
-    "maximum_input_tokens_per_call": 8_192,
-    "maximum_output_tokens_per_call": 1_024,
-    "maximum_model_calls_per_cycle": 2,
-}
-PER_CALL_RESERVED_ESTIMATE_USD = (
-    Decimal("1") * 8_192 + Decimal("3") * 1_024
-) / Decimal(1_000_000)
-MAX_RESERVED_ESTIMATE_USD = 2 * PER_CALL_RESERVED_ESTIMATE_USD
-assert PER_CALL_RESERVED_ESTIMATE_USD == Decimal("0.011264")
-assert MAX_RESERVED_ESTIMATE_USD == Decimal("0.022528")
+COST_POLICY = DEFAULT_HARNESS_CONFIG.cost_policy
+
+
+def reserved_ceiling(config=DEFAULT_HARNESS_CONFIG, *, model_calls: int = 1) -> Decimal:
+    return (
+        model_calls
+        * (
+            config.cost.input_usd_per_million_tokens
+            * config.cost.maximum_input_tokens_per_call
+            + config.cost.output_usd_per_million_tokens
+            * config.cost.maximum_output_tokens_per_call
+        )
+        / Decimal(1_000_000)
+    )
+
+
+PER_CALL_RESERVED_ESTIMATE_USD = reserved_ceiling()
+MAX_RESERVED_ESTIMATE_USD = reserved_ceiling(model_calls=2)
 SUMMARY_FIELDS = {
     "status",
     "reason",
@@ -104,8 +108,8 @@ def setup_state() -> dict[str, object]:
                 source_url="https://polymarket.com/event/fixed-evaluation-event",
                 yes_token_id="fixed-evaluation-yes-token",
                 asks=(BookLevel(0.4, 25), BookLevel(0.42, 25)),
-                fee_rate=0.02,
-                fee_source="paper-assumption:flat-2pct-v1",
+                fee_rate=DEFAULT_HARNESS_CONFIG.venue.paper_fee_rate,
+                fee_source=DEFAULT_HARNESS_CONFIG.venue.paper_fee_source,
                 book_captured_at="2026-09-01T00:00:00+00:00",
             )
         ),
@@ -324,10 +328,14 @@ def grade(
             record.get("estimated_reserved_usd") != str(PER_CALL_RESERVED_ESTIMATE_USD)
             or record.get("cycle_id") != expected["cycle_id"]
             or record.get("model") != COST_POLICY["model"]
-            or record.get("input_token_ceiling") != 8_192
-            or record.get("output_token_ceiling") != 1_024
-            or record.get("input_usd_per_million_tokens") != "1"
-            or record.get("output_usd_per_million_tokens") != "3"
+            or record.get("input_token_ceiling")
+            != DEFAULT_HARNESS_CONFIG.cost.maximum_input_tokens_per_call
+            or record.get("output_token_ceiling")
+            != DEFAULT_HARNESS_CONFIG.cost.maximum_output_tokens_per_call
+            or record.get("input_usd_per_million_tokens")
+            != str(DEFAULT_HARNESS_CONFIG.cost.input_usd_per_million_tokens)
+            or record.get("output_usd_per_million_tokens")
+            != str(DEFAULT_HARNESS_CONFIG.cost.output_usd_per_million_tokens)
         ):
             raise ValueError("paper-cycle reservation differs from its fixed ceiling")
         actual_input = record.get("actual_input_tokens")
@@ -335,10 +343,14 @@ def grade(
         if (
             not isinstance(actual_input, int)
             or isinstance(actual_input, bool)
-            or not 0 <= actual_input <= 8_192
+            or not 0
+            <= actual_input
+            <= DEFAULT_HARNESS_CONFIG.cost.maximum_input_tokens_per_call
             or not isinstance(actual_output, int)
             or isinstance(actual_output, bool)
-            or not 0 <= actual_output <= 1_024
+            or not 0
+            <= actual_output
+            <= DEFAULT_HARNESS_CONFIG.cost.maximum_output_tokens_per_call
         ):
             raise ValueError("paper-cycle actual usage exceeded its reservation")
         recorded_cost = _cost(record.get("actual_cost_usd"))

@@ -11,7 +11,8 @@ class PaperCycleBoundaryTests(unittest.TestCase):
                 sys.executable,
                 "-c",
                 "import json, sys; import chrysopoeia.paper_cycle; "
-                "print(json.dumps(sorted(name for name in sys.modules if name == 'google.adk' or name.startswith('google.adk.'))))",
+                "print(json.dumps(sorted(name for name in sys.modules if name == 'chrysopoeia.configuration' "
+                "or name == 'google.adk' or name.startswith('google.adk.'))))",
             ],
             check=True,
             capture_output=True,

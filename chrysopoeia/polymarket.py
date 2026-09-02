@@ -17,8 +17,6 @@ CLOB_HOST = "clob.polymarket.com"
 WEB_HOSTS = {"polymarket.com", "www.polymarket.com"}
 MAX_AGE = timedelta(minutes=5)
 MAX_BOOK_LEVELS = 50
-PAPER_FEE_RATE = 0.02
-PAPER_FEE_SOURCE = "paper-assumption:flat-2pct-v1"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 256_000
 Fetch = Callable[[str, float, int], bytes]
@@ -166,6 +164,8 @@ def load_market_snapshot(
     timeout: float = DEFAULT_TIMEOUT,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     fetch: Fetch = _fetch,
+    paper_fee_rate: float,
+    paper_fee_source: str,
 ) -> MarketSnapshot:
     """Load metadata and YES depth; identity excludes capture time but includes source timestamps, levels, fee assumption, and account state."""
     endpoint, expected, uses_slug = _endpoint(market)
@@ -178,6 +178,15 @@ def load_market_snapshot(
         raise PolymarketError("Polymarket adapter current time must include a UTC offset")
     if snapshot_id is not None and (not isinstance(snapshot_id, str) or not snapshot_id.strip()):
         raise PolymarketError("Polymarket adapter snapshot ID must be a non-blank string")
+    if not isinstance(paper_fee_source, str) or len(paper_fee_source) > 200:
+        raise PolymarketError("Polymarket adapter paper fee is invalid")
+    try:
+        MarketSnapshot(
+            "validation", "validation", 0.5, bankroll, market_exposure,
+            total_exposure, fee_rate=paper_fee_rate, fee_source=paper_fee_source,
+        )
+    except (TypeError, ValueError):
+        raise PolymarketError("Polymarket adapter paper fee is invalid") from None
 
     data = _fetch_json(endpoint, float(timeout), max_response_bytes, fetch)
 
@@ -238,7 +247,7 @@ def load_market_snapshot(
         "end": end.isoformat(), "updated": updated.isoformat(), "source_url": source_url,
         "yes_token": yes_token, "book_time": book_time.isoformat(),
         "asks": [(level.price, level.size) for level in asks],
-        "fee_rate": PAPER_FEE_RATE, "fee_source": PAPER_FEE_SOURCE,
+        "fee_rate": paper_fee_rate, "fee_source": paper_fee_source,
         "bankroll": bankroll, "market_exposure": market_exposure,
         "total_exposure": total_exposure,
     }, sort_keys=True, separators=(",", ":"))
@@ -248,7 +257,7 @@ def load_market_snapshot(
             snapshot_id if snapshot_id is not None else generated_id,
             market_id, price, bankroll, market_exposure, total_exposure,
             question, rules, end.isoformat(), current_utc.isoformat(), source_url,
-            yes_token, asks, PAPER_FEE_RATE, PAPER_FEE_SOURCE, book_time.isoformat(),
+            yes_token, asks, paper_fee_rate, paper_fee_source, book_time.isoformat(),
         )
     except ValueError as exc:
         raise PolymarketError(f"Polymarket adapter cannot create snapshot: {exc}") from exc

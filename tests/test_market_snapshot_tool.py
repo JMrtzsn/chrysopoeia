@@ -22,8 +22,9 @@ class MarketSnapshotToolTests(unittest.TestCase):
         context = SimpleNamespace(state=state)
         calls: list[tuple[object, ...]] = []
 
-        def load(market: str, bankroll: float, market_exposure: float, total_exposure: float) -> MarketSnapshot:
+        def load(market: str, bankroll: float, market_exposure: float, total_exposure: float, **fee: object) -> MarketSnapshot:
             calls.append((market, bankroll, market_exposure, total_exposure))
+            self.assertEqual(fee, {"paper_fee_rate": 0.02, "paper_fee_source": "paper-assumption:flat-2pct-v1"})
             return MarketSnapshot("snapshot-1", "12345", 0.42, bankroll, market_exposure, total_exposure)
 
         with patch("chrysopoeia.agent.load_market_snapshot", load):
@@ -38,7 +39,7 @@ class MarketSnapshotToolTests(unittest.TestCase):
     def test_missing_exposure_state_is_explicit_first_cycle_zero(self) -> None:
         context = SimpleNamespace(state={"operating_config": self.configuration.copy()})
 
-        def load(market: str, bankroll: float, market_exposure: float, total_exposure: float) -> MarketSnapshot:
+        def load(market: str, bankroll: float, market_exposure: float, total_exposure: float, **_: object) -> MarketSnapshot:
             self.assertEqual((market_exposure, total_exposure), (0, 0))
             return MarketSnapshot("snapshot-1", "12345", 0.42, bankroll, market_exposure, total_exposure)
 

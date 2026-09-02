@@ -67,6 +67,12 @@ Python 3.10 or later and `uv` are required. Configure Gemini for ADK with either
 the Developer API or Vertex AI environment supported by ADK; do not put secrets
 in source, prompts, session state, or logs.
 
+`chrysopoeia.toml` is the checked-in operator configuration authority for the
+current `adk` runtime, paper mode, public Polymarket adapter, four ADK model
+roles, paper-fee assumption, and single-model pricing ceilings. User-controlled
+`daily_cloud_cost_budget` remains operating configuration and is not duplicated
+there. Unknown keys and unsupported adapters or modes fail closed.
+
 ```sh
 uv sync
 uv run python -m unittest discover

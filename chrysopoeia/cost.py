@@ -2,6 +2,8 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from functools import partial
+from types import MappingProxyType
 
 from google.adk.agents.context import Context
 from google.adk.models.llm_request import LlmRequest
@@ -14,23 +16,6 @@ from chrysopoeia.trading import OperatingConfig
 LEDGER_KEY = "model_cost_ledger"
 MAX_TOKENS = 100_000_000
 MILLION = Decimal(1_000_000)
-DEFAULT_COST_POLICY: dict[str, object] = {
-    "version": "project-estimate-2026-08-v1",
-    "model": "gemini-flash-latest",
-    "input_usd_per_million_tokens": "1",
-    "output_usd_per_million_tokens": "3",
-    "maximum_input_tokens_per_call": 8_192,
-    "maximum_output_tokens_per_call": 1_024,
-    "maximum_model_calls_per_cycle": 12,
-}
-BOOTSTRAP_COST_POLICY: dict[str, object] = {
-    **DEFAULT_COST_POLICY,
-    "version": "onboarding-bootstrap-2026-08-v1",
-    "maximum_input_tokens_per_call": 2_048,
-    "maximum_output_tokens_per_call": 512,
-    "maximum_model_calls_per_cycle": 1,
-}
-BOOTSTRAP_DAILY_BUDGET = Decimal("0.01")
 StateMap = MutableMapping[str, object] | State
 
 
@@ -123,8 +108,13 @@ def _records(state: StateMap) -> list[dict[str, object]]:
 
 def _budget(state: StateMap, policy: CostPolicy) -> Decimal:
     value = state.get("operating_config")
-    if value is None and policy.version == BOOTSTRAP_COST_POLICY["version"]:
-        return BOOTSTRAP_DAILY_BUDGET
+    if value is None:
+        return (
+            policy.input_usd_per_million_tokens
+            * policy.maximum_input_tokens_per_call
+            + policy.output_usd_per_million_tokens
+            * policy.maximum_output_tokens_per_call
+        ) / MILLION
     if not isinstance(value, Mapping):
         raise ValueError("operating configuration is missing or invalid")
     try:
@@ -141,7 +131,7 @@ def reserve_model_call(
     agent_name, model, call_id = (_identifier(agent_name, "agent name"), _identifier(model, "model"), _identifier(call_id, "call ID"))
     invocation_id = _identifier(invocation_id or call_id, "invocation ID")
     cycle_id = _identifier(state.get("cycle_id"), "cycle ID")
-    policy, records = CostPolicy.from_mapping(state.get("model_cost_policy", DEFAULT_COST_POLICY)), _records(state)
+    policy, records = CostPolicy.from_mapping(state.get("model_cost_policy")), _records(state)
     if any(record["call_id"] == call_id for record in records):
         raise ValueError("model call ID already exists")
     if model != policy.model:
@@ -234,7 +224,8 @@ def _settle_violation_at_ceiling(state: StateMap, record: dict[str, object]) -> 
     state[LEDGER_KEY] = _records(state)
 
 
-async def before_model_cost(callback_context: Context, llm_request: LlmRequest, *, now: datetime | None = None) -> LlmResponse | None:
+async def before_model_cost(callback_context: Context, llm_request: LlmRequest, *, now: datetime | None = None,
+                            default_policy: Mapping[str, object]) -> LlmResponse | None:
     try:
         state = _state(getattr(callback_context, "state", None))
         agent_name = _identifier(getattr(callback_context, "agent_name", None), "agent name")
@@ -242,9 +233,9 @@ async def before_model_cost(callback_context: Context, llm_request: LlmRequest, 
         if "operating_config" not in state:
             if agent_name != "chrysopoeia" or _records(state):
                 raise ValueError("complete root onboarding before any additional model call")
-            state["model_cost_policy"] = BOOTSTRAP_COST_POLICY.copy()
+            state["model_cost_policy"] = dict(default_policy)
             state["cycle_id"] = f"bootstrap:{invocation_id}"
-        policy = CostPolicy.from_mapping(state.get("model_cost_policy", DEFAULT_COST_POLICY))
+        policy = CostPolicy.from_mapping(state.get("model_cost_policy", default_policy))
         requested_input = llm_request.cacheable_contents_token_count
         requested_output = llm_request.config.max_output_tokens
         requested_input = policy.maximum_input_tokens_per_call if requested_input is None else _tokens(requested_input, "requested input token ceiling")
@@ -290,3 +281,9 @@ async def on_model_cost_error(callback_context: Context, llm_request: LlmRequest
         return None
     except ValueError:
         return _denied("MODEL_COST_RELEASE_FAILED", "Model failure could not release its cost reservation; the reservation remains fail-closed.")
+
+
+def configured_before_model_cost(policy: Mapping[str, object]):
+    """Bind immutable operator pricing to one independently built agent set."""
+    configured = MappingProxyType(dict(policy))
+    return partial(before_model_cost, default_policy=configured)
