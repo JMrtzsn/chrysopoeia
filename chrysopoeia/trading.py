@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from hashlib import sha256
+import json
 from math import isfinite
 import re
 from urllib.parse import urlparse
@@ -175,6 +177,27 @@ class MarketSnapshot:
             validate_polymarket_event_url(self.source_url)
 
 
+def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
+    """Return the canonical market-data identity, excluding capture and account state."""
+    identity = json.dumps(
+        {
+            "market_id": snapshot.market_id,
+            "price": float(snapshot.price),
+            "question": snapshot.question,
+            "resolution_rules": snapshot.resolution_rules,
+            "end_time": snapshot.end_time,
+            "source_url": snapshot.source_url,
+            "yes_token_id": snapshot.yes_token_id,
+            "asks": [(float(level.price), float(level.size)) for level in snapshot.asks],
+            "fee_rate": float(snapshot.fee_rate),
+            "fee_source": snapshot.fee_source,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "polymarket-" + sha256(identity.encode()).hexdigest()[:24]
+
+
 @dataclass(frozen=True)
 class Proposal:
     snapshot_id: str
@@ -264,6 +287,8 @@ def check_risk(
     review: Review,
     quote: SimulatedFill | None = None,
     quote_error: str | None = None,
+    maximum_market_exposure: float = MAXIMUM_MARKET_EXPOSURE,
+    maximum_total_exposure: float = MAXIMUM_TOTAL_EXPOSURE,
 ) -> RiskDecision:
     identities = {(snapshot.snapshot_id, snapshot.market_id), (proposal.snapshot_id, proposal.market_id), (review.snapshot_id, review.market_id)}
     if len(identities) != 1:
@@ -278,9 +303,9 @@ def check_risk(
         quoted = quote or _quote(snapshot, proposal)
     except ValueError as exc:
         return RiskDecision(False, str(exc))
-    if snapshot.market_exposure + quoted.total_cost > snapshot.bankroll * MAXIMUM_MARKET_EXPOSURE:
+    if snapshot.market_exposure + quoted.total_cost > snapshot.bankroll * maximum_market_exposure:
         return RiskDecision(False, "per-market exposure limit exceeded")
-    if snapshot.total_exposure + quoted.total_cost > snapshot.bankroll * MAXIMUM_TOTAL_EXPOSURE:
+    if snapshot.total_exposure + quoted.total_cost > snapshot.bankroll * maximum_total_exposure:
         return RiskDecision(False, "total exposure limit exceeded")
     return RiskDecision(True, "approved by review and deterministic risk policy")
 
@@ -290,7 +315,12 @@ def paper_execute(snapshot: MarketSnapshot, proposal: Proposal) -> SimulatedFill
     return _quote(snapshot, proposal)
 
 
-def run_decision_cycle(snapshot: MarketSnapshot, proposal: Proposal, review: Review) -> CycleReport:
+def run_decision_cycle(
+    snapshot: MarketSnapshot,
+    proposal: Proposal,
+    review: Review,
+    operating: OperatingConfig | None = None,
+) -> CycleReport:
     """Run proposal, review, risk, paper execution, and reporting in order."""
     quote = None
     quote_error = None
@@ -299,7 +329,16 @@ def run_decision_cycle(snapshot: MarketSnapshot, proposal: Proposal, review: Rev
             quote = _quote(snapshot, proposal)
         except ValueError as exc:
             quote_error = str(exc)
-    decision = check_risk(snapshot, proposal, review, quote, quote_error)
+    limits = operating or OperatingConfig(bankroll=snapshot.bankroll)
+    decision = check_risk(
+        snapshot,
+        proposal,
+        review,
+        quote,
+        quote_error,
+        limits.maximum_market_exposure,
+        limits.maximum_total_exposure,
+    )
     fill = quote if decision.allowed else None
     outcome = (
         f"filled VWAP {fill.price:g}, gross {fill.amount:g}, fee {fill.fee:g}, "

@@ -104,6 +104,35 @@ class PolymarketAdapterTests(unittest.TestCase):
         self.assertEqual(first.snapshot_id, second.snapshot_id)
         self.assertTrue(first.snapshot_id.startswith("polymarket-"))
 
+    def test_snapshot_identity_excludes_account_state_but_includes_market_data(self) -> None:
+        baseline = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fixture_fetch(), **FEE)
+        exposed = load_market_snapshot("12345", 9_000, 10, 20, now=NOW, fetch=fixture_fetch(), **FEE)
+        changed_fee = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=fixture_fetch(),
+            paper_fee_rate=0.03, paper_fee_source="paper-assumption:test-v1",
+        )
+
+        self.assertEqual(baseline.snapshot_id, exposed.snapshot_id)
+        self.assertNotEqual(baseline.snapshot_id, changed_fee.snapshot_id)
+
+        changed_book = json.loads(book())
+        changed_book["asks"][0]["size"] = "21"
+
+        def changed_book_fetch(url: str, *_: object) -> bytes:
+            return json.dumps(changed_book).encode() if "clob" in url else market()
+
+        changed_depth = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=changed_book_fetch, **FEE
+        )
+        def changed_metadata_fetch(url: str, *_: object) -> bytes:
+            return book() if "clob" in url else market(question="Will it drizzle?")
+
+        changed_metadata = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=changed_metadata_fetch, **FEE
+        )
+        self.assertNotEqual(baseline.snapshot_id, changed_depth.snapshot_id)
+        self.assertNotEqual(baseline.snapshot_id, changed_metadata.snapshot_id)
+
     def test_identifier_uses_market_slug_when_event_slug_is_absent(self) -> None:
         live_schema = json.loads(market(id="559651", slug="xi-jinping-out-before-2027"))
         live_schema.pop("eventSlug")

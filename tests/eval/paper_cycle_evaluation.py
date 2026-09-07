@@ -7,23 +7,18 @@ from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 
 from google.adk.models import BaseLlm, Gemini
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.workflow import RetryConfig, Workflow
-from google.genai import types
+from google.adk.workflow import Workflow
 
 from chrysopoeia.agent import (
     DEFAULT_HARNESS_CONFIG,
-    complete_abstention,
-    complete_paper_cycle,
-    paper_cycle_workflow,
-    prepare_reviewer_input,
-    prepare_trader_input,
     reviewer_agent,
-    route_proposal,
     trader_agent,
 )
 from chrysopoeia.cost import LEDGER_KEY, CostPolicy
+from chrysopoeia.cycle_runner import (
+    build_cycle_workflow,
+    run_paper_cycle_state,
+)
 from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
@@ -33,7 +28,6 @@ from chrysopoeia.paper_cycle import (
     REVIEW_KEY,
     EvidenceRecord,
     PaperCycleReportOutput,
-    PaperCycleRequest,
     ProposalOutput,
     ReviewOutput,
 )
@@ -84,7 +78,7 @@ _ALLOWED_REJECTION_REASONS = {
     "per-market exposure limit exceeded",
     "total exposure limit exceeded",
 }
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("chrysopoeia.cycle_runner")
 
 
 def setup_state() -> dict[str, object]:
@@ -92,7 +86,7 @@ def setup_state() -> dict[str, object]:
     return {
         "operating_config": asdict(OperatingConfig()),
         "model_cost_policy": COST_POLICY.copy(),
-        "cycle_id": "paper-cycle-evaluation-1",
+        "cycle_id": f"paper-cycle:{SNAPSHOT_ID}",
         "market_snapshot": asdict(
             MarketSnapshot(
                 SNAPSHOT_ID,
@@ -120,44 +114,12 @@ def build_workflow(
     trader_model: BaseLlm | str | None = None,
     reviewer_model: BaseLlm | str | None = None,
 ) -> Workflow:
-    """Build a fresh two-model paper workflow with no research or execution tools."""
-    no_retry = RetryConfig(max_attempts=1)
-    model_config = types.GenerateContentConfig(
-        http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1))
-    )
-    trader = trader_agent.clone(
-        update={
-            "model": trader_model or trader_agent.model,
-            "tools": [],
-            "retry_config": no_retry,
-            "generate_content_config": model_config,
-        }
-    )
-    reviewer = reviewer_agent.clone(
-        update={
-            "model": reviewer_model or reviewer_agent.model,
-            "tools": [],
-            "retry_config": no_retry,
-            "generate_content_config": model_config,
-        }
-    )
-    return Workflow(
-        name=paper_cycle_workflow.name,
-        description=paper_cycle_workflow.description,
-        input_schema=PaperCycleRequest,
-        output_schema=paper_cycle_workflow.output_schema,
-        edges=[
-            ("START", prepare_trader_input),
-            (prepare_trader_input, trader),
-            (trader, route_proposal),
-            (
-                route_proposal,
-                {"trade": prepare_reviewer_input, "abstain": complete_abstention},
-            ),
-            (prepare_reviewer_input, reviewer),
-            (reviewer, complete_paper_cycle),
-        ],
-    )
+    """Build the production two-model workflow for evaluation."""
+    return build_cycle_workflow(
+        DEFAULT_HARNESS_CONFIG,
+        trader_model or trader_agent.model,
+        reviewer_model or reviewer_agent.model,
+    )[0]
 
 
 async def run_cycle(
@@ -166,63 +128,16 @@ async def run_cycle(
     *,
     owned_models: Sequence[BaseLlm] = (),
 ) -> tuple[dict[str, object], list[str], list[str]]:
-    """Run one fresh seeded paper workflow and return its state and tool boundary."""
-    primary_error: BaseException | None = None
-    try:
-        workflow = build_workflow(trader_model, reviewer_model)
-        sessions = InMemorySessionService()
-        await sessions.create_session(
-            app_name="paper_cycle_evaluation",
-            user_id="evaluation",
-            session_id="paper-cycle",
-            state=setup_state(),
-        )
-        runner = Runner(
-            app_name="paper_cycle_evaluation", node=workflow, session_service=sessions
-        )
-        function_calls: list[str] = []
-        async for event in runner.run_async(
-            user_id="evaluation",
-            session_id="paper-cycle",
-            new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=PaperCycleRequest().model_dump_json())],
-            ),
-        ):
-            for part in (
-                event.content.parts if event.content and event.content.parts else []
-            ):
-                if part.function_call:
-                    function_calls.append(part.function_call.name or "")
-        session = await sessions.get_session(
-            app_name="paper_cycle_evaluation",
-            user_id="evaluation",
-            session_id="paper-cycle",
-        )
-        if session is None:
-            raise ValueError("paper-cycle evaluation session is missing")
-        agents = [node for node in workflow.graph.nodes if node.name in AGENT_NAMES]
-        available_tools = [
-            name
-            for agent in agents
-            for tool in agent.tools
-            if (name := getattr(tool, "name", None)) is not None
-        ]
-        return dict(session.state), function_calls, available_tools
-    except BaseException as exc:
-        primary_error = exc
-        raise
-    finally:
-        cleanup_errors: list[BaseException] = []
-        for model in owned_models:
-            try:
-                await _close_owned_model(model)
-            except BaseException as exc:
-                cleanup_errors.append(exc)
-        if cleanup_errors:
-            if primary_error is None:
-                raise cleanup_errors[0]
-            logger.error("Model cleanup also failed; preserving the workflow error")
+    """Run the production cycle runner over the fixed evaluation fixture."""
+    state = setup_state()
+    return await run_paper_cycle_state(
+        DEFAULT_HARNESS_CONFIG,
+        MarketSnapshot(**state["market_snapshot"]),
+        OperatingConfig(**state["operating_config"]),
+        trader_model or trader_agent.model,
+        reviewer_model or reviewer_agent.model,
+        owned_models=owned_models,
+    )
 
 
 async def _close_owned_model(model: BaseLlm) -> None:

@@ -104,6 +104,7 @@ uv run python -c "import chrysopoeia.agent"
 uv run chrysopoeia validate --json
 uv run chrysopoeia inspect
 uv run chrysopoeia capture 12345 --output snapshot.json
+uv run chrysopoeia cycle --snapshot snapshot.json
 uv run adk run chrysopoeia
 ```
 
@@ -120,6 +121,17 @@ existing path. The record includes market metadata, bounded YES asks, and paper
 fee provenance, but excludes the neutral bankroll/exposure adapter inputs:
 capture creates no operating session and claims no portfolio authority. A local
 snapshot file is not an authoritative or durable store.
+
+`chrysopoeia cycle --snapshot FILE [--config PATH] [--bankroll 1000]
+[--maximum-market-exposure 0.01] [--maximum-total-exposure 0.10]
+[--maximum-loss 100] [--daily-cloud-cost-budget 5] [--market-exposure 0]
+[--total-exposure 0] [--output PATH]` runs the actual bounded trader/reviewer ADK
+workflow over that local capture without market HTTP. The optional output file
+matches stdout and is created without overwrite. This is a first-cycle command:
+current market and total exposure default to zero, so operators with existing
+exposure must provide both exposure flags. Its reported maximum reserved cost is
+the two-call ceiling, not a guarantee that both calls occur or that the full
+amount is spent.
 
 The ADK web UI is an optional development interface:
 

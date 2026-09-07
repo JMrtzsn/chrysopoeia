@@ -1,6 +1,8 @@
 import argparse
+import asyncio
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -12,9 +14,30 @@ from chrysopoeia.configuration import (
 )
 from chrysopoeia.polymarket import _fetch as polymarket_fetch
 from chrysopoeia.polymarket import load_market_snapshot
-from chrysopoeia.trading import MarketSnapshot
+from chrysopoeia.trading import (
+    BookLevel,
+    MarketSnapshot,
+    OperatingConfig,
+    market_snapshot_identity,
+)
 
 DEFAULT_CONFIG = Path(__file__).parents[1] / "chrysopoeia.toml"
+MAX_SNAPSHOT_BYTES = 512 * 1024
+_CAPTURE_KEYS = {"schema_version", "record_type", "venue", "mode", "snapshot"}
+_SNAPSHOT_KEYS = {
+    "snapshot_id",
+    "market_id",
+    "price",
+    "question",
+    "resolution_rules",
+    "end_time",
+    "captured_at",
+    "source_url",
+    "yes_token_id",
+    "asks",
+    "fee_rate",
+    "fee_source",
+}
 
 
 def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, object]:
@@ -99,6 +122,126 @@ def serialize_market_snapshot(snapshot: MarketSnapshot) -> dict[str, object]:
     }
 
 
+def _bounded_capture(path: Path) -> dict[str, object]:
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        details = os.fstat(descriptor)
+        if not stat.S_ISREG(details.st_mode) or details.st_size > MAX_SNAPSHOT_BYTES:
+            raise ValueError("invalid snapshot")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            body = source.read(MAX_SNAPSHOT_BYTES + 1)
+    except (OSError, ValueError):
+        raise ValueError("invalid snapshot") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(body) > MAX_SNAPSHOT_BYTES:
+        raise ValueError("invalid snapshot")
+    try:
+
+        def object_value(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            result = dict(pairs)
+            if len(result) != len(pairs):
+                raise ValueError
+            return result
+
+        value = json.loads(
+            body.decode("utf-8"),
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+            object_pairs_hook=object_value,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
+        raise ValueError("invalid snapshot") from None
+    if not isinstance(value, dict):
+        raise ValueError("invalid snapshot")
+    return value
+
+
+def _capture_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 10_000:
+        raise ValueError("invalid snapshot")
+    return value
+
+
+def _capture_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("invalid snapshot")
+    try:
+        result = float(value)
+    except OverflowError:
+        raise ValueError("invalid snapshot") from None
+    if not (result == result and abs(result) != float("inf")):
+        raise ValueError("invalid snapshot")
+    return result
+
+
+def load_capture_snapshot(
+    path: Path,
+    config: HarnessConfig,
+    operating: OperatingConfig,
+    market_exposure: float = 0,
+    total_exposure: float = 0,
+) -> MarketSnapshot:
+    """Load one exact capture record without market access."""
+    envelope = _bounded_capture(path)
+    if (
+        set(envelope) != _CAPTURE_KEYS
+        or envelope["schema_version"] != 1
+        or isinstance(envelope["schema_version"], bool)
+        or envelope["record_type"] != "market_snapshot"
+        or envelope["venue"] != "polymarket"
+        or envelope["mode"] != "paper"
+        or not isinstance(envelope["snapshot"], dict)
+        or set(envelope["snapshot"]) != _SNAPSHOT_KEYS
+    ):
+        raise ValueError("invalid snapshot")
+    value = envelope["snapshot"]
+    assert isinstance(value, dict)
+    asks = value["asks"]
+    if not isinstance(asks, list) or not 1 <= len(asks) <= 50:
+        raise ValueError("invalid snapshot")
+    try:
+        levels = tuple(
+            BookLevel(_capture_number(level["price"]), _capture_number(level["size"]))
+            for level in asks
+            if isinstance(level, dict) and set(level) == {"price", "size"}
+        )
+        if len(levels) != len(asks):
+            raise ValueError
+        fee_rate = _capture_number(value["fee_rate"])
+        fee_source = _capture_text(value["fee_source"])
+        if (fee_rate, fee_source) != (
+            config.venue.paper_fee_rate,
+            config.venue.paper_fee_source,
+        ):
+            raise ValueError
+        snapshot = MarketSnapshot(
+            _capture_text(value["snapshot_id"]),
+            _capture_text(value["market_id"]),
+            _capture_number(value["price"]),
+            operating.bankroll,
+            _capture_number(market_exposure),
+            _capture_number(total_exposure),
+            _capture_text(value["question"]),
+            _capture_text(value["resolution_rules"]),
+            _capture_text(value["end_time"]),
+            _capture_text(value["captured_at"]),
+            _capture_text(value["source_url"]),
+            _capture_text(value["yes_token_id"]),
+            levels,
+            fee_rate,
+            fee_source,
+            _capture_text(value["captured_at"]),
+        )
+        if snapshot.snapshot_id != market_snapshot_identity(snapshot):
+            raise ValueError
+        return snapshot
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("invalid snapshot") from None
+
+
 def _write_new(path: Path, content: bytes) -> None:
     temporary: str | None = None
     linked = False
@@ -138,6 +281,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture.add_argument("market")
     capture.add_argument("--config", type=Path)
     capture.add_argument("--output", type=Path)
+    cycle = commands.add_parser("cycle")
+    cycle.add_argument("--snapshot", type=Path, required=True)
+    cycle.add_argument("--config", type=Path)
+    cycle.add_argument("--bankroll", type=float, default=1_000)
+    cycle.add_argument("--maximum-market-exposure", type=float, default=0.01)
+    cycle.add_argument("--maximum-total-exposure", type=float, default=0.10)
+    cycle.add_argument("--maximum-loss", type=float, default=100)
+    cycle.add_argument("--daily-cloud-cost-budget", type=float, default=5)
+    cycle.add_argument("--market-exposure", type=float, default=0)
+    cycle.add_argument("--total-exposure", type=float, default=0)
+    cycle.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     path = args.config or DEFAULT_CONFIG
     label = "chrysopoeia.toml" if args.config is None else args.config.name
@@ -146,6 +300,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ConfigurationError, OSError, TypeError, ValueError) as exc:
         if args.command == "capture":
             parser.exit(2, "capture failed: invalid configuration\n")
+        if args.command == "cycle":
+            parser.exit(2, "cycle failed: model/workflow unavailable\n")
         message = str(exc)
         if str(path) in message:
             message = "could not load harness configuration"
@@ -176,6 +332,54 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _write_new(args.output, content)
             except (OSError, ValueError):
                 parser.exit(2, "capture failed: output unavailable\n")
+        print(content.decode(), end="")
+        return 0
+    if args.command == "cycle":
+        try:
+            operating = OperatingConfig(
+                args.bankroll,
+                1,
+                args.maximum_market_exposure,
+                args.maximum_total_exposure,
+                args.maximum_loss,
+                args.daily_cloud_cost_budget,
+            )
+            MarketSnapshot(
+                "validation",
+                "validation",
+                0.5,
+                operating.bankroll,
+                args.market_exposure,
+                args.total_exposure,
+            )
+        except (TypeError, ValueError):
+            parser.exit(2, "cycle failed: invalid operating configuration\n")
+        try:
+            snapshot = load_capture_snapshot(
+                args.snapshot,
+                config,
+                operating,
+                args.market_exposure,
+                args.total_exposure,
+            )
+        except (OSError, TypeError, ValueError):
+            parser.exit(2, "cycle failed: invalid snapshot\n")
+        try:
+            from chrysopoeia.cycle_runner import run_paper_cycle
+
+            result = asyncio.run(run_paper_cycle(config, snapshot, operating))
+            content = (
+                json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            parser.exit(2, "cycle failed: model/workflow unavailable\n")
+        if args.output is not None:
+            try:
+                _write_new(args.output, content)
+            except (OSError, ValueError):
+                parser.exit(2, "cycle failed: output unavailable\n")
         print(content.decode(), end="")
         return 0
     summary = _summary(config, args.command, label[:200])

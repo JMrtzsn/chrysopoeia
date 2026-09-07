@@ -6,9 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from chrysopoeia import cli
 from chrysopoeia.polymarket import PolymarketError
@@ -459,6 +460,144 @@ class OperatorCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), [])
+
+    def test_cycle_runs_from_capture_without_market_fetch_and_emits_exact_result(
+        self,
+    ) -> None:
+        from chrysopoeia.trading import BookLevel, market_snapshot_identity
+
+        snapshot = MarketSnapshot(
+            "placeholder",
+            "12345",
+            0.4,
+            1,
+            0,
+            0,
+            question="Will it rain?",
+            resolution_rules="Resolves Yes if rain is measured.",
+            end_time="2027-01-01T00:00:00+00:00",
+            captured_at="2026-09-01T00:00:00+00:00",
+            source_url="https://polymarket.com/event/will-it-rain",
+            yes_token_id="yes-token",
+            asks=(BookLevel(0.4, 20),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+            book_captured_at="2026-09-01T00:00:00+00:00",
+        )
+        snapshot = replace(snapshot, snapshot_id=market_snapshot_identity(snapshot))
+        result = {
+            "schema_version": 1,
+            "record_type": "paper_cycle_result",
+            "snapshot_id": snapshot.snapshot_id,
+            "market_id": "12345",
+            "status": "abstained",
+            "reason": "trader_abstained",
+            "trader_called": True,
+            "reviewer_called": False,
+            "fill": None,
+            "ledger_statuses": ["completed"],
+            "actual_estimated_cost_usd": "0.000032",
+            "maximum_reserved_cost_usd": "0.022528",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            output = Path(directory) / "result.json"
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ) as run,
+                patch("chrysopoeia.cli.polymarket_fetch") as fetch,
+            ):
+                code, stdout, stderr = self.invoke(
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--market-exposure",
+                    "2",
+                    "--total-exposure",
+                    "3",
+                    "--output",
+                    str(output),
+                )
+            written = output.read_bytes()
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(
+            stdout, json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        self.assertEqual(written, stdout.encode())
+        fetch.assert_not_called()
+        operating = run.call_args.args[2]
+        snapshot_arg = run.call_args.args[1]
+        self.assertEqual(
+            (snapshot_arg.market_exposure, snapshot_arg.total_exposure), (2, 3)
+        )
+        self.assertEqual(operating.trader_agents, 1)
+
+    def test_cycle_failures_are_sanitized_and_leave_no_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bad = root / "bad.json"
+            bad.write_text('{"secret":"model rationale"}')
+            output = root / "result.json"
+            code, stdout, stderr = self.invoke(
+                "cycle", "--snapshot", str(bad), "--output", str(output)
+            )
+            self.assertEqual(
+                (code, stdout, stderr), (2, "", "cycle failed: invalid snapshot\n")
+            )
+            self.assertFalse(output.exists())
+
+            code, stdout, stderr = self.invoke(
+                "cycle", "--snapshot", str(bad), "--bankroll", "0"
+            )
+            self.assertEqual(
+                (code, stdout, stderr),
+                (2, "", "cycle failed: invalid operating configuration\n"),
+            )
+
+    def test_cycle_model_failure_leaves_no_output_or_private_error(self) -> None:
+        from chrysopoeia.trading import BookLevel, market_snapshot_identity
+
+        snapshot = MarketSnapshot(
+            "placeholder",
+            "12345",
+            0.4,
+            1,
+            0,
+            0,
+            question="Will it rain?",
+            resolution_rules="Resolves Yes if rain is measured.",
+            end_time="2027-01-01T00:00:00+00:00",
+            captured_at="2026-09-01T00:00:00+00:00",
+            source_url="https://polymarket.com/event/will-it-rain",
+            yes_token_id="yes-token",
+            asks=(BookLevel(0.4, 20),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+            book_captured_at="2026-09-01T00:00:00+00:00",
+        )
+        snapshot = replace(snapshot, snapshot_id=market_snapshot_identity(snapshot))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            output = root / "result.json"
+            with patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(side_effect=RuntimeError("secret model response")),
+            ):
+                code, stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--output", str(output)
+                )
+
+            self.assertEqual(
+                (code, stdout, stderr),
+                (2, "", "cycle failed: model/workflow unavailable\n"),
+            )
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

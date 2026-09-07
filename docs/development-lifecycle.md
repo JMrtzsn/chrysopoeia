@@ -79,6 +79,12 @@ Its reservation ceilings are derived from `chrysopoeia.toml`, not separate
 operating guarantees. Paid and network checks remain manual: do not put them in
 pre-commit, pre-push, or another automatic hook.
 
+The operator path is `chrysopoeia cycle --snapshot FILE`. It reads one bounded
+capture locally, then makes at most one trader and one reviewer model call. It
+does not fetch market data. Current exposure defaults to zero for this first-cycle
+in-memory command; nonzero current exposure must be supplied explicitly with
+`--market-exposure` and `--total-exposure`.
+
 OpenCode remains an external engineering harness for orchestrating development
 and review, not a model provider or inner trading step. Product integration with
 OpenCode would create a meta-harness and requires separate explicit scope.

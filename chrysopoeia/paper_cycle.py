@@ -75,8 +75,8 @@ CitationId = Annotated[str, Field(min_length=1, max_length=128)]
 
 
 class ProposalOutput(StrictOutput):
-    snapshot_id: str = Field(min_length=1)
-    market_id: str = Field(min_length=1)
+    snapshot_id: str = Field(min_length=1, max_length=200)
+    market_id: str = Field(min_length=1, max_length=200)
     action: Literal["trade", "abstain"]
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
     amount: float = Field(strict=True)
@@ -98,8 +98,8 @@ class ProposalOutput(StrictOutput):
 
 
 class ReviewOutput(StrictOutput):
-    snapshot_id: str = Field(min_length=1)
-    market_id: str = Field(min_length=1)
+    snapshot_id: str = Field(min_length=1, max_length=200)
+    market_id: str = Field(min_length=1, max_length=200)
     approved: bool = Field(strict=True)
     reason: str = Field(min_length=1, max_length=500)
     citations: list[CitationId] = Field(max_length=10)
@@ -205,7 +205,7 @@ def finalize_paper_cycle(
     """Validate cycle state, run deterministic policy and paper fill, and store the report."""
     if not _is_state_map(state):
         raise ValueError("session state is invalid")
-    _record(
+    operating = _record(
         state.get("operating_config"),
         OperatingConfig,
         "operating configuration is missing or invalid",
@@ -237,7 +237,7 @@ def finalize_paper_cycle(
     proposal = Proposal(**proposal_output.model_dump(exclude={"action", "citations"}))
     review = Review(**review_output.model_dump(exclude={"citations"}))
     try:
-        cycle = run_decision_cycle(snapshot, proposal, review)
+        cycle = run_decision_cycle(snapshot, proposal, review, operating)
     except ValueError:
         raise ValueError("paper cycle snapshot identity is inconsistent") from None
 

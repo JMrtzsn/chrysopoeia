@@ -2,14 +2,13 @@
 
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from hashlib import sha256
 import json
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from chrysopoeia.trading import BookLevel, MarketSnapshot
+from chrysopoeia.trading import BookLevel, MarketSnapshot, market_snapshot_identity
 
 
 API_HOST = "gamma-api.polymarket.com"
@@ -166,7 +165,7 @@ def load_market_snapshot(
     paper_fee_rate: float,
     paper_fee_source: str,
 ) -> MarketSnapshot:
-    """Load metadata and YES depth; identity excludes capture time but includes source timestamps, levels, fee assumption, and account state."""
+    """Load metadata and YES depth into one canonical market-data snapshot."""
     endpoint, expected, uses_slug = _endpoint(market)
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 10:
         raise PolymarketError("Polymarket adapter timeout must be between 0 and 10 seconds")
@@ -243,23 +242,20 @@ def load_market_snapshot(
         raise PolymarketError("Polymarket adapter book is crossed")
     price = asks[0].price
 
-    # captured_at is excluded; identity includes only the validated cheapest retained asks.
-    identity = json.dumps({
-        "market_id": market_id, "question": question, "rules": rules,
-        "end": end.isoformat(), "updated": updated.isoformat(), "source_url": source_url,
-        "yes_token": yes_token, "book_time": book_time.isoformat(),
-        "asks": [(level.price, level.size) for level in asks],
-        "fee_rate": paper_fee_rate, "fee_source": paper_fee_source,
-        "bankroll": bankroll, "market_exposure": market_exposure,
-        "total_exposure": total_exposure,
-    }, sort_keys=True, separators=(",", ":"))
-    generated_id = "polymarket-" + sha256(identity.encode()).hexdigest()[:24]
     try:
-        return MarketSnapshot(
-            snapshot_id if snapshot_id is not None else generated_id,
+        snapshot = MarketSnapshot(
+            snapshot_id or "validation",
             market_id, price, bankroll, market_exposure, total_exposure,
             question, rules, end.isoformat(), current_utc.isoformat(), source_url,
             yes_token, asks, paper_fee_rate, paper_fee_source, book_time.isoformat(),
         )
+        if snapshot_id is None:
+            snapshot = MarketSnapshot(
+                market_snapshot_identity(snapshot), market_id, price, bankroll,
+                market_exposure, total_exposure, question, rules, end.isoformat(),
+                current_utc.isoformat(), source_url, yes_token, asks, paper_fee_rate,
+                paper_fee_source, book_time.isoformat(),
+            )
+        return snapshot
     except ValueError as exc:
         raise PolymarketError(f"Polymarket adapter cannot create snapshot: {exc}") from exc
