@@ -77,8 +77,16 @@ there. Unknown keys and unsupported adapters or modes fail closed.
 uv sync
 uv run python -m unittest discover
 uv run python -c "import chrysopoeia.agent"
+uv run chrysopoeia validate --json
+uv run chrysopoeia inspect
 uv run adk run chrysopoeia
 ```
+
+Operator CLI options use subcommand placement: `chrysopoeia validate [--config
+PATH] [--json]` and `chrysopoeia inspect [--config PATH] [--json]`. Without
+`--config`, both commands load the checked-in `chrysopoeia.toml` independently
+of the current working directory. `python -m chrysopoeia` accepts the same
+commands.
 
 The ADK web UI is an optional development interface:
 
