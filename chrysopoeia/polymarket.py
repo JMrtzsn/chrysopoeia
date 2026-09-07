@@ -15,7 +15,8 @@ from chrysopoeia.trading import BookLevel, MarketSnapshot
 API_HOST = "gamma-api.polymarket.com"
 CLOB_HOST = "clob.polymarket.com"
 WEB_HOSTS = {"polymarket.com", "www.polymarket.com"}
-MAX_AGE = timedelta(minutes=5)
+MAX_BOOK_AGE = timedelta(minutes=5)
+MAX_METADATA_FUTURE_SKEW = timedelta(seconds=5)
 MAX_BOOK_LEVELS = 50
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 256_000
@@ -134,8 +135,6 @@ def _levels(value: object, name: str, *, required: bool) -> tuple[BookLevel, ...
         raise PolymarketError(f"Polymarket adapter {name} list is malformed")
     if required and not value:
         raise PolymarketError("Polymarket adapter book has empty asks")
-    if len(value) > MAX_BOOK_LEVELS:
-        raise PolymarketError("Polymarket adapter book has too many levels")
     levels = []
     for item in value:
         if (
@@ -212,20 +211,20 @@ def load_market_snapshot(
     if len(tokens) != 2 or any(not isinstance(token, str) or not token for token in tokens) or tokens[0] == tokens[1]:
         raise PolymarketError("Polymarket adapter has unsupported token structure")
 
+    current_utc = current.astimezone(timezone.utc)
     updated = _timestamp(data.get("updatedAt"))
-    age = current.astimezone(timezone.utc) - updated
-    if age < timedelta(0) or age > MAX_AGE:
-        raise PolymarketError("Polymarket adapter market data is stale")
+    if updated - current_utc > MAX_METADATA_FUTURE_SKEW:
+        raise PolymarketError("Polymarket adapter market timestamp is in the future")
     question = _text(data.get("question"), "question")
     rules = _text(data.get("description"), "resolution rules")
-    end = _timestamp(data.get("endDateIso") or data.get("endDate"))
-    current_utc = current.astimezone(timezone.utc)
+    end = _timestamp(data["endDate"] if "endDate" in data else data.get("endDateIso"))
     if end <= current_utc:
         raise PolymarketError("Polymarket adapter end time must be in the future")
-    event_slug = _text(data.get("eventSlug"), "event slug")
-    if not event_slug.replace("-", "").isalnum():
+    event_slug = data.get("eventSlug") or data.get("slug")
+    source_slug = _text(event_slug, "event slug")
+    if not source_slug.replace("-", "").isalnum():
         raise PolymarketError("Polymarket adapter event slug is invalid")
-    source_url = f"https://polymarket.com/event/{event_slug}"
+    source_url = f"https://polymarket.com/event/{source_slug}"
     yes_token = tokens[0]
     book_endpoint = f"https://{CLOB_HOST}/book?token_id={quote(yes_token, safe='')}"
     book = _fetch_json(book_endpoint, float(timeout), max_response_bytes, fetch)
@@ -233,15 +232,18 @@ def load_market_snapshot(
         raise PolymarketError("Polymarket adapter book token does not match the YES token")
     book_time = _book_timestamp(book.get("timestamp"))
     book_age = current_utc - book_time
-    if book_age < timedelta(0) or book_age > MAX_AGE:
+    if book_age < timedelta(0) or book_age > MAX_BOOK_AGE:
         raise PolymarketError("Polymarket adapter book is stale")
-    asks = tuple(sorted(_levels(book.get("asks"), "asks", required=True), key=lambda level: level.price))
+    asks = tuple(sorted(
+        _levels(book.get("asks"), "asks", required=True),
+        key=lambda level: level.price,
+    )[:MAX_BOOK_LEVELS])
     bids = _levels(book.get("bids", []), "bids", required=False)
     if bids and max(level.price for level in bids) >= asks[0].price:
         raise PolymarketError("Polymarket adapter book is crossed")
     price = asks[0].price
 
-    # captured_at is excluded: identity covers immutable source metadata, book data, fee assumption, and account state.
+    # captured_at is excluded; identity includes only the validated cheapest retained asks.
     identity = json.dumps({
         "market_id": market_id, "question": question, "rules": rules,
         "end": end.isoformat(), "updated": updated.isoformat(), "source_url": source_url,

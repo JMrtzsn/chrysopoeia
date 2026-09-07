@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from urllib.error import URLError
 
+from chrysopoeia.paper_cycle import _canonical_evidence
 from chrysopoeia.polymarket import PolymarketError, load_market_snapshot
 
 
@@ -103,6 +104,99 @@ class PolymarketAdapterTests(unittest.TestCase):
         self.assertEqual(first.snapshot_id, second.snapshot_id)
         self.assertTrue(first.snapshot_id.startswith("polymarket-"))
 
+    def test_identifier_uses_market_slug_when_event_slug_is_absent(self) -> None:
+        live_schema = json.loads(market(id="559651", slug="xi-jinping-out-before-2027"))
+        live_schema.pop("eventSlug")
+
+        def fetch(url: str, *_: object) -> bytes:
+            return book() if "clob.polymarket.com" in url else json.dumps(live_schema).encode()
+
+        snapshot = load_market_snapshot("559651", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+        url_snapshot = load_market_snapshot(
+            "https://polymarket.com/event/xi-jinping-out-before-2027",
+            1_000, 0, 0, now=NOW, fetch=fetch, **FEE,
+        )
+
+        source_url = "https://polymarket.com/event/xi-jinping-out-before-2027"
+        self.assertEqual(snapshot.source_url, source_url)
+        self.assertEqual(url_snapshot.source_url, source_url)
+        self.assertEqual(_canonical_evidence(snapshot)[0].url, source_url)
+
+    def test_event_slug_takes_precedence_over_market_slug(self) -> None:
+        def fetch(url: str, *_: object) -> bytes:
+            return book() if "clob.polymarket.com" in url else market(
+                eventSlug="event-slug", slug="market-slug"
+            )
+
+        snapshot = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+
+        self.assertEqual(snapshot.source_url, "https://polymarket.com/event/event-slug")
+
+    def test_old_market_metadata_with_fresh_book_becomes_snapshot(self) -> None:
+        def fetch(url: str, *_: object) -> bytes:
+            return book() if "clob.polymarket.com" in url else market(updatedAt="2026-07-20T12:00:00Z")
+
+        snapshot = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+
+        self.assertEqual(snapshot.captured_at, "2026-07-21T12:00:00+00:00")
+
+    def test_future_market_metadata_is_rejected(self) -> None:
+        snapshot = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW,
+            fetch=lambda url, *_: book() if "clob.polymarket.com" in url else market(updatedAt="2026-07-21T12:00:05Z"),
+            **FEE,
+        )
+        self.assertEqual(snapshot.captured_at, "2026-07-21T12:00:00+00:00")
+
+        with self.assertRaisesRegex(PolymarketError, "future"):
+            load_market_snapshot(
+                "12345", 1_000, 0, 0, now=NOW,
+                fetch=lambda *_: market(updatedAt="2026-07-21T12:01:00Z"), **FEE,
+            )
+
+    def test_stale_clob_book_is_rejected(self) -> None:
+        def fetch(url: str, *_: object) -> bytes:
+            return book(timestamp="1784634800000") if "clob.polymarket.com" in url else market()
+
+        with self.assertRaisesRegex(PolymarketError, "book is stale"):
+            load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+
+    def test_end_date_is_preferred_over_date_only_end_date_iso(self) -> None:
+        def fetch(url: str, *_: object) -> bytes:
+            return book() if "clob.polymarket.com" in url else market(
+                endDateIso="2027-01-01", endDate="2027-01-01T04:59:00Z"
+            )
+
+        snapshot = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+
+        self.assertEqual(snapshot.end_time, "2027-01-01T04:59:00+00:00")
+
+    def test_aware_end_date_iso_is_used_only_when_end_date_is_absent(self) -> None:
+        aware = json.loads(market(endDateIso="2027-01-01T04:59:00-05:00"))
+        aware.pop("endDate")
+        date_only = json.loads(market(endDateIso="2027-01-01"))
+        date_only.pop("endDate")
+
+        def fetch(url: str, *_: object) -> bytes:
+            return book() if "clob.polymarket.com" in url else json.dumps(aware).encode()
+
+        snapshot = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+        self.assertEqual(snapshot.end_time, "2027-01-01T09:59:00+00:00")
+
+        with self.assertRaisesRegex(PolymarketError, "UTC offset"):
+            load_market_snapshot(
+                "12345", 1_000, 0, 0, now=NOW,
+                fetch=lambda *_: json.dumps(date_only).encode(), **FEE,
+            )
+
+        with self.assertRaisesRegex(PolymarketError, "missing or invalid"):
+            load_market_snapshot(
+                "12345", 1_000, 0, 0, now=NOW,
+                fetch=lambda *_: market(
+                    endDate=None, endDateIso="2027-01-01T04:59:00Z"
+                ), **FEE,
+            )
+
     def test_configured_fee_is_recorded_and_invalid_fee_rejects_before_io(self) -> None:
         snapshot = load_market_snapshot(
             "12345", 1_000, 0, 0, now=NOW, fetch=fixture_fetch(),
@@ -134,7 +228,6 @@ class PolymarketAdapterTests(unittest.TestCase):
             (market(active=False), "inactive"),
             (market(closed=True), "closed"),
             (market(acceptingOrders=False), "orders"),
-            (market(updatedAt="2026-07-21T11:54:59Z"), "stale"),
             (b"not json", "JSON"),
             (json.dumps([]).encode(), "schema"),
             (market(outcomes='["A", "B", "C"]', clobTokenIds='["a", "b", "c"]'), "binary"),
@@ -144,6 +237,8 @@ class PolymarketAdapterTests(unittest.TestCase):
             (market(description=None), "rules"),
             (market(endDate="2026-07-21T11:00:00Z"), "end time"),
             (market(eventSlug="bad/slug"), "event slug"),
+            (market(eventSlug=None, slug="bad/slug"), "event slug"),
+            (market(eventSlug=None, slug=None), "event slug"),
         )
         for body, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(PolymarketError, message):
@@ -153,12 +248,10 @@ class PolymarketAdapterTests(unittest.TestCase):
         cases = (
             (book(asks=[]), "empty"),
             (book(asset_id="other"), "token"),
-            (book(timestamp="1784634800000"), "stale"),
             (book(asks=[{"price": "nan", "size": "1"}]), "level"),
             (book(asks=[{"price": "0.4", "size": "0"}]), "level"),
             (book(asks=[{"price": 0.4, "size": "1"}]), "level"),
             (book(bids=[{"price": "0.42", "size": "1"}]), "crossed"),
-            (book(asks=[{"price": "0.4", "size": "1"}] * 51), "levels"),
         )
         for body, message in cases:
             def fetch(url: str, *_: object, body: bytes = body) -> bytes:
@@ -170,6 +263,39 @@ class PolymarketAdapterTests(unittest.TestCase):
             def oversized(url: str, *_: object) -> bytes:
                 return b"x" * 101 if "clob.polymarket.com" in url else market()
             load_market_snapshot("12345", 1_000, 0, 0, now=NOW, max_response_bytes=100, fetch=oversized, **FEE)
+
+    def test_deep_book_retains_cheapest_fifty_valid_asks(self) -> None:
+        asks = [
+            {"price": f"{price / 100:.2f}", "size": "1"}
+            for price in range(70, 9, -1)
+        ]
+
+        def fetch(url: str, *_: object) -> bytes:
+            return book(asks=asks, bids=[{"price": "0.05", "size": "1"}]) if "clob.polymarket.com" in url else market()
+
+        snapshot = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+        asks[0]["size"] = "999"
+        same_retained_depth = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE
+        )
+
+        self.assertEqual(len(snapshot.asks), 50)
+        self.assertEqual([level.price for level in snapshot.asks], [price / 100 for price in range(10, 60)])
+        self.assertEqual(snapshot.price, 0.10)
+        self.assertEqual(snapshot.snapshot_id, same_retained_depth.snapshot_id)
+
+    def test_deep_book_rejects_crossed_bid_and_malformed_level(self) -> None:
+        asks = [{"price": "0.50", "size": "1"}] * 60
+        cases = (
+            book(asks=asks, bids=[{"price": "0.10", "size": "1"}] * 50 + [{"price": "0.50", "size": "1"}]),
+            book(asks=asks[:50] + [{"price": 0.60, "size": "1"}] + asks[51:]),
+        )
+        for body, message in zip(cases, ("crossed", "level")):
+            def fetch(url: str, *_: object, body: bytes = body) -> bytes:
+                return body if "clob.polymarket.com" in url else market()
+
+            with self.subTest(message=message), self.assertRaisesRegex(PolymarketError, message):
+                load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
 
     def test_oversized_and_network_failures_are_safe(self) -> None:
         with self.assertRaisesRegex(PolymarketError, "too large"):
