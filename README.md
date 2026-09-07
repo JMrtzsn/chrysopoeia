@@ -79,6 +79,7 @@ uv run python -m unittest discover
 uv run python -c "import chrysopoeia.agent"
 uv run chrysopoeia validate --json
 uv run chrysopoeia inspect
+uv run chrysopoeia capture 12345 --output snapshot.json
 uv run adk run chrysopoeia
 ```
 
@@ -87,6 +88,14 @@ PATH] [--json]` and `chrysopoeia inspect [--config PATH] [--json]`. Without
 `--config`, both commands load the checked-in `chrysopoeia.toml` independently
 of the current working directory. `python -m chrysopoeia` accepts the same
 commands.
+
+`chrysopoeia capture MARKET [--config PATH] [--output PATH]` accepts a
+Polymarket event URL or market ID and emits one compact JSON snapshot to stdout.
+With `--output`, it also creates that new file atomically without overwriting an
+existing path. The record includes market metadata, bounded YES asks, and paper
+fee provenance, but excludes the neutral bankroll/exposure adapter inputs:
+capture creates no operating session and claims no portfolio authority. A local
+snapshot file is not an authoritative or durable store.
 
 The ADK web UI is an optional development interface:
 

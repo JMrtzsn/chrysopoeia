@@ -1,9 +1,18 @@
+import contextlib
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import Mock, patch
+
+from chrysopoeia import cli
+from chrysopoeia.polymarket import PolymarketError
+from chrysopoeia.trading import MarketSnapshot
 
 ROOT = Path(__file__).parents[1]
 EXPECTED = {
@@ -38,6 +47,50 @@ EXPECTED = {
 
 
 class OperatorCliTests(unittest.TestCase):
+    def invoke(self, *arguments: str) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                code = cli.main(arguments)
+            except SystemExit as exc:
+                code = int(exc.code)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def fixture_fetch(self, calls: list[str] | None = None):
+        now = datetime.now(timezone.utc)
+        metadata = {
+            "id": "12345",
+            "slug": "will-it-rain",
+            "eventSlug": "will-it-rain",
+            "active": True,
+            "closed": False,
+            "acceptingOrders": True,
+            "outcomes": ["Yes", "No"],
+            "clobTokenIds": ["yes-token", "no-token"],
+            "question": "Will it rain?",
+            "description": "Resolves Yes if measurable rain is recorded.",
+            "endDate": (now + timedelta(days=1)).isoformat(),
+            "updatedAt": (now - timedelta(seconds=1)).isoformat(),
+        }
+        book = {
+            "asset_id": "yes-token",
+            "timestamp": str(int((now - timedelta(seconds=1)).timestamp() * 1000)),
+            "asks": [
+                {"price": "0.44", "size": "10"},
+                {"price": "0.42", "size": "20"},
+            ],
+            "bids": [{"price": "0.40", "size": "5"}],
+        }
+
+        def fetch(url: str, _timeout: float, _max_bytes: int) -> bytes:
+            if calls is not None:
+                calls.append(url)
+            value = book if "clob.polymarket.com" in url else metadata
+            return json.dumps(value).encode()
+
+        return fetch
+
     def run_cli(
         self, *arguments: str, cwd: str | Path | None = None, console: bool = False
     ) -> subprocess.CompletedProcess[str]:
@@ -142,10 +195,260 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(console_misuse.returncode, 2)
         self.assertNotIn("Traceback", misuse.stderr)
 
+    def test_capture_accepts_url_and_identifier_and_emits_exact_public_record(
+        self,
+    ) -> None:
+        for market in ("12345", "https://polymarket.com/event/weather/will-it-rain"):
+            calls: list[str] = []
+            with (
+                self.subTest(market=market),
+                patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch(calls)),
+            ):
+                code, stdout, stderr = self.invoke("capture", market)
+
+            record = json.loads(stdout)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertEqual(
+                set(record),
+                {"schema_version", "record_type", "venue", "mode", "snapshot"},
+            )
+            self.assertEqual(
+                set(record["snapshot"]),
+                {
+                    "snapshot_id",
+                    "market_id",
+                    "price",
+                    "question",
+                    "resolution_rules",
+                    "end_time",
+                    "captured_at",
+                    "source_url",
+                    "yes_token_id",
+                    "asks",
+                    "fee_rate",
+                    "fee_source",
+                },
+            )
+            self.assertEqual(record["schema_version"], 1)
+            self.assertEqual(record["record_type"], "market_snapshot")
+            self.assertEqual((record["venue"], record["mode"]), ("polymarket", "paper"))
+            self.assertEqual(record["snapshot"]["market_id"], "12345")
+            self.assertEqual(record["snapshot"]["question"], "Will it rain?")
+            self.assertEqual(
+                record["snapshot"]["asks"],
+                [{"price": 0.42, "size": 20.0}, {"price": 0.44, "size": 10.0}],
+            )
+            self.assertNotIn("bankroll", stdout)
+            self.assertNotIn("exposure", stdout)
+            self.assertEqual(
+                stdout,
+                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n",
+            )
+            self.assertEqual(len(calls), 2)
+
+    def test_capture_serializer_rejects_legacy_empty_metadata(self) -> None:
+        snapshot = MarketSnapshot("snapshot", "12345", 0.5, 1, 0, 0)
+
+        with self.assertRaises(ValueError):
+            cli.serialize_market_snapshot(snapshot)
+
+    def test_capture_passes_neutral_adapter_inputs(self) -> None:
+        snapshot = MarketSnapshot("snapshot", "12345", 0.5, 1, 0, 0)
+        load = Mock(return_value=snapshot)
+
+        with patch("chrysopoeia.cli.load_market_snapshot", load):
+            code, stdout, stderr = self.invoke("capture", "12345")
+
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr, "capture failed: market data unavailable\n")
+        load.assert_called_once_with(
+            "12345",
+            bankroll=1.0,
+            market_exposure=0.0,
+            total_exposure=0.0,
+            fetch=cli.polymarket_fetch,
+            paper_fee_rate=0.02,
+            paper_fee_source="paper-assumption:flat-2pct-v1",
+        )
+
+    def test_capture_output_matches_stdout_and_refuses_existing_or_symlink(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            before = set(root.iterdir())
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke("capture", "12345")
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertTrue(stdout.endswith("\n"))
+            self.assertEqual(set(root.iterdir()), before)
+
+            output = root / "snapshot.json"
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(output)
+                )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertEqual(output.read_bytes(), stdout.encode())
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+            output.write_bytes(b"preserve")
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(output)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+            self.assertEqual(output.read_bytes(), b"preserve")
+
+            target = root / "target"
+            target.write_bytes(b"target")
+            link = root / "link"
+            link.symlink_to(target)
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(link)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+            self.assertEqual(target.read_bytes(), b"target")
+
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(root)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+
+    def test_capture_output_failures_leave_no_target_or_temp_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = root / "missing" / "snapshot.json"
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(missing)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+            self.assertFalse(missing.exists())
+
+            output = root / "snapshot.json"
+            with (
+                patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()),
+                patch(
+                    "chrysopoeia.cli.os.link",
+                    side_effect=OSError("private path or body"),
+                ),
+            ):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(output)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.iterdir()), [])
+
+            with (
+                patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()),
+                patch("chrysopoeia.cli.os.fsync", side_effect=OSError("write failed")),
+            ):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--output", str(output)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: output unavailable\n")
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_capture_uses_configured_fee_and_fails_safely_before_output(self) -> None:
+        text = (
+            (ROOT / "chrysopoeia.toml")
+            .read_text(encoding="utf-8")
+            .replace("paper_fee_rate = 0.02", "paper_fee_rate = 0.03")
+            .replace("paper-assumption:flat-2pct-v1", "paper-assumption:test-v1")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "capture.toml"
+            config.write_text(text, encoding="utf-8")
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--config", str(config)
+                )
+            snapshot = json.loads(stdout)["snapshot"]
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertEqual(
+                (snapshot["fee_rate"], snapshot["fee_source"]),
+                (0.03, "paper-assumption:test-v1"),
+            )
+
+            config.write_text("[runtime\nsecret='do-not-leak'", encoding="utf-8")
+            with patch("chrysopoeia.cli.polymarket_fetch") as fetch:
+                code, stdout, stderr = self.invoke(
+                    "capture", "12345", "--config", str(config)
+                )
+            self.assertEqual((code, stdout), (2, ""))
+            self.assertEqual(stderr, "capture failed: invalid configuration\n")
+            fetch.assert_not_called()
+
+            module = self.run_cli(
+                "capture", "12345", "--config", str(config), cwd=directory
+            )
+            console = self.run_cli(
+                "capture",
+                "12345",
+                "--config",
+                str(config),
+                cwd=directory,
+                console=True,
+            )
+            self.assertEqual(module.returncode, 2)
+            self.assertEqual(
+                (module.stdout, module.stderr), (console.stdout, console.stderr)
+            )
+
+        secret = "private-response-body"
+        with patch(
+            "chrysopoeia.cli.load_market_snapshot",
+            side_effect=PolymarketError(secret),
+        ):
+            code, stdout, stderr = self.invoke("capture", "12345")
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr, "capture failed: market data unavailable\n")
+        self.assertNotIn(secret, stderr)
+        self.assertNotIn("Traceback", stderr)
+
+        with patch(
+            "chrysopoeia.cli.load_market_snapshot", side_effect=RuntimeError(secret)
+        ):
+            code, stdout, stderr = self.invoke("capture", "12345")
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr, "capture failed: market data unavailable\n")
+        self.assertNotIn(secret, stderr)
+
+    def test_capture_default_config_is_cwd_independent(self) -> None:
+        previous = Path.cwd()
+        try:
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()),
+            ):
+                os.chdir(directory)
+                first = self.invoke("capture", "12345")
+            with patch("chrysopoeia.cli.polymarket_fetch", self.fixture_fetch()):
+                second = self.invoke("capture", "12345")
+        finally:
+            os.chdir(previous)
+
+        self.assertEqual(first[0], 0, first[2])
+        self.assertEqual(second[0], 0, second[2])
+        self.assertEqual(json.loads(first[1])["snapshot"]["market_id"], "12345")
+        self.assertEqual(set(json.loads(first[1])), set(json.loads(second[1])))
+
     def test_import_has_no_runtime_or_provider_side_effects(self) -> None:
         code = (
             "import json, sys; import chrysopoeia.cli; "
-            "blocked=('google.adk', 'chrysopoeia.agent', 'chrysopoeia.polymarket', "
+            "blocked=('google.adk', 'chrysopoeia.agent', "
             "'dotenv', 'google.genai'); "
             "print(json.dumps([n for n in sys.modules if n in blocked or "
             "n.startswith('google.adk.')]))"
