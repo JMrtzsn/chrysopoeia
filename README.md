@@ -61,6 +61,30 @@ another runtime adapter only when a second concrete runtime is required.
 - Offline deterministic unit and harness evaluations; paid model evaluation is
   separately gated and manual.
 
+## Verification Policy
+
+Every externally observable feature addition or change is incomplete until both
+deterministic offline checks and a bounded live verification pass against the
+real boundary changed. This includes external-service CLI behavior, venue and
+model/runtime boundaries, callbacks and structured workflows, serving or A2A,
+deployment, and persistence. Pure documentation, behavior-preserving internal
+refactors, and test-only tooling need offline verification only; runtime-affecting
+configuration changes are not exempt.
+
+Live runs require prior human approval for cost or external effects, a cost
+estimate, strict call/time/data bounds, least privilege with ADC or other ambient
+authentication rather than copied keys, sanitized command/result/cost evidence,
+and cleanup of temporary resources. A failure must be fixed and rerun; a blocked
+environment/IAM/vendor dependency leaves the feature incomplete and is never a
+waiver. Offline pre-commit checks remain mandatory, but no paid or network check
+belongs in an automatic pre-push or other hook. Venue live checks remain
+read-only public-data checks, model live checks remain bounded paper cycles, and
+authenticated exchange execution remains prohibited.
+
+OpenCode is an external development/review orchestrator, not a model provider or
+inner trading step. Any future product integration would create a meta-harness
+and requires separate explicit scope.
+
 ## Quickstart
 
 Python 3.10 or later and `uv` are required. Configure Gemini for ADK with either

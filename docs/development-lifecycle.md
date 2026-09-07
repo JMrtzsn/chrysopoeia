@@ -31,7 +31,8 @@ dependency; `.agents-cli-spec.md` contains Chrysopoeia's normative rules.
    Market-data tests must require no execution credentials and must not imply
    execution authority.
 4. **Verify offline:** default checks must make no network/model/Vertex calls and
-   need no credentials:
+   need no credentials. This mandatory pre-commit gate is necessary but is not
+   sufficient for an externally observable feature addition or change:
 
    ```sh
    agents-cli lint
@@ -39,25 +40,48 @@ dependency; `.agents-cli-spec.md` contains Chrysopoeia's normative rules.
    uv run python -c "import chrysopoeia.agent"
    ```
 
-5. **Evaluate behavior:** keep small datasets for task success, role/tool
+5. **Evaluate behavior offline:** keep small datasets for task success, role/tool
    boundaries, canonical grounding, abstention/rejection, safety, and model-cost
    settlement. The project-owned paper-cycle harness runs offline as part of the
    canonical suite.
-6. **Run paid/live-model evaluation only with explicit approval:** model-backed
-   generation, Agents CLI grading that may initialize Vertex services, and the
-   manual Vertex paper-cycle evaluation are potential cloud/billing operations.
-   Operators own API enablement, ADC, quota, and billing; the harness never runs
-   `gcloud` or changes infrastructure. Do not run these for offline verification.
-7. **Evolve the platform later:** durable storage, scheduling, RAG/memory,
-   managed deployment, publication, and production observability each require a
-   demonstrated need, explicit architecture/acceptance criteria, deterministic
-   checks, and approval.
+6. **Verify the changed real boundary live:** every externally observable
+   feature addition or change must pass the offline gate first and then the
+   smallest bounded live path through the boundary it changes. This applies to
+   external-service CLI behavior, venue adapters/data schemas, model/provider
+   configuration, callbacks/cost accounting, structured outputs, workflows,
+   A2A/serving endpoints, deployment/infrastructure, persistence, and any future
+   approved authenticated effect. Current venue checks use read-only public
+   data; current model checks use bounded paper cycles. Authenticated live
+   exchange execution remains prohibited.
+7. **Control and record the live run:** obtain human approval before incurring
+   cost or external effects. Estimate cost before the run; bound calls, elapsed
+   time, and data; use least privilege and ambient authentication (ADC for
+   Vertex) rather than copied keys; and sanitize retained evidence. Record the
+   exact command, result, and actual or best-known cost when applicable. Clean
+   up or disable temporary services and resources afterward.
+8. **Resolve failures:** a live failure blocks completion and any commit
+   recommendation; fix it and rerun both affected gates. If environment access,
+   IAM, or a vendor outage prevents the run, report the feature as incomplete.
+   Do not waive the gate or label the feature verified.
+9. **Apply narrow exceptions:** pure documentation, internal refactors with no
+   observable behavior change, and test-only tooling do not require a live run;
+   verify the no-behavior-change claim offline. Configuration-only changes that
+   affect runtime or provider behavior are not exempt.
+10. **Evolve the platform later:** durable storage, scheduling, RAG/memory,
+    managed deployment, publication, and production observability each require a
+    demonstrated need, explicit architecture/acceptance criteria, deterministic
+    checks, bounded live verification, and approval.
 
 The manual Vertex behavior evaluation remains explicitly gated by
 `RUN_PAPER_CYCLE_EVALUATION=1`, Vertex ADK configuration, project, and location.
 It rejects API-key credentials for that path and makes at most two model calls.
 Its reservation ceilings are derived from `chrysopoeia.toml`, not separate
-operating guarantees.
+operating guarantees. Paid and network checks remain manual: do not put them in
+pre-commit, pre-push, or another automatic hook.
+
+OpenCode remains an external engineering harness for orchestrating development
+and review, not a model provider or inner trading step. Product integration with
+OpenCode would create a meta-harness and requires separate explicit scope.
 
 ## Release Evidence
 
@@ -66,7 +90,10 @@ A local harness release records:
 - deterministic test, lint, import, and offline evaluation results;
 - model/agent/prompt/workflow/policy/tool and adapter versions where applicable;
 - adapter/configuration contract-test results and unresolved failures;
-- explicit approval and cost evidence for any paid behavior evaluation.
+- for each externally observable feature change, sanitized bounded-live evidence
+  containing the exact command, result, real boundary exercised, call/time/data
+  bounds, approval, cost estimate and actual or best-known cost when applicable,
+  authentication posture, and cleanup outcome.
 
 A future managed release additionally records deployment target, runtime
 identity, required services, migration/recovery plan, observability/privacy

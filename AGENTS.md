@@ -78,6 +78,9 @@ gates are defined in `docs/development-lifecycle.md`.
 - Do not call Chrysopoeia a meta-harness until a second independent harness and
   a coordinating control plane exist. Scheduling, persistence, or managed
   deployment of this harness alone remains Level 2.
+- OpenCode is an external engineering harness for development and review. Never
+  use it as a model provider or inner trading step. Integrating it into the
+  product would create a meta-harness and requires separate explicit scope.
 - Treat the sibling `../harness` workspace as optional design provenance only;
   never import it or add a build/runtime dependency on it.
 
@@ -101,6 +104,32 @@ gates are defined in `docs/development-lifecycle.md`.
 
 ## Verification
 
-- Run tests and import the agent before considering a change complete.
+- Run tests and import the agent before considering a change complete. The
+  offline pre-commit gate remains mandatory but is not sufficient for an
+  externally observable feature addition or change.
 - Add the smallest test that checks observable behavior for non-trivial tools, routing, or workflow logic.
 - Tests must not require live model calls or real credentials unless explicitly marked as integration tests.
+- Every externally observable feature addition or change is incomplete until
+  deterministic offline tests and a bounded live verification both pass against
+  the real boundary changed. This includes external-service CLI behavior, venue
+  adapters or schemas, runtime/provider configuration, callbacks and cost
+  accounting, structured outputs, workflows, A2A or serving endpoints,
+  deployment/infrastructure, persistence, and any future approved authenticated
+  effect.
+- Pure documentation, internal refactors with no observable behavior change,
+  and test-only tooling do not require live verification; verify their claim of
+  no behavior change offline. Configuration-only changes that affect runtime or
+  provider behavior do require live verification.
+- Before a live run, obtain human approval for cost or external effects,
+  estimate cost, and bound calls, time, and data. Exercise the smallest real
+  path with least privilege and ambient authentication (ADC for Vertex), never
+  copied keys. Sanitize evidence, record the exact command, result, and cost
+  when applicable, then clean up or disable temporary services and resources.
+- A failed live verification blocks completion and any commit recommendation;
+  fix and rerun it. An unavailable environment, insufficient IAM, or vendor
+  outage leaves the feature incomplete and must not be waived or called
+  verified.
+- Current venue live verification is read-only against public data. Current
+  model live verification is a bounded paper cycle. Authenticated live exchange
+  execution remains prohibited.
+- Do not add pre-push hooks or automatic paid/network checks.

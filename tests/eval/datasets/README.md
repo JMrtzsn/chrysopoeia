@@ -38,7 +38,9 @@ agents-cli eval grade --config tests/eval/eval_config.yaml
 
 Generation calls the Chrysopoeia agent. The custom graders are deterministic
 Python, but Agents CLI grading may still initialize Vertex services. Run either
-command only with explicit approval and credentials required by the configured
-ADK model path. The
-separately gated paper-cycle model evaluation is documented in
-`docs/development-lifecycle.md`; it is not part of offline verification.
+command only after the offline gate passes and with explicit approval, bounded
+cost/calls/time/data, and ambient credentials required by the configured ADK
+model path. The separately gated paper-cycle model evaluation is documented in
+`docs/development-lifecycle.md`; it is not part of offline verification, but a
+bounded live model-path check is mandatory when an externally observable change
+affects that boundary.
