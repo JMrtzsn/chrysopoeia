@@ -32,6 +32,20 @@ invocation. Paper execution consumes the captured YES ask depth, computes VWAP
 and the explicit paper fee assumption, and rejects insufficient depth without a
 partial fill.
 
+This graph is a Level 1 turn inside the current Level 2 specialized harness:
+
+| Concept | Current graph mapping | Status |
+| --- | --- | --- |
+| Session | Operator configuration plus ADK conversation state | In memory; not durable or recoverable |
+| Turn | One requested paper cycle or operator action | Explicitly triggered and bounded |
+| Step | One trader or reviewer model request/response | ADK owns each inner model loop |
+| Action | Snapshot/context query or deterministic validation, policy, quote/fill, and finalization | Harness-controlled; finalization is not a model tool |
+| Observation | Canonical snapshot, proposal/review record, decision, fill/no-fill, cost, and report | Recorded for current audit/evaluation, not a durable event log |
+
+Trader and reviewer steps reason and propose. Harness actions select evidence,
+validate and authorize, execute the local paper effect, and record observations;
+the graph is not an unrestricted model/tool loop.
+
 ## Ownership
 
 | Concern | Owner |
@@ -48,6 +62,9 @@ LLM output is validated structured data. An LLM cannot choose arbitrary nodes,
 grant permissions, weaken limits, or invoke paper execution directly. Search
 results are unverified context and cannot become citations until deterministic
 normalization adds them to the evidence set.
+
+The reviewer provides model-based critique, not human approval or an approval
+control plane. Its approval is still only input to deterministic policy.
 
 ## Current State And Cost Contract
 
@@ -73,6 +90,11 @@ runtime is required.
 The following graphs are retained as future design, not current behavior. They
 require durable authoritative records, idempotent triggers, explicit operating
 approval, and contract-tested adapter/configuration choices before implementation.
+Scheduling, durability, queues, cancellation, deadlines, recovery, and managed
+workers would be Level 2 operational evolution of this same harness. A Level 3
+meta-harness exists only when a control plane coordinates multiple independent
+harnesses and explicitly divides session, context, tool, and terminal-state
+ownership with them.
 
 ### Scheduled Decision Graph
 

@@ -65,6 +65,22 @@ gates are defined in `docs/development-lifecycle.md`.
   venue adapter must be isolated behind confirmation, IAM, hard limits, a kill
   switch, and reconciliation.
 
+### Harness Ownership Rules
+
+- Preserve the conceptual `Session -> Turn -> Step -> Action` hierarchy: the
+  current session is local/in-memory, a turn is one paper cycle or operator
+  action, and a step is one model request/response.
+- Keep model decision, permission, and execution distinct. Apply authorization
+  at the exact effect boundary.
+- ADK owns the current inner model loop and runtime context mechanics;
+  deterministic Chrysopoeia core contracts own money, policy, paper execution,
+  and terminal outcomes.
+- Do not call Chrysopoeia a meta-harness until a second independent harness and
+  a coordinating control plane exist. Scheduling, persistence, or managed
+  deployment of this harness alone remains Level 2.
+- Treat the sibling `../harness` workspace as optional design provenance only;
+  never import it or add a build/runtime dependency on it.
+
 ## Agent And Tool Rules
 
 - Give every agent a unique, descriptive name, description, and concise instruction.
@@ -80,7 +96,7 @@ gates are defined in `docs/development-lifecycle.md`.
 - Never commit API keys, credentials, user data, or `.env` files.
 - Read secrets from environment variables and fail clearly when required configuration is missing.
 - Do not place secrets or sensitive user data in prompts, logs, session state, traces, or tool results.
-- Apply authorization at each tool boundary; agent instructions are not a security control.
+- Agent instructions are not a security or authorization control.
 - Google Search and the ADK web UI are development capabilities, not production trust boundaries.
 
 ## Verification

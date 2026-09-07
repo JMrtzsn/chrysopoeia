@@ -9,11 +9,20 @@ tests/evaluations, and no deployment target or CI/CD runner.
 deterministic policy—not runtime state, prompts, or memory—remain the source of
 truth for paper decisions.
 
+The optional sibling workspace references `../harness/README.md` and
+`../harness/architectures/` supplied the Level 1 turn, Level 2 harness, Level 3
+meta-harness, and ownership vocabulary used here. They are design provenance
+only, may not resolve from GitHub, and are not a source, build, import, or runtime
+dependency; `.agents-cli-spec.md` contains Chrysopoeia's normative rules.
+
 ## Harness-first Gates
 
 1. **Specify:** keep the product spec, current implementation, non-goals, and
    measurable acceptance aligned. Do not describe future platform behavior as
-   current.
+   current. Every architecture change must declare who owns the model loop,
+   context assembly, tool implementation/authorization, retries, cancellation,
+   persistence, and terminal status, including any ownership moved between ADK
+   and the deterministic core.
 2. **Build a local vertical slice:** preserve role isolation and implement the
    smallest path from validated configuration and canonical venue data through
    deterministic policy, paper execution, and audit.
