@@ -79,9 +79,12 @@ Its reservation ceilings are derived from `chrysopoeia.toml`, not separate
 operating guarantees. Paid and network checks remain manual: do not put them in
 pre-commit, pre-push, or another automatic hook.
 
-The operator path is `chrysopoeia cycle --snapshot FILE`. It reads one bounded
-capture locally, then makes at most one trader and one reviewer model call. It
-does not fetch market data. Current exposure defaults to zero for this first-cycle
+The operator path is `chrysopoeia cycle --snapshot FILE [--evidence FILE]`.
+Optional evidence is a hand-authored or future-adapter-produced, bounded local
+bundle marked operator-supplied and unverified; no current command creates it.
+Validation makes no network or model calls. Cycle reads one bounded capture
+locally, then makes at most one trader and one reviewer model call. It does not
+fetch market data. Current exposure defaults to zero for this first-cycle
 in-memory command; nonzero current exposure must be supplied explicitly with
 `--market-exposure` and `--total-exposure`.
 

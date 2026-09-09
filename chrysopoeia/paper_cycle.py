@@ -1,3 +1,4 @@
+import ipaddress
 import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
@@ -6,6 +7,7 @@ from hashlib import sha256
 from inspect import signature
 from math import isfinite
 from typing import Annotated, Literal, Protocol, TypeGuard, TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -21,9 +23,13 @@ from chrysopoeia.trading import (
 PROPOSAL_KEY = "paper_cycle_proposal"
 REVIEW_KEY = "paper_cycle_review"
 EVIDENCE_KEY = "paper_cycle_evidence"
+VALIDATED_EXTERNAL_EVIDENCE_KEY = "validated_external_evidence"
 PAPER_CYCLE_DECISION_KEY = "paper_cycle_decision"
 PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
+MAX_EVIDENCE_ID_LENGTH = 200
+MAX_SNAPSHOT_ID_LENGTH = 128
+MAX_RETRIEVED_AT_LENGTH = 64
 
 
 class StrictOutput(BaseModel):
@@ -33,27 +39,73 @@ class StrictOutput(BaseModel):
 class EvidenceRecord(StrictOutput):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    evidence_id: str = Field(min_length=1, max_length=128)
+    evidence_id: str = Field(min_length=1, max_length=MAX_EVIDENCE_ID_LENGTH)
     url: str = Field(min_length=1, max_length=2048)
     title: str = Field(min_length=1, max_length=500)
-    retrieved_at: str = Field(min_length=1)
-    source_kind: Literal["market_snapshot"]
-    snapshot_id: str = Field(min_length=1)
+    retrieved_at: str = Field(min_length=1, max_length=MAX_RETRIEVED_AT_LENGTH)
+    source_kind: Literal["market_snapshot", "external"]
+    snapshot_id: str = Field(min_length=1, max_length=MAX_SNAPSHOT_ID_LENGTH)
 
     @field_validator("url")
     @classmethod
     def validate_url(cls, value: str) -> str:
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ):
+            raise ValueError("title must not be blank")
+        return value
+
+    @field_validator("snapshot_id")
+    @classmethod
+    def validate_snapshot_id(cls, value: str) -> str:
+        if not value.strip() or any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ):
+            raise ValueError("snapshot_id must be non-blank and contain no controls")
+        return value
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "EvidenceRecord":
+        if self.source_kind == "external":
+            normalized = _normalize_web_url(self.url)
+            expected = _external_evidence_id(
+                self.snapshot_id, normalized, self.title, self.retrieved_at
+            )
+            if self.evidence_id != expected:
+                raise ValueError("evidence_id does not match external evidence")
+            object.__setattr__(self, "url", normalized)
+            return self
         try:
-            return validate_polymarket_event_url(value)
+            canonical = validate_polymarket_event_url(self.url)
         except ValueError:
             raise ValueError("url must be a canonical Polymarket HTTPS event URL")  # noqa: B904
+        if canonical != self.url:
+            raise ValueError("url must be a canonical Polymarket HTTPS event URL")
+        expected = f"market_snapshot:{self.snapshot_id}"
+        if len(expected) > 128:
+            expected = (
+                "market_snapshot:" + sha256(self.snapshot_id.encode()).hexdigest()
+            )
+        if self.evidence_id != expected:
+            raise ValueError("evidence_id does not match the canonical snapshot")
+        return self
 
     @field_validator("retrieved_at")
     @classmethod
     def validate_retrieved_at(cls, value: str) -> str:
-        if not re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
-            value,
+        if (
+            len(value) > MAX_RETRIEVED_AT_LENGTH
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                value,
+            )
         ):
             raise ValueError("retrieved_at must be an RFC3339 timestamp")
         try:
@@ -65,13 +117,96 @@ class EvidenceRecord(StrictOutput):
         return value
 
 
+def _normalize_web_url(value: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        raise ValueError("web URL is invalid")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("web URL is invalid") from None
+    host = parsed.hostname
+    if (
+        parsed.scheme.lower() != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or port not in {None, 443}
+        or "\\" in value
+        or re.search(r"%(?![0-9A-Fa-f]{2})", value)
+        or any(character.isspace() or ord(character) < 32 for character in value)
+    ):
+        raise ValueError("web URL is invalid")
+    normalized_host = host.rstrip(".").lower()
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        address = None
+    if (
+        address is not None
+        or "." not in normalized_host
+        or normalized_host == "localhost"
+        or normalized_host.endswith((".localhost", ".local", ".internal"))
+    ):
+        raise ValueError("web URL host must be public")
+    try:
+        normalized_host = normalized_host.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise ValueError("web URL is invalid") from None
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or re.fullmatch(r"[a-z0-9-]+", label) is None
+        for label in normalized_host.split(".")
+    ):
+        raise ValueError("web URL is invalid")
+    netloc = normalized_host if port in {None, 443} else f"{normalized_host}:{port}"
+    normalized = urlunsplit(("https", netloc, parsed.path or "/", parsed.query, ""))
+    if len(normalized) > 2048:
+        raise ValueError("web URL is invalid")
+    return normalized
+
+
+def _external_evidence_id(
+    snapshot_id: str, normalized_url: str, normalized_title: str, retrieved_at: str
+) -> str:
+    digest = sha256(
+        f"{snapshot_id}\n{normalized_url}\n{normalized_title}\n{retrieved_at}".encode()
+    ).hexdigest()[:56]
+    return f"external:{snapshot_id}:{digest}"
+
+
+def external_evidence(
+    snapshot: MarketSnapshot,
+    url: str,
+    title: str,
+    retrieved_at: str,
+) -> EvidenceRecord:
+    """Construct one normalized, snapshot-bound external evidence record."""
+    normalized_url = _normalize_web_url(url)
+    normalized_title = title.strip() if isinstance(title, str) else title
+    return EvidenceRecord(
+        evidence_id=_external_evidence_id(
+            snapshot.snapshot_id, normalized_url, normalized_title, retrieved_at
+        ),
+        url=normalized_url,
+        title=normalized_title,
+        retrieved_at=retrieved_at,
+        source_kind="external",
+        snapshot_id=snapshot.snapshot_id,
+    )
+
+
 def _validate_unique_citations(citations: list[str]) -> list[str]:
     if len(citations) != len(set(citations)):
         raise ValueError("citations must be unique")
     return citations
 
 
-CitationId = Annotated[str, Field(min_length=1, max_length=128)]
+CitationId = Annotated[str, Field(min_length=1, max_length=MAX_EVIDENCE_ID_LENGTH)]
 
 
 class ProposalOutput(StrictOutput):
@@ -188,9 +323,34 @@ def _evidence(state: StateMap, snapshot: MarketSnapshot) -> list[EvidenceRecord]
         actual = [EvidenceRecord.model_validate(record) for record in value]
     except (TypeError, ValueError):
         raise ValueError("paper cycle evidence is missing or invalid") from None
-    if actual != expected:
-        raise ValueError("paper cycle evidence does not match the canonical snapshot")
-    return actual
+    if not expected and not actual:
+        return actual
+    try:
+        validated = validate_evidence_bundle(snapshot, actual)
+    except ValueError:
+        raise ValueError(
+            "paper cycle evidence does not match the canonical snapshot"
+        ) from None
+    return validated
+
+
+def validate_evidence_bundle(
+    snapshot: MarketSnapshot, evidence: list[EvidenceRecord]
+) -> list[EvidenceRecord]:
+    canonical = _canonical_evidence(snapshot)
+    if not canonical or not 1 <= len(evidence) <= 20 or evidence[:1] != canonical:
+        raise ValueError("evidence does not match the canonical snapshot")
+    external = evidence[1:]
+    if any(
+        record.source_kind != "external" or record.snapshot_id != snapshot.snapshot_id
+        for record in external
+    ):
+        raise ValueError("evidence does not match the canonical snapshot")
+    ids = [record.evidence_id for record in evidence]
+    urls = [canonical[0].url, *(_normalize_web_url(record.url) for record in external)]
+    if len(ids) != len(set(ids)) or len(urls) != len(set(urls)):
+        raise ValueError("evidence contains duplicates")
+    return evidence
 
 
 def _validate_citations(citations: list[str], evidence: list[EvidenceRecord]) -> None:

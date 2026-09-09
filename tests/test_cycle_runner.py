@@ -17,7 +17,13 @@ from pydantic import Field, SkipValidation
 from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.cost import LEDGER_KEY, settle_model_call
 from chrysopoeia.cycle_runner import run_paper_cycle, run_paper_cycle_state
-from chrysopoeia.paper_cycle import PAPER_CYCLE_FILL_KEY, ProposalOutput, ReviewOutput
+from chrysopoeia.paper_cycle import (
+    PAPER_CYCLE_FILL_KEY,
+    ProposalOutput,
+    ReviewOutput,
+    _canonical_evidence,
+    external_evidence,
+)
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 ROOT = Path(__file__).parents[1]
@@ -250,6 +256,62 @@ class CycleRunnerTests(unittest.TestCase):
 
         self.assertEqual(summary["status"], "rejected")
         self.assertEqual(summary["reason"], "per-market exposure limit exceeded")
+
+    def test_external_evidence_is_identical_for_trader_and_reviewer(self) -> None:
+        external = [
+            external_evidence(
+                self.snapshot,
+                "https://example.com/report",
+                "Weather report",
+                "2026-09-02T00:00:00Z",
+            )
+        ]
+        evidence = [*_canonical_evidence(self.snapshot), *external]
+        trader, reviewer, calls = self.models()
+        citation = external[0].evidence_id
+        trader.response["citations"] = [citation]
+        reviewer.response["citations"] = [citation]
+
+        state, function_calls, available_tools = asyncio.run(
+            run_paper_cycle_state(
+                self.config,
+                self.snapshot,
+                OperatingConfig(),
+                trader,
+                reviewer,
+                evidence=evidence,
+            )
+        )
+
+        self.assertEqual(
+            calls, [self.config.models.trader, self.config.models.reviewer]
+        )
+        prompts = [request.contents[-1].parts[0].text for request in trader.requests]
+        self.assertTrue(all(citation in prompt for prompt in prompts))
+        self.assertEqual(
+            state["paper_cycle_evidence"],
+            [record.model_dump() for record in evidence],
+        )
+        self.assertEqual(state["paper_cycle_report"]["status"], "filled")
+        self.assertEqual((function_calls, available_tools), ([], []))
+        self.assertTrue(all(not request.config.tools for request in trader.requests))
+
+    def test_cycle_rejects_unvalidated_external_evidence_before_model_calls(
+        self,
+    ) -> None:
+        trader, reviewer, calls = self.models()
+        with self.assertRaises(ValueError):
+            asyncio.run(
+                run_paper_cycle(
+                    self.config,
+                    self.snapshot,
+                    OperatingConfig(),
+                    trader,
+                    reviewer,
+                    evidence=[],
+                )
+            )
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

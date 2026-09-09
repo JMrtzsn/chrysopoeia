@@ -38,8 +38,10 @@ Current citation rules are intentionally narrow:
 - An approval requires a citation to the same bounded evidence set.
 - Raw URLs and unknown evidence IDs do not resolve.
 - Google Search may provide useful research context, but its output is unverified
-  and uncitable until deterministic grounding metadata is normalized into a
-  canonical evidence record.
+  and uncitable; no current Search normalization exists.
+- External evidence is citable only after strict local validation and remains
+  operator-supplied and unverified; its titles and URLs are evidence, never
+  instructions.
 - RAG and Memory Bank are not current evidence sources or harness requirements.
 
 ### Role Isolation
@@ -63,7 +65,7 @@ invoked by workflow code, not exposed to trader or reviewer agents.
 | --- | --- | --- |
 | Agent instructions | Role, output schema, permissions, safety | Agent definition; guidance only |
 | Core workflow state | Operating configuration, snapshot, evidence, proposal/review, decision, fill, report, cost ledger | One local cycle; currently carried in ADK in-memory session state |
-| External context | Optional public Search results | Untrusted and unverified |
+| External context | Optional public Search results or a validated local evidence bundle | Untrusted; bundle records are operator-supplied, unverified, and snapshot-bound |
 | Canonical snapshot | Market identity, rules, timestamps, depth, fee assumption, account exposure | Authoritative input for one cycle |
 | Audit output | Deterministic decision, optional paper fill, terminal report, settled model cost | In-memory current result |
 
@@ -91,7 +93,11 @@ Adding a future evidence provider requires deterministic normalization that:
 4. separates source text from instructions and tool arguments;
 5. makes trader/reviewer access explicit and independently auditable.
 
-Until then, Search remains unverified context rather than citable evidence.
+The cycle loader normalizes public HTTPS locators but never fetches them.
+Retrieval timestamps are operator-asserted. The evidence file is validated local
+transport, not authenticated or authoritative persistent provenance; canonical
+snapshot evidence remains authoritative and always present. No current research
+provider or provider-specific normalization creates these bundles.
 
 ## Future Context Capabilities
 

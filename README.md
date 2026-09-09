@@ -11,7 +11,7 @@ autonomous trading platform.
 ## Harness Flow
 
 ```text
-configuration -> market-data adapter -> canonical snapshot/evidence -> trader
+configuration -> capture -> optional local evidence bundle -> trader
               -> reviewer -> deterministic policy -> paper execution
               -> audit/evaluation
 ```
@@ -53,9 +53,9 @@ another runtime adapter only when a second concrete runtime is required.
 - Local Agents CLI/ADK prototype with explicit operator triggers.
 - One binary Polymarket market per cycle; paper-only and in-memory.
 - Separate single-turn trader and reviewer roles with no execution tools.
-- One canonical snapshot and evidence record. Trader and reviewer citations can
-  resolve only to that record; Search output remains unverified context until
-  deterministic normalization exists.
+- Canonical snapshot evidence is always present and authoritative. Optional
+  operator-supplied external evidence is validated locally, snapshot-bound, and
+  unverified. Search output remains unverified context and is not normalized.
 - Deterministic identity, freshness, schema, review, edge, exposure, executable
   depth, fee, and model-cost checks.
 - Offline deterministic unit and harness evaluations; paid model evaluation is
@@ -104,7 +104,7 @@ uv run python -c "import chrysopoeia.agent"
 uv run chrysopoeia validate --json
 uv run chrysopoeia inspect
 uv run chrysopoeia capture 12345 --output snapshot.json
-uv run chrysopoeia cycle --snapshot snapshot.json
+uv run chrysopoeia cycle --snapshot snapshot.json --evidence evidence.json
 uv run adk run chrysopoeia
 ```
 
@@ -122,7 +122,7 @@ fee provenance, but excludes the neutral bankroll/exposure adapter inputs:
 capture creates no operating session and claims no portfolio authority. A local
 snapshot file is not an authoritative or durable store.
 
-`chrysopoeia cycle --snapshot FILE [--config PATH] [--bankroll 1000]
+`chrysopoeia cycle --snapshot FILE [--evidence FILE] [--config PATH] [--bankroll 1000]
 [--maximum-market-exposure 0.01] [--maximum-total-exposure 0.10]
 [--maximum-loss 100] [--daily-cloud-cost-budget 5] [--market-exposure 0]
 [--total-exposure 0] [--output PATH]` runs the actual bounded trader/reviewer ADK
@@ -132,6 +132,14 @@ current market and total exposure default to zero, so operators with existing
 exposure must provide both exposure flags. Its reported maximum reserved cost is
 the two-call ceiling, not a guarantee that both calls occur or that the full
 amount is spent.
+The optional strict evidence file contains the canonical record first and 1–19
+external records with public HTTPS locators, titles, and retrieval timestamps.
+It is snapshot-bound, operator-supplied unverified local transport and is never
+fetched. Without it, the cycle remains canonical-snapshot-only. There is no
+command to create an evidence bundle. Its exact envelope contains only
+`schema_version: 1`, `record_type: "evidence_bundle"`, `snapshot_id`,
+`market_id`, `evidence: [canonical, external...]`, and
+`provenance: "operator-supplied-unverified"`.
 
 The ADK web UI is an optional development interface:
 

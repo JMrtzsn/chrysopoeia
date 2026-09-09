@@ -12,6 +12,11 @@ from chrysopoeia.configuration import (
     HarnessConfig,
     load_harness_config,
 )
+from chrysopoeia.paper_cycle import (
+    EvidenceRecord,
+    _canonical_evidence,
+    validate_evidence_bundle,
+)
 from chrysopoeia.polymarket import _fetch as polymarket_fetch
 from chrysopoeia.polymarket import load_market_snapshot
 from chrysopoeia.trading import (
@@ -37,6 +42,14 @@ _SNAPSHOT_KEYS = {
     "asks",
     "fee_rate",
     "fee_source",
+}
+_EVIDENCE_BUNDLE_KEYS = {
+    "schema_version",
+    "record_type",
+    "snapshot_id",
+    "market_id",
+    "evidence",
+    "provenance",
 }
 
 
@@ -122,23 +135,23 @@ def serialize_market_snapshot(snapshot: MarketSnapshot) -> dict[str, object]:
     }
 
 
-def _bounded_capture(path: Path) -> dict[str, object]:
+def _bounded_json(path: Path, error: str) -> dict[str, object]:
     descriptor = -1
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         details = os.fstat(descriptor)
         if not stat.S_ISREG(details.st_mode) or details.st_size > MAX_SNAPSHOT_BYTES:
-            raise ValueError("invalid snapshot")
+            raise ValueError(error)
         with os.fdopen(descriptor, "rb") as source:
             descriptor = -1
             body = source.read(MAX_SNAPSHOT_BYTES + 1)
     except (OSError, ValueError):
-        raise ValueError("invalid snapshot") from None
+        raise ValueError(error) from None
     finally:
         if descriptor >= 0:
             os.close(descriptor)
     if len(body) > MAX_SNAPSHOT_BYTES:
-        raise ValueError("invalid snapshot")
+        raise ValueError(error)
     try:
 
         def object_value(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -153,10 +166,40 @@ def _bounded_capture(path: Path) -> dict[str, object]:
             object_pairs_hook=object_value,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
-        raise ValueError("invalid snapshot") from None
+        raise ValueError(error) from None
     if not isinstance(value, dict):
-        raise ValueError("invalid snapshot")
+        raise ValueError(error)
     return value
+
+
+def _bounded_capture(path: Path) -> dict[str, object]:
+    return _bounded_json(path, "invalid snapshot")
+
+
+def load_evidence_bundle(path: Path, snapshot: MarketSnapshot) -> list[EvidenceRecord]:
+    """Load an exact snapshot-bound local evidence bundle."""
+    envelope = _bounded_json(path, "invalid evidence")
+    try:
+        if (
+            set(envelope) != _EVIDENCE_BUNDLE_KEYS
+            or isinstance(envelope["schema_version"], bool)
+            or envelope["schema_version"] != 1
+            or envelope["record_type"] != "evidence_bundle"
+            or envelope["snapshot_id"] != snapshot.snapshot_id
+            or envelope["market_id"] != snapshot.market_id
+            or envelope["provenance"] != "operator-supplied-unverified"
+            or not isinstance(envelope["evidence"], list)
+            or not 2 <= len(envelope["evidence"]) <= 20
+        ):
+            raise ValueError
+        evidence = [
+            EvidenceRecord.model_validate(item) for item in envelope["evidence"]
+        ]
+        if evidence[0] != _canonical_evidence(snapshot)[0] or len(evidence[1:]) > 19:
+            raise ValueError
+        return validate_evidence_bundle(snapshot, evidence)
+    except (IndexError, TypeError, ValueError):
+        raise ValueError("invalid evidence") from None
 
 
 def _capture_text(value: object) -> str:
@@ -284,6 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle = commands.add_parser("cycle")
     cycle.add_argument("--snapshot", type=Path, required=True)
     cycle.add_argument("--config", type=Path)
+    cycle.add_argument("--evidence", type=Path)
     cycle.add_argument("--bankroll", type=float, default=1_000)
     cycle.add_argument("--maximum-market-exposure", type=float, default=0.01)
     cycle.add_argument("--maximum-total-exposure", type=float, default=0.10)
@@ -365,9 +409,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (OSError, TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid snapshot\n")
         try:
+            evidence = (
+                load_evidence_bundle(args.evidence, snapshot)
+                if args.evidence is not None
+                else None
+            )
+        except (OSError, TypeError, ValueError):
+            parser.exit(2, "cycle failed: invalid evidence\n")
+        try:
             from chrysopoeia.cycle_runner import run_paper_cycle
 
-            result = asyncio.run(run_paper_cycle(config, snapshot, operating))
+            result = asyncio.run(
+                run_paper_cycle(config, snapshot, operating, evidence=evidence)
+            )
             content = (
                 json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
             ).encode()

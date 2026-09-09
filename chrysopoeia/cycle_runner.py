@@ -23,9 +23,12 @@ from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
+    VALIDATED_EXTERNAL_EVIDENCE_KEY,
+    EvidenceRecord,
     PaperCycleReportOutput,
     PaperCycleRequest,
     ProposalOutput,
+    validate_evidence_bundle,
 )
 from chrysopoeia.trading import MarketSnapshot, OperatingConfig
 
@@ -178,8 +181,15 @@ async def run_paper_cycle_state(
     *,
     session_service: BaseSessionService | None = None,
     owned_models: Sequence[BaseLlm] = (),
+    evidence: Sequence[EvidenceRecord] | None = None,
 ) -> tuple[dict[str, object], list[str], list[str]]:
     """Run one bounded ADK paper cycle and return runtime evaluation evidence."""
+    external: list[EvidenceRecord] = []
+    if evidence is not None:
+        validated = validate_evidence_bundle(snapshot, list(evidence))
+        if len(validated) < 2:
+            raise ValueError("external evidence bundle is missing")
+        external = validated[1:]
     created: tuple[BaseLlm, ...] = ()
     if trader_model is None and reviewer_model is None:
         created = (
@@ -205,6 +215,15 @@ async def run_paper_cycle_state(
                 "model_cost_policy": config.cost_policy,
                 "cycle_id": f"paper-cycle:{snapshot.snapshot_id}",
                 "market_snapshot": asdict(snapshot),
+                **(
+                    {
+                        VALIDATED_EXTERNAL_EVIDENCE_KEY: [
+                            record.model_dump() for record in external
+                        ]
+                    }
+                    if external
+                    else {}
+                ),
             },
         )
         runner = Runner(app_name=app_name, node=workflow, session_service=sessions)
@@ -260,6 +279,7 @@ async def run_paper_cycle(
     *,
     session_service: BaseSessionService | None = None,
     owned_models: Sequence[BaseLlm] = (),
+    evidence: Sequence[EvidenceRecord] | None = None,
 ) -> dict[str, object]:
     """Run one bounded ADK paper cycle over an already captured snapshot."""
     state, _, _ = await run_paper_cycle_state(
@@ -270,5 +290,6 @@ async def run_paper_cycle(
         reviewer_model,
         session_service=session_service,
         owned_models=owned_models,
+        evidence=evidence,
     )
     return summarize_cycle(config, snapshot, state)

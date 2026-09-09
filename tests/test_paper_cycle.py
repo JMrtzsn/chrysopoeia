@@ -182,12 +182,12 @@ class PaperCycleTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             evidence.title = "changed"
         for changes in (
-            {"evidence_id": "x" * 129},
+            {"evidence_id": "x" * 201},
             {"url": "http://polymarket.com/event/will-it-rain"},
             {"url": "https://polymarket.com/event/will-it-rain?forged=1"},
             {"title": "x" * 501},
             {"retrieved_at": "2026-09-01"},
-            {"source_kind": "google_search"},
+            {"source_kind": "unknown"},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
                 EvidenceRecord.model_validate({**evidence.model_dump(), **changes})
