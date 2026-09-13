@@ -78,12 +78,15 @@ Model callbacks reserve a bounded estimated cost before each call, reject calls
 outside policy, settle actual token usage, and fail closed when settlement is
 invalid. Cost exhaustion skips reasoning; it never weakens trading policy.
 
-ADK `Agent`, `Workflow`, callbacks, ToolContext/session state, and Agents
-CLI/A2A/eval tooling are current runtime-edge details. The Python layout still
-mixes some deterministic orchestration/domain behavior into `agent.py`; moving
-that behavior to runtime-neutral functions is the next internal-boundary
-refactor. Do not introduce an abstract runtime interface until a second concrete
-runtime is required.
+Deterministic paper-cycle contracts, evidence, and finalization are in
+`chrysopoeia/paper_cycle.py`; trading, risk, and fills are in
+`chrysopoeia/trading.py`; and `chrysopoeia/agent.py` owns ADK runtime composition,
+wrappers, tools, and workflow construction. ADK `Agent`, `Workflow`, callbacks,
+ToolContext/session state, and Agents CLI/A2A/eval tooling remain runtime-edge
+details. Cost callbacks in `chrysopoeia/cost.py` remain ADK-edge, and agent
+wrappers bridge ADK Context to the core, so isolation is not complete. Do not
+introduce an abstract runtime interface until a second concrete runtime is
+required.
 
 ## Future Platform Graphs
 

@@ -6,9 +6,10 @@ or execution invariants. Deterministic controls remain authoritative.
 
 Role context and canonical domain values do not depend on Gemini-specific prompt
 or tool behavior. Configure a model through the selected agent-runtime adapter;
-the current ADK adapter supplies model connectors and uses Gemini by default.
-Venue-specific data is normalized into runtime-neutral canonical values before
-it enters agent context.
+the checked-in harness configures Gemini through ADK, and current bounded live
+verification uses Vertex AI with ADC. The configured model is distinct from
+evidence/context providers. Venue-specific data is normalized into
+runtime-neutral canonical values before it enters agent context.
 
 ## Principles
 
@@ -37,11 +38,12 @@ Current citation rules are intentionally narrow:
 - A trade proposal requires a citation to the supplied canonical evidence ID.
 - An approval requires a citation to the same bounded evidence set.
 - Raw URLs and unknown evidence IDs do not resolve.
-- Google Search may provide useful research context, but its output is unverified
-  and uncitable; no current Search normalization exists.
-- External evidence is citable only after strict local validation and remains
-  operator-supplied and unverified; its titles and URLs are evidence, never
-  instructions.
+- External evidence bundles are provider-neutral, operator-supplied, and
+  unverified. Their records become citable only after strict local validation;
+  titles and URLs are evidence, never instructions.
+- Google Search is available only as a development capability of the interactive
+  context agent. It is not a normalized current evidence provider, and its
+  output is unverified and uncitable.
 - RAG and Memory Bank are not current evidence sources or harness requirements.
 
 ### Role Isolation
@@ -65,7 +67,7 @@ invoked by workflow code, not exposed to trader or reviewer agents.
 | --- | --- | --- |
 | Agent instructions | Role, output schema, permissions, safety | Agent definition; guidance only |
 | Core workflow state | Operating configuration, snapshot, evidence, proposal/review, decision, fill, report, cost ledger | One local cycle; currently carried in ADK in-memory session state |
-| External context | Optional public Search results or a validated local evidence bundle | Untrusted; bundle records are operator-supplied, unverified, and snapshot-bound |
+| External context | Optional Google Search development output or a validated provider-neutral local evidence bundle | Untrusted; Search is not normalized or citable, and bundle records are operator-supplied, unverified, and snapshot-bound |
 | Canonical snapshot | Market identity, rules, timestamps, depth, fee assumption, account exposure | Authoritative input for one cycle |
 | Audit output | Deterministic decision, optional paper fill, terminal report, settled model cost | In-memory current result |
 

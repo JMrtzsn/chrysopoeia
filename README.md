@@ -42,15 +42,19 @@ route reports a fill, rejection, or abstention reason.
   consumes YES-side depth, rejects insufficient depth without a partial fill,
   computes VWAP, and applies `paper-assumption:flat-2pct-v1`.
 
-The current Python layout does not fully isolate these boundaries: deterministic
-orchestration and some domain behavior still live in `chrysopoeia/agent.py`.
-Moving that behavior behind runtime-neutral functions is the next internal
-boundary refactor. Do not add an abstract runtime Protocol/interface now; add
-another runtime adapter only when a second concrete runtime is required.
+Deterministic paper-cycle contracts, evidence, and finalization live in
+`chrysopoeia/paper_cycle.py`; trading, risk, and fills live in
+`chrysopoeia/trading.py`; and `chrysopoeia/agent.py` composes ADK agents,
+wrappers, tools, and workflows. This is not full runtime isolation: cost
+callbacks remain at the ADK edge in `chrysopoeia/cost.py`, and agent wrappers
+bridge ADK Context to the core. Do not add an abstract runtime
+Protocol/interface until a second concrete runtime is required.
 
 ## Current Implementation
 
 - Local Agents CLI/ADK prototype with explicit operator triggers.
+- Checked-in Gemini model configuration through ADK; bounded live model
+  verification uses Vertex AI with ADC.
 - One binary Polymarket market per cycle; paper-only and in-memory.
 - Separate single-turn trader and reviewer roles with no execution tools.
 - Canonical snapshot evidence is always present and authoritative. Optional
@@ -81,15 +85,16 @@ belongs in an automatic pre-push or other hook. Venue live checks remain
 read-only public-data checks, model live checks remain bounded paper cycles, and
 authenticated exchange execution remains prohibited.
 
-OpenCode is an external development/review orchestrator, not a model provider or
-inner trading step. Any future product integration would create a meta-harness
-and requires separate explicit scope.
+OpenCode and official Claude Code are external development/review harnesses, not
+model providers or inner trading steps. Neither is imported or a product
+dependency. Any product integration would create Level 3/meta-harness scope and
+requires explicit design.
 
 ## Quickstart
 
-Python 3.10 or later and `uv` are required. Configure Gemini for ADK with either
-the Developer API or Vertex AI environment supported by ADK; do not put secrets
-in source, prompts, session state, or logs.
+Python 3.10 or later and `uv` are required. Configure Gemini through ADK on
+Vertex AI with ADC for the current supported development and evaluation path;
+never copy credentials into source, prompts, session state, or logs.
 
 `chrysopoeia.toml` is the checked-in operator configuration authority for the
 current `adk` runtime, paper mode, public Polymarket adapter, four ADK model

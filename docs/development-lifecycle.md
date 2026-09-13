@@ -72,12 +72,13 @@ dependency; `.agents-cli-spec.md` contains Chrysopoeia's normative rules.
     demonstrated need, explicit architecture/acceptance criteria, deterministic
     checks, bounded live verification, and approval.
 
-The manual Vertex behavior evaluation remains explicitly gated by
-`RUN_PAPER_CYCLE_EVALUATION=1`, Vertex ADK configuration, project, and location.
-It rejects API-key credentials for that path and makes at most two model calls.
-Its reservation ceilings are derived from `chrysopoeia.toml`, not separate
-operating guarantees. Paid and network checks remain manual: do not put them in
-pre-commit, pre-push, or another automatic hook.
+The checked-in harness model is Gemini through ADK. The supported bounded live
+model verification is the manual Vertex behavior evaluation, explicitly gated
+by `RUN_PAPER_CYCLE_EVALUATION=1`, Vertex ADK configuration, project, location,
+and ADC. It rejects API-key credentials and makes at most two model calls. Its
+reservation ceilings are derived from `chrysopoeia.toml`, not separate operating
+guarantees. Paid and network checks remain manual: do not put them in pre-commit,
+pre-push, or another automatic hook.
 
 The operator path is `chrysopoeia cycle --snapshot FILE [--evidence FILE]`.
 Optional evidence is a hand-authored or future-adapter-produced, bounded local
@@ -88,9 +89,10 @@ fetch market data. Current exposure defaults to zero for this first-cycle
 in-memory command; nonzero current exposure must be supplied explicitly with
 `--market-exposure` and `--total-exposure`.
 
-OpenCode remains an external engineering harness for orchestrating development
-and review, not a model provider or inner trading step. Product integration with
-OpenCode would create a meta-harness and requires separate explicit scope.
+OpenCode and official Claude Code remain external engineering harnesses for
+development and review, not model providers or inner trading steps. Neither is
+imported or a product dependency. Product integration of either would create
+Level 3/meta-harness scope and requires explicit design.
 
 ## Release Evidence
 

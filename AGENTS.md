@@ -15,8 +15,8 @@ gates are defined in `docs/development-lifecycle.md`.
 - Python 3.10 or later.
 - Google Agent Development Kit for Python as the current agent-runtime adapter.
 - `uv` for dependency and environment management.
-- Gemini through `GOOGLE_API_KEY` by default; configure alternatives only through
-  connectors supplied by the selected runtime adapter (ADK today).
+- Gemini through ADK. Current development and evaluation use Vertex AI with
+  Application Default Credentials (ADC), never copied API keys.
 
 ## Commands
 
@@ -31,10 +31,14 @@ gates are defined in `docs/development-lifecycle.md`.
   paper quote/fill, workflow transitions, and audit/evaluation requirements
   runtime-neutral.
 - Keep the root agent in `chrysopoeia/agent.py` while the application is small.
+- Keep deterministic paper-cycle contracts, evidence, and finalization in
+  `chrysopoeia/paper_cycle.py`; keep trading, risk, and fills in
+  `chrysopoeia/trading.py`; and keep `chrysopoeia/agent.py` focused on ADK
+  runtime composition, wrappers, tools, and workflow construction.
 - Treat ADK `Agent`, `Workflow`, callbacks, ToolContext/session state, and Agents
-  CLI/A2A/eval tooling as current runtime-edge integration details. The current
-  Python layout is not fully isolated; the next internal-boundary refactor is to
-  move deterministic orchestration/domain behavior out of `agent.py`.
+  CLI/A2A/eval tooling as current runtime-edge integration details. The boundary
+  is not fully isolated: cost callbacks remain ADK-edge code in
+  `chrysopoeia/cost.py`, and agent wrappers bridge ADK Context to the core.
 - Separate trader and reviewer agents because their responsibilities and tool
   permissions differ; keep order execution outside both.
 - Use ordinary typed Python functions for discrete tools.
@@ -78,9 +82,13 @@ gates are defined in `docs/development-lifecycle.md`.
 - Do not call Chrysopoeia a meta-harness until a second independent harness and
   a coordinating control plane exist. Scheduling, persistence, or managed
   deployment of this harness alone remains Level 2.
-- OpenCode is an external engineering harness for development and review. Never
-  use it as a model provider or inner trading step. Integrating it into the
-  product would create a meta-harness and requires separate explicit scope.
+- OpenCode and official Claude Code are external engineering harnesses for
+  development and review, not model providers or inner trading steps. Existing
+  OpenCode orchestration rules still apply; Claude Code may read this guidance
+  but is not imported or a dependency. Claude Pro credentials belong only to
+  official Claude Code, never Chrysopoeia inference or OpenCode. Product
+  integration of either harness would create Level 3/meta-harness scope and
+  requires explicit design.
 - Treat the sibling `../harness` workspace as optional design provenance only;
   never import it or add a build/runtime dependency on it.
 
