@@ -35,10 +35,11 @@ live-verification gates remain in `docs/development-lifecycle.md`.
    model adapter with explicit pricing or another venue adapter. Stable core
    contracts are sufficient; do not add a generic plugin framework.
    Claude-on-Vertex is a candidate, not committed scope.
-2. **Multi-cycle portfolio and paper accounting design.** Define cross-cycle
-   positions, bankroll, realized and unrealized P&L, maximum-loss enforcement,
-   and market-resolution needs. This design determines persistence requirements
-   rather than assuming them in advance.
+2. **Multi-cycle portfolio and paper accounting design.** Design written in
+   `docs/portfolio-accounting.md` (cross-cycle positions, book/ledger, marks,
+   realized and unrealized P&L, cumulative maximum-loss halt, venue-derived
+   resolution, and the derived journal-based persistence requirement). It
+   awaits operator agreement; implementation is milestones 3–4.
 3. **Durable local session, turn, and accounting records.** Implement
    immediately when milestone 3 requires cross-process state, using atomic
    records with inspection and resume support. This is conditional on the
