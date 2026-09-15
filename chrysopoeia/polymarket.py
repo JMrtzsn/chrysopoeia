@@ -1,6 +1,7 @@
 """Read-only public Polymarket market-data adapter."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from math import isfinite
@@ -8,7 +9,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from chrysopoeia.trading import BookLevel, MarketSnapshot, market_snapshot_identity
+from chrysopoeia.trading import (
+    BookLevel,
+    MarketSnapshot,
+    market_snapshot_identity,
+    validate_polymarket_event_url,
+)
 
 
 API_HOST = "gamma-api.polymarket.com"
@@ -18,12 +24,30 @@ MAX_BOOK_AGE = timedelta(minutes=5)
 MAX_METADATA_FUTURE_SKEW = timedelta(seconds=5)
 MAX_BOOK_LEVELS = 50
 DEFAULT_TIMEOUT = 5.0
-DEFAULT_MAX_RESPONSE_BYTES = 256_000
+DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
 
 
 class PolymarketError(ValueError):
     """A safe failure while loading public Polymarket market data."""
+
+
+@dataclass(frozen=True)
+class MarketCandidate:
+    market_id: str
+    question: str
+    end_time: str
+    source_url: str
+    capture: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "market_id": self.market_id,
+            "question": self.question,
+            "end_time": self.end_time,
+            "source_url": self.source_url,
+            "capture": self.capture,
+        }
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -100,7 +124,7 @@ def _json_body(body: object, max_bytes: int) -> dict[str, object]:
         raise PolymarketError("Polymarket adapter response is too large")
     try:
         data = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
         raise PolymarketError("Polymarket adapter response is not valid JSON") from None
     if not isinstance(data, dict):
         raise PolymarketError("Polymarket adapter response has invalid schema")
@@ -118,6 +142,153 @@ def _fetch_json(url: str, timeout: float, max_bytes: int, fetch: Fetch) -> dict[
     except (HTTPError, URLError, TimeoutError, OSError):
         raise PolymarketError("Polymarket adapter could not fetch public market data") from None
     return _json_body(body, max_bytes)
+
+
+def _fetch_json_list(
+    url: str, timeout: float, max_bytes: int, fetch: Fetch
+) -> list[object]:
+    if urlparse(url).hostname != API_HOST:
+        raise PolymarketError("Polymarket adapter endpoint is not allowlisted")
+    try:
+        body = fetch(url, timeout, max_bytes)
+    except PolymarketError:
+        raise
+    except (HTTPError, URLError, TimeoutError, OSError):
+        raise PolymarketError(
+            "Polymarket adapter could not fetch public market data"
+        ) from None
+    if not isinstance(body, bytes):
+        raise PolymarketError("Polymarket adapter fetch returned invalid data")
+    if len(body) > max_bytes:
+        raise PolymarketError("Polymarket adapter response is too large")
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
+        raise PolymarketError("Polymarket adapter response is not valid JSON") from None
+    if not isinstance(data, list):
+        raise PolymarketError("Polymarket adapter response has invalid schema")
+    return data
+
+
+def _candidate(data: object, current: datetime) -> tuple[MarketCandidate, datetime] | None:
+    try:
+        if not isinstance(data, dict):
+            return None
+        identifier = data.get("id")
+        if isinstance(identifier, bool) or not isinstance(identifier, (str, int)):
+            return None
+        market_id = str(identifier)
+        if (
+            len(market_id) > 100
+            or not market_id.isascii()
+            or not market_id.isdigit()
+            or market_id.startswith("0")
+        ):
+            return None
+        if (
+            data.get("active") is not True
+            or data.get("closed") is not False
+            or data.get("acceptingOrders") is not True
+        ):
+            return None
+        for name in ("outcomes", "clobTokenIds"):
+            value = data.get(name)
+            if isinstance(value, str) and len(value) > 10_000:
+                return None
+        if _list_field(data.get("outcomes"), "outcomes") != ["Yes", "No"]:
+            return None
+        tokens = _list_field(data.get("clobTokenIds"), "token")
+        if (
+            len(tokens) != 2
+            or len(set(tokens)) != 2
+            or any(
+                not isinstance(token, str)
+                or not token.strip()
+                or len(token) > 500
+                for token in tokens
+            )
+        ):
+            return None
+        question = data.get("question")
+        if (
+            not isinstance(question, str)
+            or not question.strip()
+            or len(question) > 500
+            or any(ord(character) < 32 or ord(character) == 127 for character in question)
+        ):
+            return None
+        end = None
+        for value in (data.get("endDate"), data.get("endDateIso")):
+            try:
+                end = _timestamp(value)
+                break
+            except PolymarketError:
+                pass
+        if end is None:
+            return None
+        if end <= current:
+            return None
+        source_url = None
+        for slug in (data.get("eventSlug"), data.get("slug")):
+            if not isinstance(slug, str) or len(slug) > 500:
+                continue
+            candidate_url = f"https://polymarket.com/event/{slug}"
+            try:
+                source_url = validate_polymarket_event_url(candidate_url)
+                break
+            except ValueError:
+                pass
+        if source_url is None:
+            return None
+        candidate = MarketCandidate(
+            market_id,
+            question.strip(),
+            end.isoformat(),
+            source_url,
+            market_id,
+        )
+        return candidate, end
+    except (PolymarketError, TypeError, ValueError):
+        return None
+
+
+def discover_markets(
+    *,
+    limit: int = 10,
+    now: datetime | None = None,
+    fetch: Fetch = _fetch,
+) -> tuple[MarketCandidate, ...]:
+    """Discover at most 20 eligible markets from a bounded public Gamma scan."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
+        raise PolymarketError("Polymarket discovery limit must be between 1 and 20")
+    current = now or datetime.now(timezone.utc)
+    if not isinstance(current, datetime) or current.tzinfo is None:
+        raise PolymarketError("Polymarket adapter current time must include a UTC offset")
+    current = current.astimezone(timezone.utc)
+    found: dict[str, tuple[MarketCandidate, datetime]] = {}
+    for offset in (0, 25, 50):
+        endpoint = (
+            f"https://{API_HOST}/markets?active=true&closed=false"
+            f"&limit=25&offset={offset}"
+        )
+        page = _fetch_json_list(
+            endpoint, DEFAULT_TIMEOUT, DEFAULT_MAX_RESPONSE_BYTES, fetch
+        )
+        for item in page[:25]:
+            parsed = _candidate(item, current)
+            if parsed is None:
+                continue
+            candidate, end = parsed
+            previous = found.get(candidate.market_id)
+            if previous is not None and previous[0] != candidate:
+                raise PolymarketError(
+                    "Polymarket discovery contains a conflicting duplicate market"
+                )
+            found[candidate.market_id] = (candidate, end)
+        if len(page) < 25:
+            break
+    ranked = sorted(found.values(), key=lambda item: (item[1], int(item[0].market_id)))
+    return tuple(candidate for candidate, _ in ranked[:limit])
 
 
 def _book_timestamp(value: object) -> datetime:

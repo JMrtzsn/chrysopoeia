@@ -196,6 +196,97 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(console_misuse.returncode, 2)
         self.assertNotIn("Traceback", misuse.stderr)
 
+    def test_discover_accepts_default_and_bounded_limits(self) -> None:
+        with patch("chrysopoeia.cli.discover_markets", return_value=()) as discover:
+            code, stdout, stderr = self.invoke("discover")
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["candidates"], [])
+        discover.assert_called_once_with(limit=10, fetch=cli.polymarket_fetch)
+
+        for limit in ("1", "20"):
+            with (
+                self.subTest(limit=limit),
+                patch("chrysopoeia.cli.discover_markets", return_value=()) as discover,
+            ):
+                code, _, stderr = self.invoke("discover", "--limit", limit)
+                self.assertEqual((code, stderr), (0, ""))
+                discover.assert_called_once_with(
+                    limit=int(limit), fetch=cli.polymarket_fetch
+                )
+
+        for limit in ("0", "21", "1.0", "true"):
+            with self.subTest(limit=limit):
+                code, stdout, stderr = self.invoke("discover", "--limit", limit)
+                self.assertEqual((code, stdout), (2, ""))
+                self.assertNotIn("Traceback", stderr)
+
+    def test_discover_emits_exact_metadata_only_json_and_empty_success(self) -> None:
+        from chrysopoeia.polymarket import MarketCandidate
+
+        candidates = (
+            MarketCandidate(
+                "12345",
+                "Will it rain?",
+                "2026-09-14T12:00:00+00:00",
+                "https://polymarket.com/event/will-it-rain",
+                "12345",
+            ),
+        )
+        with patch("chrysopoeia.cli.discover_markets", return_value=candidates):
+            code, stdout, stderr = self.invoke("discover", "--limit", "1")
+
+        expected = {
+            "schema_version": 1,
+            "record_type": "market_discovery",
+            "venue": "polymarket",
+            "mode": "public-read-only",
+            "candidates": [
+                {
+                    "market_id": "12345",
+                    "question": "Will it rain?",
+                    "end_time": "2026-09-14T12:00:00+00:00",
+                    "source_url": "https://polymarket.com/event/will-it-rain",
+                    "capture": "12345",
+                }
+            ],
+        }
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(
+            stdout, json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        for forbidden in ("price", "liquidity", "volume", "bestAsk", "depth", "score"):
+            self.assertNotIn(forbidden, stdout)
+
+        with patch("chrysopoeia.cli.discover_markets", return_value=()):
+            code, stdout, stderr = self.invoke("discover")
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["candidates"], [])
+
+    def test_discover_failures_are_safe_and_config_precedes_io(self) -> None:
+        secret = "private provider body /private/config.toml"
+        with patch(
+            "chrysopoeia.cli.discover_markets", side_effect=RuntimeError(secret)
+        ):
+            code, stdout, stderr = self.invoke("discover")
+        self.assertEqual(
+            (code, stdout, stderr),
+            (2, "", "discovery failed: market data unavailable\n"),
+        )
+        self.assertNotIn(secret, stderr)
+        self.assertNotIn("Traceback", stderr)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "private.toml"
+            config.write_text("[runtime\nsecret='do-not-leak'")
+            with patch("chrysopoeia.cli.discover_markets") as discover:
+                code, stdout, stderr = self.invoke("discover", "--config", str(config))
+        self.assertEqual(
+            (code, stdout, stderr),
+            (2, "", "discovery failed: invalid configuration\n"),
+        )
+        discover.assert_not_called()
+
     def test_capture_accepts_url_and_identifier_and_emits_exact_public_record(
         self,
     ) -> None:

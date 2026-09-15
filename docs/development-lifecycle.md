@@ -89,6 +89,13 @@ fetch market data. Current exposure defaults to zero for this first-cycle
 in-memory command; nonzero current exposure must be supplied explicitly with
 `--market-exposure` and `--total-exposure`.
 
+The bounded discovery venue check runs `chrysopoeia discover --limit 1`, then
+passes the returned `capture` market ID to `chrysopoeia capture MARKET`. It is a
+manual public read-only check bounded to three Gamma requests and one Gamma plus
+one CLOB capture request. Discovery samples at most 75 records in three 25-record
+pages. Every request has a five-second timeout and 256 KiB response limit; the
+check makes no model calls and has zero model cost.
+
 OpenCode and official Claude Code remain external engineering harnesses for
 development and review, not model providers or inner trading steps. Neither is
 imported or a product dependency. Product integration of either would create

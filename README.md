@@ -65,6 +65,11 @@ Protocol/interface until a second concrete runtime is required.
 - Offline deterministic unit and harness evaluations; paid model evaluation is
   separately gated and manual.
 
+## Roadmap
+
+See [`ROADMAP.md`](ROADMAP.md) for ordered work. `.agents-cli-spec.md` remains
+authoritative for product scope and acceptance.
+
 ## Verification Policy
 
 Every externally observable feature addition or change is incomplete until both
@@ -108,6 +113,7 @@ uv run python -m unittest discover
 uv run python -c "import chrysopoeia.agent"
 uv run chrysopoeia validate --json
 uv run chrysopoeia inspect
+uv run chrysopoeia discover --limit 10
 uv run chrysopoeia capture 12345 --output snapshot.json
 uv run chrysopoeia cycle --snapshot snapshot.json --evidence evidence.json
 uv run adk run chrysopoeia
@@ -118,6 +124,18 @@ PATH] [--json]` and `chrysopoeia inspect [--config PATH] [--json]`. Without
 `--config`, both commands load the checked-in `chrysopoeia.toml` independently
 of the current working directory. `python -m chrysopoeia` accepts the same
 commands.
+
+`chrysopoeia discover [--limit N] [--config PATH]` performs an explicitly
+operator-triggered public Gamma metadata scan with no model, CLOB, credentials,
+or file writes. It samples at most three 25-record pages (75 records total) and
+emits up to 20 eligible future binary markets ordered by end time and market ID
+within that bounded sample; it does not rank the whole market universe. Output
+is a compact JSON `market_discovery` record containing only market ID, question,
+end time, canonical public source URL, and a `capture` value equal to the market
+ID; an eligible-empty scan succeeds with an empty candidate list. Pass a returned
+`capture` value to the existing `chrysopoeia capture MARKET` command to fetch
+the selected market's metadata and depth. Discovery remains pending release
+acceptance until its mandatory bounded live check passes.
 
 `chrysopoeia capture MARKET [--config PATH] [--output PATH]` accepts a
 Polymarket event URL or market ID and emits one compact JSON snapshot to stdout.

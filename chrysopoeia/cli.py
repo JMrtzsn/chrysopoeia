@@ -18,7 +18,7 @@ from chrysopoeia.paper_cycle import (
     validate_evidence_bundle,
 )
 from chrysopoeia.polymarket import _fetch as polymarket_fetch
-from chrysopoeia.polymarket import load_market_snapshot
+from chrysopoeia.polymarket import discover_markets, load_market_snapshot
 from chrysopoeia.trading import (
     BookLevel,
     MarketSnapshot,
@@ -324,6 +324,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture.add_argument("market")
     capture.add_argument("--config", type=Path)
     capture.add_argument("--output", type=Path)
+    discover = commands.add_parser("discover")
+    discover.add_argument("--limit", type=int, choices=range(1, 21), default=10)
+    discover.add_argument("--config", type=Path)
     cycle = commands.add_parser("cycle")
     cycle.add_argument("--snapshot", type=Path, required=True)
     cycle.add_argument("--config", type=Path)
@@ -342,7 +345,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_harness_config(path)
     except (ConfigurationError, OSError, TypeError, ValueError) as exc:
-        if args.command == "capture":
+        if args.command in {"capture", "discover"}:
+            if args.command == "discover":
+                parser.exit(2, "discovery failed: invalid configuration\n")
             parser.exit(2, "capture failed: invalid configuration\n")
         if args.command == "cycle":
             parser.exit(2, "cycle failed: model/workflow unavailable\n")
@@ -377,6 +382,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             except (OSError, ValueError):
                 parser.exit(2, "capture failed: output unavailable\n")
         print(content.decode(), end="")
+        return 0
+    if args.command == "discover":
+        try:
+            candidates = discover_markets(limit=args.limit, fetch=polymarket_fetch)
+            result = {
+                "schema_version": 1,
+                "record_type": "market_discovery",
+                "venue": "polymarket",
+                "mode": "public-read-only",
+                "candidates": [candidate.as_dict() for candidate in candidates],
+            }
+        except Exception:
+            parser.exit(2, "discovery failed: market data unavailable\n")
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "cycle":
         try:
