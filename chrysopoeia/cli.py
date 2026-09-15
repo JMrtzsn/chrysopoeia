@@ -339,7 +339,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle.add_argument("--market-exposure", type=float, default=0)
     cycle.add_argument("--total-exposure", type=float, default=0)
     cycle.add_argument("--output", type=Path)
+    book = commands.add_parser("book")
+    book.add_argument("--journal", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.command == "book":
+        from chrysopoeia.accounting import JournalError, replay
+
+        try:
+            state = replay(args.journal)
+        except ValueError as exc:
+            parser.exit(2, f"book failed: {exc}\n")
+        except JournalError as exc:
+            parser.exit(2, f"book failed: {exc}\n")
+        positions = [
+            {
+                "market_id": position.market_id,
+                "snapshot_id": position.snapshot_id,
+                "entered_at": position.entered_at,
+                "price": position.price,
+                "shares": position.shares,
+                "total_cost": position.total_cost,
+                "mark_price": state.marks.get(position.market_id, position.price),
+            }
+            for position in state.positions.values()
+        ]
+        summary = {
+            "schema_version": 1,
+            "record_type": "book_report",
+            "journal": str(args.journal),
+            "status": state.status,
+            "bankroll": state.bankroll,
+            "maximum_loss": state.maximum_loss,
+            "realized_pnl": state.realized_pnl,
+            "unrealized_pnl": state.unrealized_pnl,
+            "open_exposure": state.open_exposure,
+            "bankroll_now": state.bankroll_now,
+            "open_positions": positions,
+            "admitted_turns": len(state.admitted_turns),
+        }
+        print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+        return 0
     path = args.config or DEFAULT_CONFIG
     label = "chrysopoeia.toml" if args.config is None else args.config.name
     try:

@@ -164,6 +164,13 @@ command to create an evidence bundle. Its exact envelope contains only
 `market_id`, `evidence: [canonical, external...]`, and
 `provenance: "operator-supplied-unverified"`.
 
+`chrysopoeia book --journal DIR` derives and prints the durable paper-accounting
+book from that journal directory: session status, bankroll, realized and
+unrealized P&L, open exposure, and open positions. The journal is the only
+durable financial truth; agents never read or mutate it, and repeated turn
+admission is an idempotent no-op. A corrupt journal is refused, never silently
+repaired. See `docs/portfolio-accounting.md` for the design contract.
+
 The ADK web UI is an optional development interface:
 
 ```sh
