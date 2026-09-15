@@ -346,7 +346,78 @@ def main(argv: Sequence[str] | None = None) -> int:
     settle_command = commands.add_parser("settle")
     settle_command.add_argument("--journal", type=Path, required=True)
     settle_command.add_argument("--market", required=True)
+    mark = commands.add_parser("mark")
+    mark.add_argument("--journal", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.command == "mark":
+        from chrysopoeia.accounting import (
+            JournalError,
+            record_mark,
+            replay,
+        )
+
+        try:
+            journal_state = replay(args.journal)
+            if not journal_state.positions:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "record_type": "book_mark_report",
+                            "journal": str(args.journal),
+                            "marked": [],
+                            "status": journal_state.status,
+                            "realized_pnl": journal_state.realized_pnl,
+                            "unrealized_pnl": journal_state.unrealized_pnl,
+                            "open_exposure": journal_state.open_exposure,
+                            "bankroll_now": journal_state.bankroll_now,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                return 0
+            marked: list[dict[str, object]] = []
+            for market_id, position in journal_state.positions.items():
+                try:
+                    fresh = load_market_snapshot(
+                        market_id,
+                        journal_state.bankroll,
+                        position.total_cost,
+                        journal_state.open_exposure,
+                        fetch=polymarket_fetch,
+                        paper_fee_rate=0.0,
+                        paper_fee_source="paper-assumption:no-fee-v1",
+                    )
+                except Exception:
+                    raise JournalError(
+                        f"mark capture for market {market_id} failed"
+                    ) from None
+                record_mark(args.journal, replay(args.journal), market_id, fresh.price)
+                marked.append(
+                    {
+                        "market_id": market_id,
+                        "entry_price": position.price,
+                        "mark_price": fresh.price,
+                        "mark_captured_at": fresh.captured_at,
+                    }
+                )
+            final = replay(args.journal)
+        except (ValueError, JournalError) as exc:
+            parser.exit(2, f"mark failed: {exc}\n")
+        summary = {
+            "schema_version": 1,
+            "record_type": "book_mark_report",
+            "journal": str(args.journal),
+            "marked": marked,
+            "status": final.status,
+            "realized_pnl": final.realized_pnl,
+            "unrealized_pnl": final.unrealized_pnl,
+            "open_exposure": final.open_exposure,
+            "bankroll_now": final.bankroll_now,
+        }
+        print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+        return 0
     if args.command == "settle":
         from chrysopoeia.accounting import (
             JournalError,

@@ -213,3 +213,16 @@ never include secrets, private user data, or hidden reasoning.
 - Cost: zero model cost; no paid services.
 - Authentication: none required; public endpoints.
 - Cleanup: nothing created beyond temp journal directories.
+
+### Book marking (2026-09-15)
+
+- Command: `chrysopoeia mark --journal <temp dir>` over the open live-verified
+  paper session (one open position on market 559651).
+- Real boundary: public Gamma sector policy and one CLOB book capture (the
+  standard capture path). First attempt failed on a transient book fetch and
+  the retry succeeded; failures leave no mark record (offline tested).
+- Result: fresh venue mark 0.038 recorded against the entry price 0.005;
+  unrealized P&L +$789.60 in the journal and report.
+- Bounds: one capture (one Gamma + one CLOB read-only request). Approval:
+  operator pre-approved the read-only venue checks. Cost: zero model cost.
+  Authentication: none required. Cleanup: temp dir only.

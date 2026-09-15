@@ -184,6 +184,10 @@ prints a settlement report including realized P&L and the cumulative-loss halt
 state. Unresolved, ambiguous, or position-less markets are refused without
 journal changes. This is the only path that realizes P&L today.
 
+`chrysopoeia mark --journal DIR` re-captures every open position's market and
+records a fresh venue mark, so the book reports current unrealized P&L. A
+failed capture records no mark and no state change.
+
 The ADK web UI is an optional development interface:
 
 ```sh

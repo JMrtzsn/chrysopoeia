@@ -45,6 +45,10 @@ live-verification gates remain in `docs/development-lifecycle.md`.
   settlement, refusal of unresolved or ambiguous markets. Live-verified
   2026-09-15 against a real resolved market; see Recorded Live Verification in
   `docs/development-lifecycle.md`.
+- [x] Venue price marking (`chrysopoeia/cli.py`: `mark`): re-capture of open
+  positions feeds journal marks so unrealized P&L reflects live venue data.
+  Live-verified 2026-09-15; see Recorded Live Verification in
+  `docs/development-lifecycle.md`.
 
 ## Next
 
