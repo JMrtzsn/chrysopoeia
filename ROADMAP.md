@@ -40,13 +40,18 @@ live-verification gates remain in `docs/development-lifecycle.md`.
    realized and unrealized P&L, cumulative maximum-loss halt, venue-derived
    resolution, and the derived journal-based persistence requirement). It
    awaits operator agreement; implementation is milestones 3–4.
-3. **Durable local session, turn, and accounting records.** Implement
-   immediately when milestone 3 requires cross-process state, using atomic
-   records with inspection and resume support. This is conditional on the
-   accounting design, not the current priority.
-4. **Idempotent turn admission and recovery.** After durable records exist, and
-   only if repeated or unattended cycles are needed, prevent duplicate fills or
-   records and define terminal versus resumable states and recovery behavior.
+3. **Durable local session, turn, and accounting records.** Implemented:
+   `chrysopoeia/accounting.py` journal/replay/book, the `book` inspection CLI,
+   and `cycle --journal` admission, exposure, fill recording, halt checking,
+   and `book_after` reporting (`docs/portfolio-accounting.md` is the contract).
+   Live-verified 2026-09-15; see Recorded Live Verification in
+   `docs/development-lifecycle.md`. The configured default model alias
+   `gemini-flash-latest` remains Gemini-API-only; a Vertex run needs a
+   Vertex-native alias in the config — pending operator decision.
+4. **Idempotent turn admission.** Largely implemented with milestone 3
+   (deterministic turn IDs `turn-<sha24>`, no-op repeats, pre-model same-market
+   preemption). Full turn-level recovery of interrupted cycles remains when
+   unattended operation is actually needed.
 
 ## Deferred
 

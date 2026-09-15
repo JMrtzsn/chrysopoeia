@@ -137,3 +137,26 @@ never include secrets, private user data, or hidden reasoning.
 - Authentication: none required; public endpoints.
 - Cleanup: temporary output retained only in `os_tmpdir`; no services created.
 - Offline preconditions: 135 unit tests passed before the live check.
+
+### Journaled paper cycle (2026-09-15)
+
+- Commands: one `uv run chrysopoeia cycle --snapshot <captured market 559651>
+  --config <temp config> --journal <temp dir>`, then one identical re-run for
+  the admission idempotency proof.
+- Real boundary: Gemini 2.5 Flash on Vertex AI with ambient ADC (project
+  PROJECT_ID, us-central1); no copied keys. The project's Agent
+  Platform API had to be enabled first (zero-cost prerequisite) and the
+  configured default `gemini-flash-latest` alias proved unavailable on Vertex,
+  so the temp config used the `gemini-2.5-flash` alias with the configured
+  $1/$3 pricing left as a conservative ceiling.
+- Result: first cycle abstained after exactly one trader call (estimated
+  $0.00226 against a $0.022528 reserved ceiling); journal recorded
+  `session_opened` and `turn_admitted`; `book_after` appeared in the report.
+  The re-run abstained again (estimated $0.00215) and added no journal
+  records — repeat turn admission was a no-op (2 lines stayed 2 lines).
+- Bounds: two cycles, at most one trader call each; reviewer never invoked;
+  no venue network activity during the cycles.
+- Approval: operator approved the bounded live model run.
+- Cost: ~$0.0044 total estimated model cost.
+- Cleanup: temporary config and journal live only in the OS temp directory;
+  no cloud resources created beyond the API enablement.
