@@ -28,6 +28,16 @@ live-verification gates remain in `docs/development-lifecycle.md`.
   75-market sample (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`; spec:
   Core Capability Boundaries). Live-verified 2026-09-15; see Recorded Live
   Verification in `docs/development-lifecycle.md`.
+- [x] Durable local session, turn, and accounting records
+  (`chrysopoeia/accounting.py`, `chrysopoeia/cli.py`; contract:
+  `docs/portfolio-accounting.md`). The `book` inspection CLI and
+  `cycle --journal` admission, exposure, fill recording, halt checking, and
+  `book_after` reporting are live-verified 2026-09-15, including the full
+  abstain→review→reject→fill route and same-market preemption; see Recorded
+  Live Verification in `docs/development-lifecycle.md`.
+- [x] Idempotent turn admission (`chrysopoeia/accounting.py`): deterministic
+  `turn-<sha24>` IDs, no-op repeats, and pre-model same-market preemption,
+  also covered by the 2026-09-15 live verification.
 
 ## Next
 

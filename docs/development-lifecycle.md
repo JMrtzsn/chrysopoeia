@@ -160,3 +160,34 @@ never include secrets, private user data, or hidden reasoning.
 - Cost: ~$0.0044 total estimated model cost.
 - Cleanup: temporary config and journal live only in the OS temp directory;
   no cloud resources created beyond the API enablement.
+
+### Full trade-route paper cycle (2026-09-15)
+
+- Setup: seeded rich snapshot (same real market 559651 questions/rules,
+  canonical identity recomputed: price 0.005, one million-share YES ask) plus a
+  hand-authored snapshot-bound evidence bundle (provenance
+  `operator-supplied-unverified`, four public-URL external records). The spec
+  explicitly admits seeded local cycles; the allocation was pure paper.
+- Real boundary: Gemini 2.5 Flash on Vertex AI (ADC only), ~13 one-cycle runs.
+- Observed route progression across runs:
+  1. canonical-snapshot-only cycles abstain five times (~$0.002 each) even at a
+     seeded 0.02 price — the trader correctly refuses without citable evidence;
+  2. with evidence, the trader proposed and the reviewer ran and was consulted
+     (first non-abstain route: `reviewer_called: true`); the deterministic
+     policy rejected on the 5-point minimum net edge;
+  3. next run the policy rejected on the 1% per-market exposure cap;
+  4. with the operator raising the limit to 20% (a documented operator flag),
+     the cycle **filled**: 24,000 shares @ VWAP 0.005, $120 gross, $2.40 fee,
+     and the journal recorded the position (book: open exposure $122.40,
+     bankroll-now $877.60, unrealized −$2.40 fee float);
+  5. an immediate re-run of the same cycle was refused **before any model
+     call** ("market has an open journal position"), proving same-market
+     preemption live.
+- Result: abstain → review → deterministic reject (edge, then exposure) →
+  review-approved fill → journal record → duplicate-turn preemption all
+  observed against the real model boundary.
+- Bounds: ~13 cycles, ≤2 calls each, no reviewer call on abstentions.
+- Approval: operator approved the bounded live model runs.
+- Cost: ~$0.03 total estimated model cost across the progression.
+- Cleanup: seeded snapshots, evidence bundles, and journals live only in the OS
+  temp directory; one journal intentionally left open (paper only).
