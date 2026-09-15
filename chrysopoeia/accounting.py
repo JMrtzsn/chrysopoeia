@@ -11,6 +11,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -296,6 +297,14 @@ def open_session(directory: Path, bankroll: float, maximum_loss: float) -> Book:
             "resumed session configuration differs from the requested configuration"
         )
     return book
+
+
+def cycle_turn_id(snapshot_id: str, market_id: str) -> str:
+    """Return the deterministic turn identity for one snapshot/market pair."""
+    _clean(snapshot_id, "snapshot_id")
+    _clean(market_id, "market_id")
+    identity = json.dumps([snapshot_id, market_id], separators=(",", ":"))
+    return "turn-" + sha256(identity.encode()).hexdigest()[:24]
 
 
 def admit_turn(directory: Path, turn_id: str, snapshot_id: str, market_id: str) -> dict:

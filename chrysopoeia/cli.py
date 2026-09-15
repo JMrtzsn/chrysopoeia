@@ -5,6 +5,7 @@ import os
 import stat
 import tempfile
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from chrysopoeia.configuration import (
@@ -338,6 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle.add_argument("--daily-cloud-cost-budget", type=float, default=5)
     cycle.add_argument("--market-exposure", type=float, default=0)
     cycle.add_argument("--total-exposure", type=float, default=0)
+    cycle.add_argument("--journal", type=Path)
     cycle.add_argument("--output", type=Path)
     book = commands.add_parser("book")
     book.add_argument("--journal", type=Path, required=True)
@@ -456,16 +458,54 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except (TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid operating configuration\n")
+        total_exposure = args.total_exposure
+        book_state = None
+        if args.journal is not None:
+            from chrysopoeia.accounting import (
+                JournalError,
+                Position,
+                admit_turn,
+                check_halt,
+                cycle_turn_id,
+                open_session,
+                record_fill,
+                replay,
+            )
+
+            try:
+                book_state = open_session(
+                    args.journal, operating.bankroll, operating.maximum_loss
+                )
+            except (ValueError, JournalError) as exc:
+                parser.exit(2, f"cycle failed: {exc}\n")
+            total_exposure += book_state.open_exposure
         try:
             snapshot = load_capture_snapshot(
                 args.snapshot,
                 config,
                 operating,
                 args.market_exposure,
-                args.total_exposure,
+                total_exposure,
             )
         except (OSError, TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid snapshot\n")
+        if args.journal is not None and book_state is not None:
+            blocking = book_state.positions.get(snapshot.market_id)
+            if blocking is not None:
+                parser.exit(
+                    2,
+                    "cycle failed: market has an open journal position; "
+                    "settle it before restarting a cycle on the same market\n",
+                )
+            try:
+                admit_turn(
+                    args.journal,
+                    cycle_turn_id(snapshot.snapshot_id, snapshot.market_id),
+                    snapshot.snapshot_id,
+                    snapshot.market_id,
+                )
+            except (ValueError, JournalError) as exc:
+                parser.exit(2, f"cycle failed: {exc}\n")
         try:
             evidence = (
                 load_evidence_bundle(args.evidence, snapshot)
@@ -480,13 +520,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = asyncio.run(
                 run_paper_cycle(config, snapshot, operating, evidence=evidence)
             )
-            content = (
-                json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode()
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             parser.exit(2, "cycle failed: model/workflow unavailable\n")
+        if book_state is not None and args.journal is not None:
+            fill_summary = result.get("fill")
+            try:
+                if isinstance(fill_summary, dict):
+                    position = Position(
+                        market_id=snapshot.market_id,
+                        snapshot_id=snapshot.snapshot_id,
+                        entered_at=datetime.now(timezone.utc).isoformat(),
+                        price=fill_summary["price"],
+                        amount=fill_summary["amount"],
+                        shares=fill_summary["shares"],
+                        fee=fill_summary["fee"],
+                        total_cost=fill_summary["total_cost"],
+                    )
+                    record_fill(args.journal, replay(args.journal), position)
+                    check_halt(args.journal, replay(args.journal))
+                book_state = replay(args.journal)
+                result["book_after"] = {
+                    "status": book_state.status,
+                    "realized_pnl": book_state.realized_pnl,
+                    "unrealized_pnl": book_state.unrealized_pnl,
+                    "open_exposure": book_state.open_exposure,
+                    "bankroll_now": book_state.bankroll_now,
+                    "open_positions": len(book_state.positions),
+                }
+            except (JournalError, KeyError, TypeError, ValueError):
+                parser.exit(2, "cycle failed: journal workflow rejected the fill\n")
+        content = (
+            json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
         if args.output is not None:
             try:
                 _write_new(args.output, content)

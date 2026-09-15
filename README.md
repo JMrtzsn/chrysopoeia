@@ -148,7 +148,7 @@ snapshot file is not an authoritative or durable store.
 `chrysopoeia cycle --snapshot FILE [--evidence FILE] [--config PATH] [--bankroll 1000]
 [--maximum-market-exposure 0.01] [--maximum-total-exposure 0.10]
 [--maximum-loss 100] [--daily-cloud-cost-budget 5] [--market-exposure 0]
-[--total-exposure 0] [--output PATH]` runs the actual bounded trader/reviewer ADK
+[--total-exposure 0] [--journal DIR] [--output PATH]` runs the actual bounded trader/reviewer ADK
 workflow over that local capture without market HTTP. The optional output file
 matches stdout and is created without overwrite. This is a first-cycle command:
 current market and total exposure default to zero, so operators with existing
@@ -170,6 +170,11 @@ unrealized P&L, open exposure, and open positions. The journal is the only
 durable financial truth; agents never read or mutate it, and repeated turn
 admission is an idempotent no-op. A corrupt journal is refused, never silently
 repaired. See `docs/portfolio-accounting.md` for the design contract.
+With `--journal DIR`, the cycle admits its turn idempotently in that journal,
+derives total exposure from the journal's open positions (the listed exposure
+flags add operator-known exposure beyond the journal), refuses to run when the
+same market already has an open position, records any paper fill, checks the
+cumulative-loss halt, and appends a `book_after` summary to the cycle report.
 
 The ADK web UI is an optional development interface:
 

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from chrysopoeia import cli
 from chrysopoeia.polymarket import PolymarketError
-from chrysopoeia.trading import MarketSnapshot
+from chrysopoeia.trading import BookLevel, MarketSnapshot, market_snapshot_identity
 
 ROOT = Path(__file__).parents[1]
 EXPECTED = {
@@ -626,6 +626,176 @@ class OperatorCliTests(unittest.TestCase):
             (snapshot_arg.market_exposure, snapshot_arg.total_exposure), (2, 3)
         )
         self.assertEqual(operating.trader_agents, 1)
+
+    def cycle_fill_result(self) -> dict[str, object]:
+        snapshot = MarketSnapshot(
+            "placeholder",
+            "12345",
+            0.4,
+            1,
+            0,
+            0,
+            question="Will it rain?",
+            resolution_rules="Resolves Yes if rain is measured.",
+            end_time="2027-01-01T00:00:00+00:00",
+            captured_at="2026-09-01T00:00:00+00:00",
+            source_url="https://polymarket.com/event/will-it-rain",
+            yes_token_id="yes-token",
+            asks=(BookLevel(0.4, 20),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+            book_captured_at="2026-09-01T00:00:00+00:00",
+        )
+        snapshot = replace(snapshot, snapshot_id=market_snapshot_identity(snapshot))
+        fill = {
+            "price": 0.4,
+            "amount": 4.0,
+            "shares": 10.0,
+            "fee": 0.08,
+            "total_cost": 4.08,
+            "levels_consumed": 1,
+        }
+        result = {
+            "schema_version": 1,
+            "record_type": "paper_cycle_result",
+            "snapshot_id": snapshot.snapshot_id,
+            "market_id": "12345",
+            "status": "filled",
+            "reason": "approved by review and deterministic risk policy",
+            "trader_called": True,
+            "reviewer_called": True,
+            "fill": fill,
+            "ledger_statuses": ["completed", "completed"],
+            "actual_estimated_cost_usd": "0.000064",
+            "maximum_reserved_cost_usd": "0.022528",
+        }
+        return snapshot, result
+
+    def test_cycle_with_journal_records_fill_and_book_after(self) -> None:
+        from chrysopoeia.accounting import journal_path, replay
+
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            source = Path(directory) / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            output = Path(directory) / "result.json"
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ),
+                patch("chrysopoeia.cli.polymarket_fetch"),
+            ):
+                code, stdout, stderr = self.invoke(
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--journal",
+                    str(journal),
+                    "--output",
+                    str(output),
+                )
+            self.assertEqual((code, stderr), (0, ""))
+            reported = json.loads(stdout)
+            self.assertEqual(reported["book_after"]["open_positions"], 1)
+            self.assertAlmostEqual(reported["book_after"]["open_exposure"], 4.08)
+            self.assertEqual(reported["book_after"]["status"], "open")
+            state = replay(journal)
+            self.assertIn("12345", state.positions)
+            self.assertEqual(len(state.admitted_turns), 1)
+            self.assertEqual(
+                len(journal_path(journal).read_text().splitlines()),
+                3,  # session_opened, turn_admitted, fill_recorded
+            )
+
+    def test_cycle_with_journal_refuses_same_market_position_before_operating(
+        self,
+    ) -> None:
+        from chrysopoeia.accounting import Position as BookPosition
+        from chrysopoeia.accounting import open_session, record_fill, replay
+
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            open_session(journal, 1_000.0, 100.0)
+            record_fill(
+                journal,
+                replay(journal),
+                BookPosition(
+                    market_id="12345",
+                    snapshot_id=snapshot.snapshot_id,
+                    entered_at="2026-09-15T00:00:00+00:00",
+                    price=0.41,
+                    amount=10.0,
+                    shares=24.39,
+                    fee=0.2,
+                    total_cost=10.2,
+                ),
+            )
+            source = Path(directory) / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            output = Path(directory) / "result.json"
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ) as run,
+                patch("chrysopoeia.cli.polymarket_fetch"),
+            ):
+                code, _stdout, stderr = self.invoke(
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--journal",
+                    str(journal),
+                    "--output",
+                    str(output),
+                )
+            self.assertEqual(code, 2)
+            self.assertIn("open journal position", stderr)
+            run.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_cycle_with_journal_derives_total_exposure_from_book(self) -> None:
+        from chrysopoeia.accounting import Position as BookPosition
+        from chrysopoeia.accounting import open_session, record_fill, replay
+
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            open_session(journal, 1_000.0, 100.0)
+            other = BookPosition(
+                market_id="other-market",
+                snapshot_id=snapshot.snapshot_id,
+                entered_at="2026-09-15T00:00:00+00:00",
+                price=0.5,
+                amount=10.0,
+                shares=20.0,
+                fee=0.2,
+                total_cost=10.2,
+            )
+            record_fill(journal, replay(journal), other)
+            source = Path(directory) / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ) as run,
+                patch("chrysopoeia.cli.polymarket_fetch"),
+            ):
+                code, _stdout, stderr = self.invoke(
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--journal",
+                    str(journal),
+                )
+                self.assertEqual((code, stderr), (0, ""))
+                snapshot_arg = run.call_args.args[1]
+                self.assertEqual(snapshot_arg.total_exposure, 10.2)
+                self.assertEqual(snapshot_arg.market_exposure, 0.0)
 
     def test_cycle_failures_are_sanitized_and_leave_no_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
