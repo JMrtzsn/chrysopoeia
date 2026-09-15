@@ -176,6 +176,14 @@ flags add operator-known exposure beyond the journal), refuses to run when the
 same market already has an open position, records any paper fill, checks the
 cumulative-loss halt, and appends a `book_after` summary to the cycle report.
 
+`chrysopoeia settle --journal DIR --market MARKET` closes an open paper
+position against venue reality: it reads the market's public Polymarket
+resolution (one Gamma request, read-only), normalizes it to canonical
+`resolved_yes`/`resolved_no`, records the `settled` event in the journal, and
+prints a settlement report including realized P&L and the cumulative-loss halt
+state. Unresolved, ambiguous, or position-less markets are refused without
+journal changes. This is the only path that realizes P&L today.
+
 The ADK web UI is an optional development interface:
 
 ```sh
