@@ -26,7 +26,8 @@ live-verification gates remain in `docs/development-lifecycle.md`.
   `chrysopoeia/fast_api_app.py`; spec: Adapter And Configuration Model).
 - [x] Bounded public market discovery and capture handoff over a deterministic
   75-market sample (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`; spec:
-  Core Capability Boundaries).
+  Core Capability Boundaries). Live-verified 2026-09-15; see Recorded Live
+  Verification in `docs/development-lifecycle.md`.
 
 ## Next
 

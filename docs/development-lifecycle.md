@@ -117,3 +117,23 @@ A future managed release additionally records deployment target, runtime
 identity, required services, migration/recovery plan, observability/privacy
 settings, and rollback procedure. Production logs default to metadata only and
 never include secrets, private user data, or hidden reasoning.
+
+## Recorded Live Verification
+
+### Bounded market discovery (2026-09-15)
+
+- Commands: `uv run chrysopoeia discover --limit 1` then
+  `uv run chrysopoeia capture 559651 --output <local file>`
+- Real boundary: public Polymarket Gamma and CLOB read-only endpoints.
+- Bounds: discovery 1 candidate (under the 75-record/three-page sample limit,
+  bounded to the documented per-check Gamma requests); capture one Gamma plus
+  one CLOB request with five-second timeout and 256 KiB limit. No model calls.
+- Result: discovery returned candidate market 559651 ("Xi Jinping out before
+  2027?"); capture returned a validated 2,723-byte canonical snapshot with
+  order book, 0.02 fee provenance (`paper-assumption:flat-2pct-v1`),
+  resolution rules, token ID, and source URL. Both commands exited 0.
+- Approval: operator approved the read-only network check.
+- Cost: zero model cost; no paid services used.
+- Authentication: none required; public endpoints.
+- Cleanup: temporary output retained only in `os_tmpdir`; no services created.
+- Offline preconditions: 135 unit tests passed before the live check.
