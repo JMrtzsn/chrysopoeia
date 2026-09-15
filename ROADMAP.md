@@ -24,28 +24,25 @@ live-verification gates remain in `docs/development-lifecycle.md`.
   `docs/development-lifecycle.md`; spec: Phase 1 Acceptance Criteria).
 - [x] Agents CLI and A2A prototype surface (`agents-cli-manifest.yaml`,
   `chrysopoeia/fast_api_app.py`; spec: Adapter And Configuration Model).
+- [x] Bounded public market discovery and capture handoff over a deterministic
+  75-market sample (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`; spec:
+  Core Capability Boundaries).
 
 ## Next
 
-1. **Bounded market discovery and opportunity gate — In progress.** The
-   explicitly operator-triggered, public read-only metadata sample of up to 75
-   markets and capture handoff are implemented locally without a whole-universe
-   ranking, scheduler, model calls, or persistence. Keep this item here until
-   offline gates and the mandatory bounded live discovery/capture check pass and
-   acceptance evidence is recorded.
-2. **Second concrete adapter proof.** Only on an actual need, add either another
+1. **Second concrete adapter proof.** Only on an actual need, add either another
    model adapter with explicit pricing or another venue adapter. Stable core
    contracts are sufficient; do not add a generic plugin framework.
    Claude-on-Vertex is a candidate, not committed scope.
-3. **Multi-cycle portfolio and paper accounting design.** Define cross-cycle
+2. **Multi-cycle portfolio and paper accounting design.** Define cross-cycle
    positions, bankroll, realized and unrealized P&L, maximum-loss enforcement,
    and market-resolution needs. This design determines persistence requirements
    rather than assuming them in advance.
-4. **Durable local session, turn, and accounting records.** Implement
+3. **Durable local session, turn, and accounting records.** Implement
    immediately when milestone 3 requires cross-process state, using atomic
    records with inspection and resume support. This is conditional on the
    accounting design, not the current priority.
-5. **Idempotent turn admission and recovery.** After durable records exist, and
+4. **Idempotent turn admission and recovery.** After durable records exist, and
    only if repeated or unattended cycles are needed, prevent duplicate fills or
    records and define terminal versus resumable states and recovery behavior.
 
