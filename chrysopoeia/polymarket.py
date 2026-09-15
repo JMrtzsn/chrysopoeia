@@ -50,6 +50,20 @@ class MarketCandidate:
         }
 
 
+@dataclass(frozen=True)
+class MarketResolution:
+    market_id: str
+    resolution: str
+    resolved_at: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "market_id": self.market_id,
+            "resolution": self.resolution,
+            "resolved_at": self.resolved_at,
+        }
+
+
 class _NoRedirects(HTTPRedirectHandler):
     def redirect_request(self, req: Request, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
         return None
@@ -320,6 +334,57 @@ def _levels(value: object, name: str, *, required: bool) -> tuple[BookLevel, ...
             raise PolymarketError("Polymarket adapter book level is malformed") from None
         levels.append(level)
     return tuple(levels)
+
+
+def load_market_resolution(
+    market: str,
+    *,
+    now: datetime | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    fetch: Fetch = _fetch,
+) -> MarketResolution:
+    """Load one venue-derived canonical resolution from public Gamma data."""
+    endpoint, _expected, _uses_slug = _endpoint(market)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 10:
+        raise PolymarketError("Polymarket adapter timeout must be between 0 and 10 seconds")
+    if not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool) or not 0 < max_response_bytes <= 1_000_000:
+        raise PolymarketError("Polymarket adapter response limit must be between 1 and 1,000,000 bytes")
+    current = now or datetime.now(timezone.utc)
+    if not isinstance(current, datetime) or current.tzinfo is None:
+        raise PolymarketError("Polymarket adapter current time must include a UTC offset")
+    data = _fetch_json(endpoint, float(timeout), max_response_bytes, fetch)
+    identifier = data.get("id")
+    if isinstance(identifier, bool) or not isinstance(identifier, (str, int)) or not str(identifier).isdigit():
+        raise PolymarketError("Polymarket adapter response has invalid market ID schema")
+    market_id = str(identifier)
+    if data.get("closed") is not True:
+        raise PolymarketError("Polymarket adapter market has not resolved yet")
+    prices = data.get("outcomePrices")
+    if isinstance(prices, str):
+        try:
+            prices = json.loads(prices)
+        except ValueError:
+            raise PolymarketError("Polymarket adapter outcome prices are malformed") from None
+    if not isinstance(prices, list) or len(prices) != 2 or not all(
+        isinstance(price, (str, int, float)) for price in prices
+    ):
+        raise PolymarketError("Polymarket adapter outcome prices are malformed")
+    try:
+        fractions = [float(price) for price in prices]
+    except (TypeError, ValueError):
+        raise PolymarketError("Polymarket adapter outcome prices are malformed") from None
+    if any(not 0 <= fraction <= 1 for fraction in fractions):
+        raise PolymarketError("Polymarket adapter outcome prices are out of range")
+    resolved = sum(1 for fraction in fractions if fraction >= 0.999)
+    if resolved != 1:
+        raise PolymarketError("Polymarket adapter market has no dominant resolution")
+    resolution = "resolved_yes" if fractions[0] >= 0.999 else "resolved_no"
+    return MarketResolution(
+        market_id,
+        resolution,
+        current.astimezone(timezone.utc).isoformat(),
+    )
 
 
 def load_market_snapshot(

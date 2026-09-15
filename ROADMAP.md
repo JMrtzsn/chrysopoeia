@@ -38,6 +38,13 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 - [x] Idempotent turn admission (`chrysopoeia/accounting.py`): deterministic
   `turn-<sha24>` IDs, no-op repeats, and pre-model same-market preemption,
   also covered by the 2026-09-15 live verification.
+- [x] Venue-derived resolution and paper settlement
+  (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`: `settle`): read-only
+  Gamma resolution capture normalized to canonical `resolved_yes|resolved_no`,
+  deterministic settlement against open positions, cumulative-loss halt on
+  settlement, refusal of unresolved or ambiguous markets. Live-verified
+  2026-09-15 against a real resolved market; see Recorded Live Verification in
+  `docs/development-lifecycle.md`.
 
 ## Next
 

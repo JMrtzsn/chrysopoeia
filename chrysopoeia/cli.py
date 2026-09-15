@@ -343,7 +343,53 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle.add_argument("--output", type=Path)
     book = commands.add_parser("book")
     book.add_argument("--journal", type=Path, required=True)
+    settle_command = commands.add_parser("settle")
+    settle_command.add_argument("--journal", type=Path, required=True)
+    settle_command.add_argument("--market", required=True)
     args = parser.parse_args(argv)
+    if args.command == "settle":
+        from chrysopoeia.accounting import (
+            JournalError,
+            check_halt,
+            replay,
+            settle,
+        )
+        from chrysopoeia.polymarket import load_market_resolution
+
+        try:
+            journal_state = replay(args.journal)
+            if args.market not in journal_state.positions:
+                raise JournalError(f"no open position for market {args.market}")
+            resolution_record = load_market_resolution(
+                args.market, fetch=polymarket_fetch
+            ).as_dict()
+            settle(
+                args.journal,
+                journal_state,
+                resolution_record["market_id"],
+                resolution_record["resolution"],
+            )
+            check_halt(args.journal, replay(args.journal))
+            settled_state = replay(args.journal)
+        except (ValueError, JournalError) as exc:
+            parser.exit(2, f"settle failed: {exc}\n")
+        except Exception:
+            parser.exit(2, "settle failed: resolution data unavailable\n")
+        summary = {
+            "schema_version": 1,
+            "record_type": "settlement_report",
+            "market_id": resolution_record["market_id"],
+            "resolution": resolution_record["resolution"],
+            "resolved_at": resolution_record["resolved_at"],
+            "status": settled_state.status,
+            "realized_pnl": settled_state.realized_pnl,
+            "unrealized_pnl": settled_state.unrealized_pnl,
+            "open_exposure": settled_state.open_exposure,
+            "bankroll_now": settled_state.bankroll_now,
+            "open_positions": len(settled_state.positions),
+        }
+        print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+        return 0
     if args.command == "book":
         from chrysopoeia.accounting import JournalError, replay
 

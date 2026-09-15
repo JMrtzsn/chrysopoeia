@@ -191,3 +191,25 @@ never include secrets, private user data, or hidden reasoning.
 - Cost: ~$0.03 total estimated model cost across the progression.
 - Cleanup: seeded snapshots, evidence bundles, and journals live only in the OS
   temp directory; one journal intentionally left open (paper only).
+
+### Resolution capture and settlement (2026-09-15)
+
+- Commands: one direct `load_market_resolution("20")` read, one bounded
+  settlement replay exercise, plus one `chrysopoeia settle` CLI refusal and one
+  earlier `settle` run against the live unresolved market 559651 (correctly
+  refused before any book change).
+- Real boundary: public Polymarket Gamma read-only; no model calls.
+- Adapter schema findings from live data, now covered by offline contract
+  tests: `outcomePrices` is a JSON-encoded string in the Gamma market detail
+  response; gamma holds settled prices at ~0.000001/~0.999999 rather than
+  exactly 1/0; open markets are refused with "has not resolved yet"; closed
+  markets without a dominant outcome are refused.
+- Result: real resolved market 20 normalized to `resolved_no`; a paper
+  position on that market settled through the deterministic book against the
+  venue fact (realized −$122.40, full loss including fee), and the unresolved
+  real market was refused without affecting its journal.
+- Bounds: three Gamma reads total (two unresolved market ids, one resolved).
+- Approval: operator approved the read-only venue checks.
+- Cost: zero model cost; no paid services.
+- Authentication: none required; public endpoints.
+- Cleanup: nothing created beyond temp journal directories.
