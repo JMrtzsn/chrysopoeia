@@ -107,6 +107,24 @@ roles, paper-fee assumption, and single-model pricing ceilings. User-controlled
 `daily_cloud_cost_budget` remains operating configuration and is not duplicated
 there. Unknown keys and unsupported adapters or modes fail closed.
 
+Model providers are pluggable at the ADK registry boundary. `[models] adapter`
+accepts `adk-gemini` (default, direct Vertex Gemini) or `adk-registry`, which
+resolves any model name supported by ADK's `LLMRegistry` — e.g. `ollama/*`
+(local models via the `google-adk[extensions]` extra), `claude-*`, `gpt-*`, or
+`openai/*`. When roles use different models, price each one explicitly under
+`[cost.models]`; the cost gate reserves and settles each call at its own
+model's pricing and denies unpriced models:
+
+```toml
+[models]
+adapter = "adk-registry"
+trader = "ollama/llama3.1:8b"
+
+[cost.models."ollama/llama3.1:8b"]
+input_usd_per_million_tokens = "0"
+output_usd_per_million_tokens = "0"
+```
+
 ```sh
 uv sync
 uv run python -m unittest discover

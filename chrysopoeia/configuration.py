@@ -84,6 +84,7 @@ class VenueConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
+    adapter: str
     root: str
     context: str
     trader: str
@@ -91,8 +92,16 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class ModelPrice:
+    model: str
+    input_usd_per_million_tokens: Decimal
+    output_usd_per_million_tokens: Decimal
+
+
+@dataclass(frozen=True)
 class CostConfig:
     model: str
+    prices: tuple[ModelPrice, ...]
     input_usd_per_million_tokens: Decimal
     output_usd_per_million_tokens: Decimal
     maximum_input_tokens_per_call: int
@@ -116,21 +125,23 @@ class HarnessConfig:
             {"adapter", "paper_fee_rate", "paper_fee_source"},
             "venue",
         )
-        models = _table(
-            root["models"], {"root", "context", "trader", "reviewer"}, "models"
-        )
-        cost = _table(
-            root["cost"],
-            {
-                "model",
-                "input_usd_per_million_tokens",
-                "output_usd_per_million_tokens",
-                "maximum_input_tokens_per_call",
-                "maximum_output_tokens_per_call",
-                "maximum_model_calls_per_cycle",
-            },
-            "cost",
-        )
+        cost_keys = {
+            "model",
+            "input_usd_per_million_tokens",
+            "output_usd_per_million_tokens",
+            "maximum_input_tokens_per_call",
+            "maximum_output_tokens_per_call",
+            "maximum_model_calls_per_cycle",
+        }
+        cost_raw = root["cost"]
+        if isinstance(cost_raw, Mapping) and "models" in cost_raw:
+            cost_keys.add("models")
+        cost = _table(root["cost"], cost_keys, "cost")
+        models_raw = root["models"]
+        model_keys = {"root", "context", "trader", "reviewer"}
+        if isinstance(models_raw, Mapping) and "adapter" in models_raw:
+            model_keys.add("adapter")
+        models = _table(models_raw, model_keys, "models")
 
         runtime_config = RuntimeConfig(
             _text(runtime["adapter"], "runtime adapter"),
@@ -157,21 +168,82 @@ class HarnessConfig:
             raise ConfigurationError("positive paper fee requires explicit provenance")
         venue_config = VenueConfig(adapter, float(fee), fee_source)
 
+        model_adapter = _text(
+            models.get("adapter", "adk-gemini")
+            if isinstance(models, Mapping)
+            else models,
+            "models adapter",
+        )
+        if model_adapter not in {"adk-gemini", "adk-registry"}:
+            raise ConfigurationError("models adapter is unsupported")
         model_config = ModelConfig(
+            model_adapter,
             *(
                 _text(models[name], f"{name} model")
-                for name in ModelConfig.__annotations__
-            )
+                for name in (
+                    role
+                    for role in tuple(ModelConfig.__annotations__)
+                    if role != "adapter"
+                )
+            ),
         )
+        configured_models = [
+            getattr(model_config, role)
+            for role in tuple(ModelConfig.__annotations__)
+            if role != "adapter"
+        ]
         cost_model = _text(cost["model"], "cost model")
-        if any(model != cost_model for model in model_config.__dict__.values()):
-            raise ConfigurationError(
-                "all configured models must match the priced model"
-            )
+        flat_input = _price(cost["input_usd_per_million_tokens"], "input price")
+        flat_output = _price(cost["output_usd_per_million_tokens"], "output price")
+        if "models" in cost:
+            pricing = cost["models"]
+            if not isinstance(pricing, Mapping) or not pricing:
+                raise ConfigurationError("cost model pricing is missing or invalid")
+            priced: list[ModelPrice] = []
+            for name in sorted(pricing):
+                entry = pricing[name]
+                if not isinstance(entry, Mapping) or set(entry) != {
+                    "input_usd_per_million_tokens",
+                    "output_usd_per_million_tokens",
+                }:
+                    raise ConfigurationError(
+                        f"{name} cost pricing is missing or invalid"
+                    )
+                priced.append(
+                    ModelPrice(
+                        _text(name, "cost model"),
+                        _price(
+                            entry["input_usd_per_million_tokens"],
+                            f"{name} input price",
+                        ),
+                        _price(
+                            entry["output_usd_per_million_tokens"],
+                            f"{name} output price",
+                        ),
+                    )
+                )
+            required = {*configured_models, cost_model}
+            if any(price.model not in required for price in priced):
+                raise ConfigurationError(
+                    "priced cost models must all be configured models"
+                )
+            if any(
+                model not in {price.model for price in priced} for model in required
+            ):
+                raise ConfigurationError(
+                    "every configured model must have explicit pricing"
+                )
+        else:
+            priced = (ModelPrice(cost_model, flat_input, flat_output),)
+            if any(model != cost_model for model in configured_models):
+                raise ConfigurationError(
+                    "all configured models must match the priced model"
+                )
         cost_config = CostConfig(
             cost_model,
-            _price(cost["input_usd_per_million_tokens"], "input price"),
-            _price(cost["output_usd_per_million_tokens"], "output price"),
+            tuple(priced),
+            flat_input,
+            flat_output,
             _positive_int(
                 cost["maximum_input_tokens_per_call"], "maximum input tokens"
             ),
@@ -184,16 +256,38 @@ class HarnessConfig:
 
     @property
     def cost_policy(self) -> dict[str, object]:
+        maximum_input = self.cost.maximum_input_tokens_per_call
+        maximum_output = self.cost.maximum_output_tokens_per_call
+        maximum_calls = self.cost.maximum_model_calls_per_cycle
+        if len(self.cost.prices) == 1:
+            price = self.cost.prices[0]
+            return {
+                "version": COST_POLICY_VERSION,
+                "model": price.model,
+                "input_usd_per_million_tokens": str(price.input_usd_per_million_tokens),
+                "output_usd_per_million_tokens": str(
+                    price.output_usd_per_million_tokens
+                ),
+                "maximum_input_tokens_per_call": maximum_input,
+                "maximum_output_tokens_per_call": maximum_output,
+                "maximum_model_calls_per_cycle": maximum_calls,
+            }
         return {
             "version": COST_POLICY_VERSION,
-            "model": self.cost.model,
-            "input_usd_per_million_tokens": str(self.cost.input_usd_per_million_tokens),
-            "output_usd_per_million_tokens": str(
-                self.cost.output_usd_per_million_tokens
-            ),
-            "maximum_input_tokens_per_call": self.cost.maximum_input_tokens_per_call,
-            "maximum_output_tokens_per_call": self.cost.maximum_output_tokens_per_call,
-            "maximum_model_calls_per_cycle": self.cost.maximum_model_calls_per_cycle,
+            "models": {
+                price.model: {
+                    "input_usd_per_million_tokens": str(
+                        price.input_usd_per_million_tokens
+                    ),
+                    "output_usd_per_million_tokens": str(
+                        price.output_usd_per_million_tokens
+                    ),
+                }
+                for price in self.cost.prices
+            },
+            "maximum_input_tokens_per_call": maximum_input,
+            "maximum_output_tokens_per_call": maximum_output,
+            "maximum_model_calls_per_cycle": maximum_calls,
         }
 
 

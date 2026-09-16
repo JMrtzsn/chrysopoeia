@@ -226,3 +226,23 @@ never include secrets, private user data, or hidden reasoning.
 - Bounds: one capture (one Gamma + one CLOB read-only request). Approval:
   operator pre-approved the read-only venue checks. Cost: zero model cost.
   Authentication: none required. Cleanup: temp dir only.
+
+### Pluggable model registry run (2026-09-15)
+
+- Command: one `uv run chrysopoeia cycle ... --config <registry config>
+  --journal <temp dir>` using `[models] adapter = "adk-registry"` and explicit
+  per-model `[cost.models]` pricing.
+- Real boundary: ADK `LLMRegistry` model resolution (the registry path now
+  used instead of the hard-coded `Gemini()` constructor) and the per-model
+  cost gate; Gemini 2.5 Flash on Vertex AI with ambient ADC, no copied keys.
+- Result: the cycle abstained after one trader call; estimated cost
+  $0.0008508 reserved against a $0.0100352 ceiling computed from the
+  configured per-model pricing ($0.30/$2.50 per M tokens) rather than the
+  legacy flat prices ($1/$3); the cost ledger completed cleanly.
+- Bounds: one cycle, at most two calls; reviewer not invoked.
+- Scope note: non-Gemini providers (ollama/claude/gpt/openai prefixes via
+  LiteLlm) are offline-tested; a bounded live run against one of those needs
+  `google-adk[extensions]` and provider credentials or a local backend, so
+  that boundary remains not verified. Claude Pro/Code credentials are banned
+  from this harness by the safety contract regardless.
+- Approval: operator approved. Cost: about $0.0009. Cleanup: temp dir only.

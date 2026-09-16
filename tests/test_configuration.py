@@ -300,5 +300,88 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), [])
 
 
+class ModelAdapterTests(unittest.TestCase):
+    def multi_model(self, **overrides: object) -> dict[str, object]:
+        mapping: dict[str, object] = json.loads(json.dumps(VALID))
+        models = mapping["models"]  # type: ignore[index]
+        assert isinstance(models, dict)
+        cost = mapping["cost"]  # type: ignore[index]
+        assert isinstance(cost, dict)
+        models["adapter"] = "adk-registry"
+        models["trader"] = "ollama/llama3.1:8b"
+        cost["models"] = {
+            "gemini-flash-latest": {
+                "input_usd_per_million_tokens": "1",
+                "output_usd_per_million_tokens": "3",
+            },
+            "ollama/llama3.1:8b": {
+                "input_usd_per_million_tokens": "0",
+                "output_usd_per_million_tokens": "0",
+            },
+        }
+        assert isinstance(mapping, dict)
+        deep = mapping
+        return deep if not overrides else json.loads(json.dumps(deep))
+
+    def test_registry_adapter_accepts_per_model_pricing(self) -> None:
+        config = HarnessConfig.from_mapping(self.multi_model())
+        self.assertEqual(config.models.adapter, "adk-registry")
+        self.assertEqual(
+            {
+                (price.model, price.input_usd_per_million_tokens)
+                for price in config.cost.prices
+            },
+            {
+                ("gemini-flash-latest", Decimal("1")),
+                ("ollama/llama3.1:8b", Decimal("0")),
+            },
+        )
+        self.assertEqual(
+            config.cost_policy["models"],
+            {  # type: ignore[typeddict-item]
+                "gemini-flash-latest": {
+                    "input_usd_per_million_tokens": "1",
+                    "output_usd_per_million_tokens": "3",
+                },
+                "ollama/llama3.1:8b": {
+                    "input_usd_per_million_tokens": "0",
+                    "output_usd_per_million_tokens": "0",
+                },
+            },
+        )
+
+    def test_unpriced_configured_model_is_rejected(self) -> None:
+        value = self.multi_model()
+        models = value["models"]  # type: ignore[index]
+        assert isinstance(models, dict)
+        models["trader"] = "ollama/other:1b"
+        with self.assertRaises(ConfigurationError):
+            HarnessConfig.from_mapping(value)
+
+    def test_unconfigured_priced_model_is_rejected(self) -> None:
+        value = self.multi_model()
+        cost = value["cost"]  # type: ignore[index]
+        assert isinstance(cost, dict)
+        cost["models"]["gpt-4o"] = {
+            "input_usd_per_million_tokens": "1",
+            "output_usd_per_million_tokens": "1",
+        }
+        with self.assertRaises(ConfigurationError):
+            HarnessConfig.from_mapping(value)
+
+    def test_unsupported_adapters_are_rejected(self) -> None:
+        value = self.multi_model()
+        models = value["models"]  # type: ignore[index]
+        assert isinstance(models, dict)
+        models["adapter"] = "litellm-plugin"
+        with self.assertRaises(ConfigurationError):
+            HarnessConfig.from_mapping(value)
+
+    def test_gemini_adapter_defaults_from_flat_configuration(self) -> None:
+        config = HarnessConfig.from_mapping(VALID)
+        self.assertEqual(config.models.adapter, "adk-gemini")
+        self.assertEqual(len(config.cost.prices), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

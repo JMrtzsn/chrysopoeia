@@ -202,6 +202,46 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("operating_config", state)
         self.assertEqual(state["model_cost_policy"]["version"], "project-estimate-2026-08-v1")
 
+    def multi_model_state(self) -> dict[str, object]:
+        return {
+            **configured_state(),
+            "model_cost_policy": {
+                "version": "test-v1",
+                "models": {
+                    "gemini-flash-latest": {
+                        "input_usd_per_million_tokens": "1",
+                        "output_usd_per_million_tokens": "2",
+                    },
+                    "ollama/llama3.1:8b": {
+                        "input_usd_per_million_tokens": "0",
+                        "output_usd_per_million_tokens": "0",
+                    },
+                },
+                "maximum_input_tokens_per_call": 100,
+                "maximum_output_tokens_per_call": 50,
+                "maximum_model_calls_per_cycle": 2,
+            },
+        }
+
+    def test_multi_model_policy_prices_each_model_independently(self) -> None:
+        state = self.multi_model_state()
+        reserve_model_call(state, "paper_market_trader", "ollama/llama3.1:8b", 100, 50, "call-1", NOW)
+        gemini = reserve_model_call(state, "paper_market_trader", "gemini-flash-latest", 100, 50, "call-2", NOW)
+        self.assertEqual(gemini["estimated_reserved_usd"], "0.0002")
+        self.assertEqual(state["model_cost_ledger"][0]["estimated_reserved_usd"], "0")
+
+    def test_multi_model_policy_denies_unpriced_models(self) -> None:
+        state = self.multi_model_state()
+        with self.assertRaises(ValueError) as raised:
+            reserve_model_call(state, "paper_market_trader", "gpt-4o", 100, 50, "call-1", NOW)
+        self.assertIn("not priced", str(raised.exception))
+
+    def test_multi_model_settlement_uses_reserved_per_model_prices(self) -> None:
+        state = self.multi_model_state()
+        reserve_model_call(state, "paper_market_trader", "ollama/llama3.1:8b", 100, 50, "call-1", NOW)
+        settled = settle_model_call(state, "call-1", 100, 50)
+        self.assertEqual(settled["actual_cost_usd"], "0")
+
 
 if __name__ == "__main__":
     unittest.main()

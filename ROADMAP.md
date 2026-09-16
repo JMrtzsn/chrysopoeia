@@ -52,10 +52,15 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 
 ## Next
 
-1. **Second concrete adapter proof.** Only on an actual need, add either another
-   model adapter with explicit pricing or another venue adapter. Stable core
-   contracts are sufficient; do not add a generic plugin framework.
-   Claude-on-Vertex is a candidate, not committed scope.
+1. **Second concrete adapter proof.** Implemented: a pluggable models adapter
+   (`[models] adapter`: `adk-gemini` | `adk-registry`) routing model names
+   through the ADK `LLMRegistry` (ollama/claude/gpt/openai prefixes) with
+   optional per-model `[cost.models]` pricing enforced in the cost gate
+   (`chrysopoeia/configuration.py`, `chrysopoeia/cost.py`,
+   `chrysopoeia/cycle_runner.py`). Gemini-registry routing is live-verified
+   2026-09-15; a bounded live run against a non-Gemini provider (e.g. ollama
+   with `google-adk[extensions]`) remains before calling that provider
+   boundary proven. No generic plugin framework was added.
 2. **Multi-cycle portfolio and paper accounting design.** Design written in
    `docs/portfolio-accounting.md` (cross-cycle positions, book/ledger, marks,
    realized and unrealized P&L, cumulative maximum-loss halt, venue-derived

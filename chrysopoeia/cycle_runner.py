@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 
-from google.adk.models import BaseLlm, Gemini
+from google.adk.models import BaseLlm, Gemini, LLMRegistry
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService, InMemorySessionService
 from google.adk.workflow import RetryConfig, Workflow
@@ -17,7 +17,7 @@ from chrysopoeia.agent import (
     prepare_trader_input,
     route_proposal,
 )
-from chrysopoeia.configuration import HarnessConfig
+from chrysopoeia.configuration import HarnessConfig, ModelPrice
 from chrysopoeia.cost import LEDGER_KEY
 from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
@@ -36,16 +36,30 @@ logger = logging.getLogger(__name__)
 
 
 def reserved_ceiling(config: HarnessConfig, model_calls: int = 2) -> Decimal:
+    prices = config.cost.prices or (
+        ModelPrice(
+            config.cost.model,
+            config.cost.input_usd_per_million_tokens,
+            config.cost.output_usd_per_million_tokens,
+        ),
+    )
     return (
         model_calls
         * (
-            config.cost.input_usd_per_million_tokens
+            max(price.input_usd_per_million_tokens for price in prices)
             * config.cost.maximum_input_tokens_per_call
-            + config.cost.output_usd_per_million_tokens
+            + max(price.output_usd_per_million_tokens for price in prices)
             * config.cost.maximum_output_tokens_per_call
         )
         / Decimal(1_000_000)
     )
+
+
+def resolve_model(adapter: str, model_name: str) -> BaseLlm:
+    """Resolve one configured model through the selected ADK model boundary."""
+    if adapter == "adk-gemini":
+        return Gemini(model=model_name)
+    return LLMRegistry.new_llm(model=model_name)
 
 
 def build_cycle_workflow(
@@ -193,8 +207,8 @@ async def run_paper_cycle_state(
     created: tuple[BaseLlm, ...] = ()
     if trader_model is None and reviewer_model is None:
         created = (
-            Gemini(model=config.models.trader),
-            Gemini(model=config.models.reviewer),
+            resolve_model(config.models.adapter, config.models.trader),
+            resolve_model(config.models.adapter, config.models.reviewer),
         )
         trader_model, reviewer_model = created
     elif trader_model is None or reviewer_model is None:

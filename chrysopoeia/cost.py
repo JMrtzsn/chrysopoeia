@@ -53,26 +53,50 @@ def _tokens(value: object, name: str, *, positive: bool = False) -> int:
 @dataclass(frozen=True)
 class CostPolicy:
     version: str
-    model: str
-    input_usd_per_million_tokens: Decimal
-    output_usd_per_million_tokens: Decimal
+    prices: Mapping[str, tuple[Decimal, Decimal]]
     maximum_input_tokens_per_call: int
     maximum_output_tokens_per_call: int
     maximum_model_calls_per_cycle: int
 
     @classmethod
     def from_mapping(cls, value: object) -> "CostPolicy":
-        keys = {
+        flat = {
             "version", "model", "input_usd_per_million_tokens", "output_usd_per_million_tokens",
             "maximum_input_tokens_per_call", "maximum_output_tokens_per_call", "maximum_model_calls_per_cycle",
         }
-        if not isinstance(value, Mapping) or set(value) != keys:
+        mapped = {
+            "version", "models",
+            "maximum_input_tokens_per_call", "maximum_output_tokens_per_call", "maximum_model_calls_per_cycle",
+        }
+        if not isinstance(value, Mapping):
+            raise ValueError("model cost policy is missing or invalid")
+        if set(value) == flat:
+            prices = {
+                str(value["model"]): (
+                    _decimal(value["input_usd_per_million_tokens"], "input price"),
+                    _decimal(value["output_usd_per_million_tokens"], "output price"),
+                )
+            }
+        elif set(value) == mapped:
+            pricing = value["models"]
+            if not isinstance(pricing, Mapping) or not pricing:
+                raise ValueError("model cost policy pricing is missing or invalid")
+            prices = {}
+            for name, entry in pricing.items():
+                _identifier(name, "policy model")
+                if not isinstance(entry, Mapping) or set(entry) != {
+                    "input_usd_per_million_tokens", "output_usd_per_million_tokens",
+                }:
+                    raise ValueError("model cost policy pricing is missing or invalid")
+                prices[str(name)] = (
+                    _decimal(entry["input_usd_per_million_tokens"], "input price"),
+                    _decimal(entry["output_usd_per_million_tokens"], "output price"),
+                )
+        else:
             raise ValueError("model cost policy is missing or invalid")
         return cls(
             _identifier(value["version"], "policy version"),
-            _identifier(value["model"], "policy model"),
-            _decimal(value["input_usd_per_million_tokens"], "input price"),
-            _decimal(value["output_usd_per_million_tokens"], "output price"),
+            prices,
             _tokens(value["maximum_input_tokens_per_call"], "input token ceiling", positive=True),
             _tokens(value["maximum_output_tokens_per_call"], "output token ceiling", positive=True),
             _tokens(value["maximum_model_calls_per_cycle"], "cycle model-call ceiling", positive=True),
@@ -109,11 +133,11 @@ def _records(state: StateMap) -> list[dict[str, object]]:
 def _budget(state: StateMap, policy: CostPolicy) -> Decimal:
     value = state.get("operating_config")
     if value is None:
+        maximum_input = max(price[0] for price in policy.prices.values())
+        maximum_output = max(price[1] for price in policy.prices.values())
         return (
-            policy.input_usd_per_million_tokens
-            * policy.maximum_input_tokens_per_call
-            + policy.output_usd_per_million_tokens
-            * policy.maximum_output_tokens_per_call
+            maximum_input * policy.maximum_input_tokens_per_call
+            + maximum_output * policy.maximum_output_tokens_per_call
         ) / MILLION
     if not isinstance(value, Mapping):
         raise ValueError("operating configuration is missing or invalid")
@@ -134,8 +158,9 @@ def reserve_model_call(
     policy, records = CostPolicy.from_mapping(state.get("model_cost_policy")), _records(state)
     if any(record["call_id"] == call_id for record in records):
         raise ValueError("model call ID already exists")
-    if model != policy.model:
-        raise ValueError("model is not allowed by the cost policy")
+    priced = policy.prices.get(model)
+    if priced is None:
+        raise ValueError("model is not priced by the cost policy")
     input_token_ceiling = _tokens(input_token_ceiling, "input token ceiling")
     output_token_ceiling = _tokens(output_token_ceiling, "output token ceiling")
     if input_token_ceiling > policy.maximum_input_tokens_per_call:
@@ -148,8 +173,8 @@ def reserve_model_call(
         raise ValueError("current time must include a UTC offset")
     day = now.astimezone(timezone.utc).date().isoformat()
     reserved = (
-        policy.input_usd_per_million_tokens * input_token_ceiling
-        + policy.output_usd_per_million_tokens * output_token_ceiling
+        priced[0] * input_token_ceiling
+        + priced[1] * output_token_ceiling
     ) / MILLION
     spent = Decimal(0)
     for record in records:
@@ -165,8 +190,8 @@ def reserve_model_call(
         "date": day, "cycle_id": cycle_id, "agent": agent_name, "model": model, "call_id": call_id,
         "invocation_id": invocation_id, "estimated_reserved_usd": str(reserved),
         "input_token_ceiling": input_token_ceiling, "output_token_ceiling": output_token_ceiling,
-        "input_usd_per_million_tokens": str(policy.input_usd_per_million_tokens),
-        "output_usd_per_million_tokens": str(policy.output_usd_per_million_tokens), "status": "reserved",
+        "input_usd_per_million_tokens": str(priced[0]),
+        "output_usd_per_million_tokens": str(priced[1]), "status": "reserved",
     }
     # ponytail: session state is single-writer; use a persistent atomic ledger when concurrent invocations arrive.
     state[LEDGER_KEY] = [*records, record]
