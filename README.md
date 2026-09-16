@@ -125,6 +125,35 @@ input_usd_per_million_tokens = "0"
 output_usd_per_million_tokens = "0"
 ```
 
+## Run In The Cloud (optional, operator-driven)
+
+Cost-sensitive Level 2 deployment: a persistent base (one versioned journal
+bucket + one least-privileged runner service account, managed by the Pulumi
+program in `infra/`) and **ephemeral spot VM sessions** that pay only for the
+minutes you work. Unattended operation, Cloud Scheduler, and Cloud SQL are
+deliberately not provisioned yet (`docs/gcp-architecture.md`).
+
+```sh
+uv sync --all-groups                # includes the Pulumi dev dependency
+cd infra
+PULUMI_CONFIG_PASSPHRASE=<pass> pulumi stack init local-dev
+pulumi config set project_id <project>
+pulumi config set operator <operator>
+pulumi preview                       # the offline evidence gate
+# live base apply only with explicit operator approval, then:
+eval "$(pulumi stack output --shell runner_email 2>/dev/null || true)"  # set RUNNER_SA/JOURNAL_BUCKET manually
+cd ..
+infra/script/session.sh init <session-id>        # boots spot VM
+infra/script/session.sh push <session-id>        # ships source, mounts journal
+infra/script/session.sh ssh  <session-id>        # run cycles interactively
+infra/script/session.sh delete <session-id>      # teardown: idle cost becomes zero
+```
+
+The VM runs as the runner service account (no keys are ever copied); journals
+land in the versioned bucket and are visible from local `chrysopoeia book`
+commands via a local gcsfuse mount. Multi-tenant or public-facing use is out
+of scope and requires an explicit design first.
+
 ```sh
 uv sync
 uv run python -m unittest discover

@@ -313,16 +313,18 @@ class CycleRunnerTests(unittest.TestCase):
             )
         self.assertEqual(calls, [])
 
-    def test_model_resolution_routes_gemini_and_fails_closed_for_missing_extras(
-        self,
-    ) -> None:
+    def test_model_resolution_routes_gemini_and_litellm_prefixes(self) -> None:
         from chrysopoeia.cycle_runner import resolve_model
 
         resolved = resolve_model("adk-registry", "gemini-flash-latest")
         self.assertEqual(type(resolved).__name__, "Gemini")
-        with self.assertRaises(ValueError) as raised:
-            resolve_model("adk-registry", "ollama/llama3.1:8b")
-        self.assertIn("litellm", str(raised.exception))
+        try:
+            luz = resolve_model("adk-registry", "ollama/llama3.1:8b")
+        except ValueError as raised:
+            # litellm is an optional google-adk[extensions] provider extra
+            self.assertIn("litellm", str(raised))
+        else:
+            self.assertEqual(type(luz).__name__, "LiteLlm")
 
 
 if __name__ == "__main__":

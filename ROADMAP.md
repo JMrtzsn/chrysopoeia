@@ -52,37 +52,27 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 
 ## Next
 
-1. **Second concrete adapter proof.** Implemented: a pluggable models adapter
-   (`[models] adapter`: `adk-gemini` | `adk-registry`) routing model names
-   through the ADK `LLMRegistry` (ollama/claude/gpt/openai prefixes) with
-   optional per-model `[cost.models]` pricing enforced in the cost gate
-   (`chrysopoeia/configuration.py`, `chrysopoeia/cost.py`,
-   `chrysopoeia/cycle_runner.py`). Gemini-registry routing is live-verified
-   2026-09-15; a bounded live run against a non-Gemini provider (e.g. ollama
-   with `google-adk[extensions]`) remains before calling that provider
-   boundary proven. No generic plugin framework was added.
-2. **Multi-cycle portfolio and paper accounting design.** Design written in
-   `docs/portfolio-accounting.md` (cross-cycle positions, book/ledger, marks,
-   realized and unrealized P&L, cumulative maximum-loss halt, venue-derived
-   resolution, and the derived journal-based persistence requirement). It
-   awaits operator agreement; implementation is milestones 3–4.
-3. **Durable local session, turn, and accounting records.** Implemented:
-   `chrysopoeia/accounting.py` journal/replay/book, the `book` inspection CLI,
-   and `cycle --journal` admission, exposure, fill recording, halt checking,
-   and `book_after` reporting (`docs/portfolio-accounting.md` is the contract).
-   Live-verified 2026-09-15; see Recorded Live Verification in
-   `docs/development-lifecycle.md`. The configured default model alias
-   `gemini-flash-latest` remains Gemini-API-only; a Vertex run needs a
-   Vertex-native alias in the config — pending operator decision.
-4. **Idempotent turn admission.** Largely implemented with milestone 3
-   (deterministic turn IDs `turn-<sha24>`, no-op repeats, pre-model same-market
-   preemption). Full turn-level recovery of interrupted cycles remains when
-   unattended operation is actually needed.
+0. **Managed deployment, Level 2 (single operator).** Selected profile
+   (`docs/gcp-architecture.md`): Pulumi-managed persistent base (versioned
+   journal bucket, least-privileged runner SA) plus scripted ephemeral spot
+   sessions (`infra/script/session.sh`). Pending: `pulumi preview` evidence,
+   one approved live base apply, and one bounded live session (boot, offline
+   gate, one journaled cycle, teardown) before any of this counts complete.
+0a. **Unattended multi-cycle operation** (Cloud Scheduler + loops) — only
+   after the Level 2 sessions above are verified, since idempotent recovery
+   and turn-level resumability are not complete.
+1. **Non-Gemini provider live proof.** A bounded live run against a non-Gemini
+   provider (e.g. ollama with `google-adk[extensions]`) before calling that
+   registry-provider boundary proven. The registry routing itself is
+   live-verified for Gemini; no generic plugin framework exists.
 
 ## Deferred
 
+- Cloud SQL, RAG Engine, Memory Bank, and managed runtime services (still gated
+  on adoption triggers in `docs/gcp-architecture.md`).
+- Multi-tenant or public-facing deployment (Level 3): requires explicit design
+  before anything exists.
 - Autonomous scheduling/scanning and managed queues, deadlines, or cancellation.
-- Cloud SQL, managed deployment, and production observability.
 - RAG/memory plus lifecycle and version management.
 - Authenticated execution; it requires confirmation, least-privilege IAM, hard
   limits, a kill switch, idempotency, and reconciliation.

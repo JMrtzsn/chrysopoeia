@@ -1,9 +1,28 @@
 # Optional Google Cloud Deployment Profile
 
-Chrysopoeia's runtime-neutral core harness contracts require no Google Cloud
-infrastructure. The current ADK runtime adapter may use configured Gemini model
-access; using Vertex AI is a model access choice, not proof that runtime,
-storage, RAG, scheduling, or deployment infrastructure exists.
+Selected profile (operator-approved 2026-09-15): **persistent base + scripted
+ephemeral sessions**, cost-sensitive, single operator, Level 2 scope.
+
+- Persistent (Pulumi program in `infra/`): one versioned GCS journal bucket and
+  one least-privileged runner service account
+  (`roles/aiplatform.user` project-wide, `roles/storage.objectAdmin` on that
+  bucket). Nothing else. State is a local file backend.
+- Ephemeral (`infra/script/session.sh`): a spot e2-small Debian VM per
+  operator session, running the harness directly (no container image), with
+  the journal bucket mounted via gcsfuse at `/mnt/journal`; the VM and local
+  commands share one authoritative journal. Exit path is an explicit teardown;
+  idle cost after teardown is exactly zero; per-session compute is minutes of
+  one small vCPU.
+- Deferred per the adoption triggers below: Cloud Scheduler, Cloud Run jobs,
+  Cloud SQL, RAG Engine, Memory Bank, managed runtime, and any multi-tenant
+  or public-facing posture (Level 3 requires explicit design before anything
+  exists).
+
+The harness itself never provisions or mutates cloud resources and must not
+run `gcloud`. Application Default Credentials (ADC) provide authentication to
+configured Google APIs. ADC does not provision APIs, billing, IAM, databases,
+networks, or an agent runtime; `infra/` (Pulumi program and session script) is
+the only sanctioned operator tooling for cloud changes.
 
 Application Default Credentials (ADC) provide authentication to configured
 Google APIs. ADC does not provision APIs, billing, IAM, databases, networks, or
