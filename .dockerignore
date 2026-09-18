@@ -1,0 +1,12 @@
+.venv
+__pycache__
+.pytest_cache
+.git
+artifacts
+tests
+docs
+ROADMAP.md
+AGENTS.md
+README.md
+infra
+.githooks

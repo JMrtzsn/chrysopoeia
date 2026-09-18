@@ -53,11 +53,13 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 ## Next
 
 0. **Managed deployment, Level 2 (single operator).** Selected profile
-   (`docs/gcp-architecture.md`): Pulumi-managed persistent base (versioned
-   journal bucket, least-privileged runner SA) plus scripted ephemeral spot
-   sessions (`infra/script/session.sh`). Pending: `pulumi preview` evidence,
-   one approved live base apply, and one bounded live session (boot, offline
-   gate, one journaled cycle, teardown) before any of this counts complete.
+   (`docs/gcp-architecture.md`): container-first Pulumi base — versioned
+   journal bucket, least-privileged runner SA, Artifact Registry repository,
+   and one Cloud Run job whose every execution runs one bounded paper cycle
+   (zero idle cost, no boot scripts). Offline gate passed (`pulumi preview`:
+   8 resources). Pending: approved live base apply, one image build/push, and
+   one bounded live execution (one journaled cycle) before any of this
+   counts complete.
 0a. **Unattended multi-cycle operation** (Cloud Scheduler + loops) — only
    after the Level 2 sessions above are verified, since idempotent recovery
    and turn-level resumability are not complete.

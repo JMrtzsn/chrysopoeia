@@ -127,32 +127,35 @@ output_usd_per_million_tokens = "0"
 
 ## Run In The Cloud (optional, operator-driven)
 
-Cost-sensitive Level 2 deployment: a persistent base (one versioned journal
-bucket + one least-privileged runner service account, managed by the Pulumi
-program in `infra/`) and **ephemeral spot VM sessions** that pay only for the
-minutes you work. Unattended operation, Cloud Scheduler, and Cloud SQL are
-deliberately not provisioned yet (`docs/gcp-architecture.md`).
+Cost-sensitive Level 2 deployment: the entire, runtime-complete harness
+`Dockerfile` image plus a Cloud Run **job** — no boot scripts, no maintained
+VMs. Every `gcloud beta run jobs execute ...` runs one paper cycle and bills
+only its own vCPU seconds, so idle cost is exactly zero. Unattended
+operation, Cloud Scheduler, and Cloud SQL are deliberately not provisioned
+yet (`docs/gcp-architecture.md`).
 
 ```sh
 uv sync --all-groups                # includes the Pulumi dev dependency
 cd infra
-PULUMI_CONFIG_PASSPHRASE=<pass> pulumi stack init local-dev
+PULUMI_CONFIG_PASSPHRASE=<pass> pulumi stack init <stack>
 pulumi config set project_id <project>
 pulumi config set operator <operator>
-pulumi preview                       # the offline evidence gate
-# live base apply only with explicit operator approval, then:
-eval "$(pulumi stack output --shell runner_email 2>/dev/null || true)"  # set RUNNER_SA/JOURNAL_BUCKET manually
-cd ..
-infra/script/session.sh init <session-id>        # boots spot VM
-infra/script/session.sh push <session-id>        # ships source, mounts journal
-infra/script/session.sh ssh  <session-id>        # run cycles interactively
-infra/script/session.sh delete <session-id>      # teardown: idle cost becomes zero
+pulumi preview                      # the offline evidence gate
+# live base apply only with explicit operator approval, then build+push once:
+docker build --platform linux/amd64 \
+  -t <region>-docker.pkg.dev/<project>/chrysopoeia/harness:latest ..
+docker push <region>-docker.pkg.dev/<project>/chrysopoeia/harness:latest
+# job args (default: cycle over /mnt/journal/snapshot.json) are set via:
+pulumi config set --path 'job_args[0]' book     # or any CLI subcommand
+# run a bounded paper cycle on demand (this is the "instance on request"):
+gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region>
 ```
 
-The VM runs as the runner service account (no keys are ever copied); journals
-land in the versioned bucket and are visible from local `chrysopoeia book`
-commands via a local gcsfuse mount. Multi-tenant or public-facing use is out
-of scope and requires an explicit design first.
+The job runs as the runner service account (no keys are ever copied) and the
+journal bucket is mounted at `/mnt/journal`, so journals persist across
+executions and local `chrysopoeia book` commands via a local gcsfuse mount.
+Multi-tenant or public-facing use is out of scope and requires an explicit
+design first.
 
 ```sh
 uv sync

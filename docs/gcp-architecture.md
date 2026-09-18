@@ -1,22 +1,25 @@
 # Optional Google Cloud Deployment Profile
 
-Selected profile (operator-approved 2026-09-15): **persistent base + scripted
-ephemeral sessions**, cost-sensitive, single operator, Level 2 scope.
+Selected profile (operator-approved 2026-09-16): **containers on demand via
+one Cloud Run job**, cost-sensitive, single operator, Level 2 scope.
 
-- Persistent (Pulumi program in `infra/`): one versioned GCS journal bucket and
-  one least-privileged runner service account
-  (`roles/aiplatform.user` project-wide, `roles/storage.objectAdmin` on that
-  bucket). Nothing else. State is a local file backend.
-- Ephemeral (`infra/script/session.sh`): a spot e2-small Debian VM per
-  operator session, running the harness directly (no container image), with
-  the journal bucket mounted via gcsfuse at `/mnt/journal`; the VM and local
-  commands share one authoritative journal. Exit path is an explicit teardown;
-  idle cost after teardown is exactly zero; per-session compute is minutes of
-  one small vCPU.
-- Deferred per the adoption triggers below: Cloud Scheduler, Cloud Run jobs,
-  Cloud SQL, RAG Engine, Memory Bank, managed runtime, and any multi-tenant
-  or public-facing posture (Level 3 requires explicit design before anything
-  exists).
+- Persistent base (always declared): one versioned GCS journal bucket, one
+  least-privileged runner service account (`roles/aiplatform.user`
+  project-wide, `roles/storage.objectAdmin` on that bucket,
+  `roles/artifactregistry.reader` on the harness image repo), one Docker
+  Artifact Registry repository, and one Cloud Run job backed by the
+  repository `Dockerfile` image. Managed by the Pulumi program in `infra/`
+  with a local file state backend. There is no boot script; the container
+  image is the entire runtime.
+- Ephemeral execution (the "instance on request"): every
+  `gcloud beta run jobs execute chrysopoeia-cycle-<operator>` runs exactly one
+  bounded paper cycle and bills only its own vCPU seconds; idle cost between
+  executions is exactly zero and no VM ever exists. The journal bucket is
+  mounted at `/mnt/journal` via a Cloud Run GCS volume, so journals persist
+  across executions without a database.
+- Deferred per the adoption triggers below: Cloud Scheduler, Cloud SQL, RAG
+  Engine, Memory Bank, managed runtime, and any multi-tenant or public-facing
+  posture (Level 3 requires explicit design before anything exists).
 
 The harness itself never provisions or mutates cloud resources and must not
 run `gcloud`. Application Default Credentials (ADC) provide authentication to
