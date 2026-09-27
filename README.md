@@ -8,6 +8,27 @@ autonomous trading platform.
 
 ![Chrysopoeia architecture](docs/architecture.svg)
 
+## Repo Layout: Two Work Units
+
+This is a monorepo with two independently owned folders. Each work unit stays
+under its folder and touches the other only through one artifact — the
+**container image** built from the harness wheel:
+
+```
+harness/     application code: agent loop, accounting, CLI, tests, config,
+             offline gates (never runs gcloud/pulumi)
+platform/    GCP deployment: Pulumi base, wheel-based Dockerfile, build script,
+             pinned image digest (never imports the harness package)
+docs/        shared documentation (root): ROADMAP, lifecycle, architecture,
+             accounting, and the product spec `../spec`-equivalent
+```
+
+Ownership details and fences live in `harness/AGENTS.md` and
+`platform/AGENTS.md`. The umbrella workflow is the root
+[`AGENTS.md`](AGENTS.md). In short: the harness publishes a wheel and an image;
+the platform pins an image digest, runs Cloud Run jobs, and never imports the
+harness; the harness never invokes `gcloud`/`pulumi`.
+
 ## Harness Flow
 
 ```text
@@ -42,13 +63,14 @@ route reports a fill, rejection, or abstention reason.
   consumes YES-side depth, rejects insufficient depth without a partial fill,
   computes VWAP, and applies `paper-assumption:flat-2pct-v1`.
 
-Deterministic paper-cycle contracts, evidence, and finalization live in
-`chrysopoeia/paper_cycle.py`; trading, risk, and fills live in
-`chrysopoeia/trading.py`; and `chrysopoeia/agent.py` composes ADK agents,
-wrappers, tools, and workflows. This is not full runtime isolation: cost
-callbacks remain at the ADK edge in `chrysopoeia/cost.py`, and agent wrappers
-bridge ADK Context to the core. Do not add an abstract runtime
-Protocol/interface until a second concrete runtime is required.
+Within the harness, deterministic paper-cycle contracts, evidence, and
+finalization live in `harness/chrysopoeia/paper_cycle.py`; trading, risk, and
+fills live in `harness/chrysopoeia/trading.py`; and
+`harness/chrysopoeia/agent.py` composes ADK agents, wrappers, tools, and
+workflows. This is not full runtime isolation: cost callbacks remain at the
+ADK edge in `harness/chrysopoeia/cost.py`, and agent wrappers bridge ADK
+Context to the core. Do not add an abstract runtime Protocol/interface until a
+second concrete runtime is required.
 
 ## Current Implementation
 
@@ -62,6 +84,10 @@ Protocol/interface until a second concrete runtime is required.
   unverified. Search output remains unverified context and is not normalized.
 - Deterministic identity, freshness, schema, review, edge, exposure, executable
   depth, fee, and model-cost checks.
+- Durable local journal accounting (session, turns, fills, marks, settlement,
+  loss halt) — CLI-surface complete and live-verified.
+- Level 2 managed deployment: container image + Cloud Run job (see the cloud
+  section), single operator.
 - Offline deterministic unit and harness evaluations; paid model evaluation is
   separately gated and manual.
 
@@ -95,17 +121,20 @@ model providers or inner trading steps. Neither is imported or a product
 dependency. Any product integration would create Level 3/meta-harness scope and
 requires explicit design.
 
-## Quickstart
+## Quickstart — Harness (local development)
 
-Python 3.10 or later and `uv` are required. Configure Gemini through ADK on
-Vertex AI with ADC for the current supported development and evaluation path;
-never copy credentials into source, prompts, session state, or logs.
+Run everything that follows from `harness/`. Python 3.10 or later and `uv`
+are required. Configure Gemini through ADK on Vertex AI with ADC for the
+current supported development and evaluation path; never copy credentials into
+source, prompts, session state, or logs.
 
 `chrysopoeia.toml` is the checked-in operator configuration authority for the
 current `adk` runtime, paper mode, public Polymarket adapter, four ADK model
 roles, paper-fee assumption, and single-model pricing ceilings. User-controlled
 `daily_cloud_cost_budget` remains operating configuration and is not duplicated
-there. Unknown keys and unsupported adapters or modes fail closed.
+there. Unknown keys and unsupported adapters or modes fail closed. The CLI
+resolves it via the `CHRYSOPOEIA_CONFIG` env override first, then the repo
+default — the override is how wheel-installed images select their config.
 
 Model providers are pluggable at the ADK registry boundary. `[models] adapter`
 accepts `adk-gemini` (default, direct Vertex Gemini) or `adk-registry`, which
@@ -125,55 +154,28 @@ input_usd_per_million_tokens = "0"
 output_usd_per_million_tokens = "0"
 ```
 
-## Run In The Cloud (optional, operator-driven)
-
-Cost-sensitive Level 2 deployment: the entire, runtime-complete harness
-`Dockerfile` image plus a Cloud Run **job** — no boot scripts, no maintained
-VMs. Every `gcloud beta run jobs execute ...` runs one paper cycle and bills
-only its own vCPU seconds, so idle cost is exactly zero. Unattended
-operation, Cloud Scheduler, and Cloud SQL are deliberately not provisioned
-yet (`docs/gcp-architecture.md`).
+Local development and gate commands:
 
 ```sh
-uv sync --all-groups                # includes the Pulumi dev dependency
-cd infra
-PULUMI_CONFIG_PASSPHRASE=<pass> pulumi stack init <stack>
-pulumi config set project_id <project>
-pulumi config set operator <operator>
-pulumi preview                      # the offline evidence gate
-# live base apply only with explicit operator approval, then build+push once:
-docker build --platform linux/amd64 \
-  -t <region>-docker.pkg.dev/<project>/chrysopoeia/harness:latest ..
-docker push <region>-docker.pkg.dev/<project>/chrysopoeia/harness:latest
-# job args (default: cycle over /mnt/journal/snapshot.json) are set via:
-pulumi config set --path 'job_args[0]' book     # or any CLI subcommand
-# run a bounded paper cycle on demand (this is the "instance on request"):
-gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region>
-```
-
-The job runs as the runner service account (no keys are ever copied) and the
-journal bucket is mounted at `/mnt/journal`, so journals persist across
-executions and local `chrysopoeia book` commands via a local gcsfuse mount.
-Multi-tenant or public-facing use is out of scope and requires an explicit
-design first.
-
-```sh
-uv sync
+uv sync --all-groups --all-extras
 uv run python -m unittest discover
-uv run python -c "import chrysopoeia.agent"
+uv run ruff check .
+uv run ty check .
 uv run chrysopoeia validate --json
 uv run chrysopoeia inspect
 uv run chrysopoeia discover --limit 10
 uv run chrysopoeia capture 12345 --output snapshot.json
 uv run chrysopoeia cycle --snapshot snapshot.json --evidence evidence.json
 uv run adk run chrysopoeia
+uv run adk web --port 8000          # optional development UI
 ```
 
 Operator CLI options use subcommand placement: `chrysopoeia validate [--config
 PATH] [--json]` and `chrysopoeia inspect [--config PATH] [--json]`. Without
 `--config`, both commands load the checked-in `chrysopoeia.toml` independently
-of the current working directory. `python -m chrysopoeia` accepts the same
-commands.
+of the current working directory (or the `CHRYSOPOEIA_CONFIG` override where
+one is set, e.g. inside the deployed image). `python -m chrysopoeia` accepts
+the same commands.
 
 `chrysopoeia discover [--limit N] [--config PATH]` performs an explicitly
 operator-triggered public Gamma metadata scan with no model, CLOB, credentials,
@@ -184,8 +186,7 @@ is a compact JSON `market_discovery` record containing only market ID, question,
 end time, canonical public source URL, and a `capture` value equal to the market
 ID; an eligible-empty scan succeeds with an empty candidate list. Pass a returned
 `capture` value to the existing `chrysopoeia capture MARKET` command to fetch
-the selected market's metadata and depth. Discovery remains pending release
-acceptance until its mandatory bounded live check passes.
+the selected market's metadata and depth.
 
 `chrysopoeia capture MARKET [--config PATH] [--output PATH]` accepts a
 Polymarket event URL or market ID and emits one compact JSON snapshot to stdout.
@@ -238,11 +239,48 @@ journal changes. This is the only path that realizes P&L today.
 records a fresh venue mark, so the book reports current unrealized P&L. A
 failed capture records no mark and no state change.
 
-The ADK web UI is an optional development interface:
+## Run In The Cloud (platform work unit; optional)
+
+Cost-sensitive Level 2 deployment: the container image built from the harness
+wheel plus a Cloud Run **job** — no boot scripts, no maintained VMs, and no
+SSH, ever. Every `gcloud beta run jobs execute ...` runs one paper cycle and
+bills only its own vCPU seconds, so idle cost is exactly zero. Unattended
+operation, Cloud Scheduler, and Cloud SQL are deliberately not provisioned
+yet (`docs/gcp-architecture.md`).
 
 ```sh
-uv run adk web --port 8000
+# 1. build + publish + (offline) validate the image from the harness wheel
+GOOGLE_CLOUD_PROJECT=<project> ./platform/build.sh
+# → prints the PULUMI image pin (digest) to set below
+
+# 2. declare the base with Pulumi from platform/infra/
+cd platform/infra
+uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+source .venv/bin/activate
+PULUMI_CONFIG_PASSPHRASE=<pass> pulumi stack init <stack>
+pulumi config set project_id <project>
+pulumi config set operator <operator>
+pulumi config set image_digest <name@sha256:...>   # from build.sh (never :latest)
+pulumi preview                                      # the offline evidence gate
+# live base apply only with explicit operator approval
+pulumi up
+
+# 3. run a bounded paper cycle on demand (this is the "instance on request")
+gcloud storage cp snapshot.json gs://<project>-chrs-journals-<operator>/
+gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region> --wait
+gcloud storage cat gs://<project>-chrs-journals-<operator>/chrysopoeia.jsonl
 ```
+
+The job runs as the runner service account (no keys are ever copied) and the
+journal bucket is mounted at `/mnt/journal`, so journals persist across
+executions. Code changes are one harness `uv build` + rebuild/push + one
+digest re-pin — nothing else. The image's ENTRYPOINT is the bare CLI, so job
+args are plain `chrysopoeia` commands (`job_args` Pulumi config).
+
+Never edit job envs with `gcloud beta run jobs update --set-env-vars` — that
+replaces all of them and desyncs Pulumi state; Pulumi owns the declared envs.
+Multi-tenant or public-facing use is out of scope and requires an explicit
+design first (per-tenant GCP project is the Level 3 shape).
 
 ## Risk Defaults And Safety
 
@@ -251,8 +289,9 @@ uv run adk web --port 8000
 - Maximum total exposure: 10% of bankroll (currently fixed policy).
 - Minimum net edge: 5 percentage points.
 - Operating configuration also validates/stores a $100 maximum-loss default and
-  $5 daily model-cost budget. The cost budget is enforced now; loss accounting
-  is future work beyond the current single-cycle in-memory harness.
+  $5 daily model-cost budget. The cost budget is enforced now; cumulative-loss
+  halts are journaled and enforced once positions are settled (the
+  `settle`-through path is live-verified).
 - Trader and reviewer agents cannot execute, alter policy, or grant themselves
   tools. Deterministic Python owns policy, sizing, cost gates, paper execution,
   and state transitions.
@@ -265,17 +304,18 @@ uv run adk web --port 8000
 - Live or authenticated execution, wallets, private keys, or geoblock bypass.
 - Autonomous scanning, scheduling, lifecycle management, self-improvement, or
   unattended operation.
-- Durable authoritative storage, idempotent distributed triggers, multi-market
-  portfolios, or multiple implemented runtime/model/venue adapters.
-- Required RAG, vector search, Memory Bank, Cloud SQL, or managed deployment.
-- A generic plugin architecture.
+- Durable authoritative multi-user storage, idempotent distributed triggers,
+  multi-market portfolios beyond the local journal, or two fully live
+  runtime/model adapters.
+- Required RAG, vector search, Memory Bank, Cloud SQL.
+- A generic plugin architecture; per-tenant public offering (Level 3).
 
 ## Future Platform Evolution
 
-Measured need and explicit approval may add durable records, idempotent triggers,
-scanning/scheduling, another runtime adapter, venue adapters, model
-configurations, lifecycle/versioning, RAG/memory, and managed deployment. These
-are optional platform capabilities, not harness prerequisites.
+Measured need and explicit approval may add durable records, idempotent
+triggers, scanning/scheduling, another runtime adapter, venue adapters, model
+configurations, lifecycle/versioning, RAG/memory, and per-tenant managed
+deployment. These are optional platform capabilities, not harness prerequisites.
 
 Any future authenticated execution must be a separate isolated adapter and
 capability with confirmation, least-privilege IAM, hard limits, a kill switch,

@@ -120,6 +120,11 @@ never include secrets, private user data, or hidden reasoning.
 
 ## Recorded Live Verification
 
+> Paths: all pre-split entries ran from the monorepo root. After the
+> 2026-09-27 split, the equivalent commands run from `harness/` and the
+> Pulumi commands from `platform/infra/` (see each folder's AGENTS.md).
+
+
 ### Bounded market discovery (2026-09-15)
 
 - Commands: `uv run chrysopoeia discover --limit 1` then

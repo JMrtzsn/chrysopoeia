@@ -8,9 +8,11 @@ one Cloud Run job**, cost-sensitive, single operator, Level 2 scope.
   project-wide, `roles/storage.objectAdmin` on that bucket,
   `roles/artifactregistry.reader` on the harness image repo), one Docker
   Artifact Registry repository, and one Cloud Run job backed by the
-  repository `Dockerfile` image. Managed by the Pulumi program in `infra/`
-  with a local file state backend. There is no boot script; the container
-  image is the entire runtime.
+  wheel-built `platform/Dockerfile` image. Managed by the Pulumi program in
+  `platform/infra/` with a local file state backend; images are pinned by
+  digest (`pulumi config set image_digest <name@sha256:...>`), never by a
+  floating tag. There is no boot script; the container image is the entire
+  runtime.
 - Ephemeral execution (the "instance on request"): every
   `gcloud beta run jobs execute chrysopoeia-cycle-<operator>` runs exactly one
   bounded paper cycle and bills only its own vCPU seconds; idle cost between
@@ -24,12 +26,16 @@ one Cloud Run job**, cost-sensitive, single operator, Level 2 scope.
 The harness itself never provisions or mutates cloud resources and must not
 run `gcloud`. Application Default Credentials (ADC) provide authentication to
 configured Google APIs. ADC does not provision APIs, billing, IAM, databases,
-networks, or an agent runtime; `infra/` (Pulumi program and session script) is
-the only sanctioned operator tooling for cloud changes.
+networks, or an agent runtime; `platform/` (the Pulumi program in
+`platform/infra/` and the wheel-based Dockerfile) is the only sanctioned
+operator tooling for cloud changes.
 
-Application Default Credentials (ADC) provide authentication to configured
-Google APIs. ADC does not provision APIs, billing, IAM, databases, networks, or
-an agent runtime, and the harness must not run `gcloud` or change them.
+## Work Unit Boundary
+
+This is one work unit inside the two-folder monorepo: `platform/` owns
+everything declared above and never imports the harness package — it consumes
+only the image built from the harness wheel (see `platform/AGENTS.md`). The
+application loop code lives in `harness/` and never runs `gcloud` or `pulumi`.
 
 ## Adoption Triggers
 

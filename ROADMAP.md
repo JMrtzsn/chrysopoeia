@@ -6,6 +6,10 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 
 ## Complete
 
+> All completed paths reference the pre-split layout (`chrysopoeia/...`,
+> `infra/`); since the 2026-09-27 split these live under `harness/` and
+> `platform/` respectively.
+
 - [x] Runtime-neutral core contracts with ADK at the runtime edge
   (`chrysopoeia/paper_cycle.py`, `chrysopoeia/trading.py`,
   `chrysopoeia/agent.py`; spec: Harness Definition And Ownership).
