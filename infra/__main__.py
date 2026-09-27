@@ -75,11 +75,21 @@ gcp.storage.BucketIAMMember(
     ),
 )
 
-required_services = gcp.projects.Service(
-    "required-apis",
+run_service = gcp.projects.Service(
+    "run-service",
     gcp.projects.ServiceArgs(
         project=project_id,
         service="run.googleapis.com",
+        disable_dependent_services=False,
+        disable_on_destroy=True,
+    ),
+)
+
+artifact_services = gcp.projects.Service(
+    "artifact-services",
+    gcp.projects.ServiceArgs(
+        project=project_id,
+        service="artifactregistry.googleapis.com",
         disable_dependent_services=False,
         disable_on_destroy=True,
     ),
@@ -93,7 +103,7 @@ repository = gcp.artifactregistry.Repository(
         repository_id="chrysopoeia",
         format="DOCKER",
     ),
-    opts=pulumi.ResourceOptions(depends_on=[required_services]),
+    opts=pulumi.ResourceOptions(depends_on=[run_service, artifact_services]),
 )
 
 gcp.artifactregistry.RepositoryIamMember(

@@ -536,6 +536,8 @@ lint = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "litellm", version = "1.85.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "litellm", version = "1.96.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "nest-asyncio" },
     { name = "pulumi" },
     { name = "pulumi-gcp" },
@@ -560,6 +562,7 @@ provides-extras = ["lint", "eval"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "litellm", specifier = ">=1.85.7" },
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
     { name = "pulumi", specifier = ">=3.0,<4" },
     { name = "pulumi-gcp", specifier = ">=7.0,<9" },

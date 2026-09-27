@@ -214,6 +214,47 @@ never include secrets, private user data, or hidden reasoning.
 - Authentication: none required; public endpoints.
 - Cleanup: nothing created beyond temp journal directories.
 
+### Cloud Run restoration after failed VM pivot (2026-09-27)
+
+- Decision: the managed deployment shape is **container-first Cloud Run jobs**
+  (per-execution billing, hard per-task cost ceiling, no boot script, no SSH
+  ever into any machine). The intermediate Debian VM + boot-script attempt is
+  recorded as abandoned; `infra/boot.sh` and the source `BucketObject` are
+  deleted, and the ephemeral VM and its shape resources were destroyed in the
+  Pulumi stack (`local-dev`).
+- Live commands: `pulumi refresh`, `pulumi up` (8 programs-declared base
+  resources + one `cloudrunv2.Job` with the gcsfuse journal volume), restore
+  of the deleted Artifact Registry repository + rebuilt image
+  `harness@sha256:70d1d9bfc65784ba9dd30a0bc53d0c90f0b17238fea7451d34683dd1a0285f42`
+  (a `gcloud beta run jobs update --set-env-vars` call that replaced job envs
+  was identified as the root cause of earlier local failure and is banned in
+  favor of Pulumi-only mutation), plus three bounded executions:
+  1. `cycle` against the cached capture (idempotent admission no-op — 0
+     journal lines, as designed, exit 0);
+  2. `book` (zero model calls, exit 0);
+  3. `cycle` against a **fresh capture** (paper_cycle live price 0.037):
+     journal gained a third line, a new `turn_admitted` with new
+     `turn-b2e624f15ac71801235a4720` (12:22:35 UTC, 2026-09-27).
+- Real boundary: the harness path from Vertex access to journal append ran
+  inside the Pulumi-declared Cloud Run job with ambient runner-SA identity;
+  session opened in the durable bucket; honest abstention (no evidence
+  bundle) on the true market; the container image is the only application
+  artifact deployed.
+- Findings: `job_args` are currently operator-configured from the stack
+  (`["cycle", ..., "--config", "/mnt/journal/vertex.toml", ...]` with the
+  Vertex-native config staged on the bucket), a tradeoff to revisit when the
+  checked-in default alias config decision is made. `gcloud beta run jobs
+  update --set-env-vars` replaces ALL env vars, so it must not be used
+  alongside Pulumi-managed envs. Stdout `book_report`/`paper_cycle_result`
+  lines remained invisible through `gcloud logging read` filters again
+  (durable journal is authoritative).
+- Approval: bounded executions pre-approved (~$0.005 total; image rebuild
+  free); result-based exit 0. Cleanup: nothing remains beyond the temp dirs
+  listed above; job object stack fenced via `goog-pulumi-provisioned` labels
+  in all Pulumi-provisioned resources.
+- Cleanup: one durable bucket (`PROJECT_ID-chrs-journals-local`)
+  remains deliberately for the next bounded session; no other paid state.
+
 ### Book marking (2026-09-15)
 
 - Command: `chrysopoeia mark --journal <temp dir>` over the open live-verified
