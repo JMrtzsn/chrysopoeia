@@ -245,4 +245,39 @@ never include secrets, private user data, or hidden reasoning.
   `google-adk[extensions]` and provider credentials or a local backend, so
   that boundary remains not verified. Claude Pro/Code credentials are banned
   from this harness by the safety contract regardless.
-- Approval: operator approved. Cost: about $0.0009. Cleanup: temp dir only.
+- Cleanup: temp dir only.
+
+### Cloud Run container deployment (2026-09-18)
+
+- Live commands: `pulumi up` (8 resources: journal bucket, runner SA with
+  project-level `roles/aiplatform.user`, bucket objectAdmin, Artifact Registry
+  repository and reader binding, API enablement, one Cloud Run job); one
+  `docker build --platform linux/amd64` plus local container offline gate
+  (`chrysopoeia validate --json` inside the image); one
+  `docker push`; snapshot upload to the journal bucket; two Cloud Run job
+  executions — one `cycle` (chrysopoeia-cycle-local-m76zd) and one `book`
+  (chrysopoeia-cycle-local-pdswd); machine config reset to the `cycle`
+  default afterwards.
+- Real boundary: the deployed container ran the real harness path — Vertex
+  model access was attempted live; the first execution failed on the known
+  `gemini-flash-latest` alias (Gemini-API-only), resolved by staging a
+  Vertex-native `vertex.toml` (the bounded prior live config) on the journal
+  bucket and configuring the job args to include `--config /mnt/journal/vertex.toml`.
+- Result: execution m76zd SUCCEEDED (exit 0) — journal in the bucket gained
+  `session_opened` and `turn_admitted`; execution pdswd SUCCEEDED — the
+  `book` report ran against the mounted journal (gcsfuse mount confirmed live
+  in the job logs). No executions place (or assume) authenticated venue
+  authority; no keys are ever copied.
+- Scope: per-tenant projects are the chosen eventual shape for Level 3; the
+  current single-operator stack is one tenant.
+- Approval: operator approved base apply, image push, and the two bounded
+  executions. Cost: accumulatively less than USD 0.02 in irreducible Cloud Run
+  billables; image repository storage cents per month; no extra paid services.
+- Findings: job stdout report lines were not visible in Cloud Logging via
+  `gcloud logging read` filters (container-runtime lines only) — the
+  authoritative durable record is the journal in the versioned bucket, which
+  is the design intent. `gcloud beta run jobs executions logs read` crashed
+  locally (gcloud bug, TypeError) while filtering.
+- Cleanup: `job_args` reset; tofu/terraform remnants deleted; one durable
+  bucket (`PROJECT_ID-chrs-journals-local`) remains deliberately for
+  the next bounded session; nothing else created.

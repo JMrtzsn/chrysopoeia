@@ -57,10 +57,10 @@ runner = gcp.serviceaccount.Account(
 
 serviceaccount_member = pulumi.Output.concat("serviceAccount:", runner.email)
 
-gcp.serviceaccount.IAMMember(
+gcp.projects.IAMMember(
     "runner-vertex-user",
-    gcp.serviceaccount.IAMMemberArgs(
-        service_account_id=runner.name,
+    gcp.projects.IAMMemberArgs(
+        project=project_id,
         role="roles/aiplatform.user",
         member=serviceaccount_member,
     ),
@@ -75,6 +75,16 @@ gcp.storage.BucketIAMMember(
     ),
 )
 
+required_services = gcp.projects.Service(
+    "required-apis",
+    gcp.projects.ServiceArgs(
+        project=project_id,
+        service="run.googleapis.com",
+        disable_dependent_services=False,
+        disable_on_destroy=True,
+    ),
+)
+
 repository = gcp.artifactregistry.Repository(
     "images",
     gcp.artifactregistry.RepositoryArgs(
@@ -83,6 +93,7 @@ repository = gcp.artifactregistry.Repository(
         repository_id="chrysopoeia",
         format="DOCKER",
     ),
+    opts=pulumi.ResourceOptions(depends_on=[required_services]),
 )
 
 gcp.artifactregistry.RepositoryIamMember(

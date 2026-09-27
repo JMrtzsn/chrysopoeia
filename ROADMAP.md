@@ -52,17 +52,18 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 
 ## Next
 
-0. **Managed deployment, Level 2 (single operator).** Selected profile
-   (`docs/gcp-architecture.md`): container-first Pulumi base — versioned
-   journal bucket, least-privileged runner SA, Artifact Registry repository,
-   and one Cloud Run job whose every execution runs one bounded paper cycle
-   (zero idle cost, no boot scripts). Offline gate passed (`pulumi preview`:
-   8 resources). Pending: approved live base apply, one image build/push, and
-   one bounded live execution (one journaled cycle) before any of this
-   counts complete.
+0. **Managed deployment, Level 2 (single operator).** Complete:
+   container-first Pulumi base — versioned journal bucket, least-privileged
+   runner SA, Artifact Registry repository, and one Cloud Run job whose every
+   execution runs one bounded paper cycle (zero idle cost, no boot scripts).
+   Live-verified 2026-09-18 with one journaled `cycle` execution and one
+   `book` execution against the mounted journal; see Recorded Live
+   Verification in `docs/development-lifecycle.md`. The journal bucket and
+   job remain the operator's durable session; multi-tenant hard isolation via
+   one GCP project per tenant is the Level 3 follow-up note in
+   `docs/gcp-architecture.md`.
 0a. **Unattended multi-cycle operation** (Cloud Scheduler + loops) — only
-   after the Level 2 sessions above are verified, since idempotent recovery
-   and turn-level resumability are not complete.
+   after turn-level recovery is complete; see Deferred.
 1. **Non-Gemini provider live proof.** A bounded live run against a non-Gemini
    provider (e.g. ollama with `google-adk[extensions]`) before calling that
    registry-provider boundary proven. The registry routing itself is
