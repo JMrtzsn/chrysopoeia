@@ -1,10 +1,12 @@
 import asyncio
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from collections.abc import Awaitable, Callable
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
@@ -381,6 +383,21 @@ class ModelAdapterTests(unittest.TestCase):
         config = HarnessConfig.from_mapping(VALID)
         self.assertEqual(config.models.adapter, "adk-gemini")
         self.assertEqual(len(config.cost.prices), 1)
+
+    def test_config_path_env_override_wins_over_repo_default(self) -> None:
+        from pathlib import Path
+
+        from chrysopoeia.cli import DEFAULT_CONFIG_ENV, default_config_path
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "cfg.toml"
+            target.write_text("[runtime]\nadapter = 'adk'\nmode = 'paper'\n")
+            with unittest.mock.patch.dict(
+                os.environ, {DEFAULT_CONFIG_ENV: str(target)}
+            ):
+                self.assertEqual(default_config_path(), target)
+        # the repo default still resolves when the override is absent
+        self.assertIn("chrysopoeia.toml", str(default_config_path()))
 
 
 if __name__ == "__main__":

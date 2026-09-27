@@ -27,7 +27,17 @@ from chrysopoeia.trading import (
     market_snapshot_identity,
 )
 
-DEFAULT_CONFIG = Path(__file__).parents[1] / "chrysopoeia.toml"
+DEFAULT_CONFIG_ENV = "CHRYSOPOEIA_CONFIG"
+
+
+def default_config_path() -> Path:
+    """Config resolution: environment override, then repo-local default."""
+    override = os.environ.get(DEFAULT_CONFIG_ENV)
+    if override:
+        return Path(override)
+    return Path(__file__).parents[1] / "chrysopoeia.toml"
+
+
 MAX_SNAPSHOT_BYTES = 512 * 1024
 _CAPTURE_KEYS = {"schema_version", "record_type", "venue", "mode", "snapshot"}
 _SNAPSHOT_KEYS = {
@@ -498,7 +508,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
         return 0
-    path = args.config or DEFAULT_CONFIG
+    path = args.config or default_config_path()
     label = "chrysopoeia.toml" if args.config is None else args.config.name
     try:
         config = load_harness_config(path)

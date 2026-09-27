@@ -1,5 +1,10 @@
 .venv/
+harness/.venv/
+platform/infra/.venv/
+platform/.build/
 __pycache__/
 .pytest_cache/
 artifacts/
 .env
+infra/state/
+platform/infra/state/

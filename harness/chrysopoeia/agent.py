@@ -11,6 +11,7 @@ from google.adk.tools import AgentTool, ToolContext, google_search
 from google.adk.workflow import Workflow
 
 from chrysopoeia import paper_cycle
+from chrysopoeia.cli import default_config_path
 from chrysopoeia.configuration import ConfigurationError, HarnessConfig, load_harness_config
 from chrysopoeia.context import discover_context
 from chrysopoeia.cost import after_model_cost, configured_before_model_cost, on_model_cost_error
@@ -291,7 +292,7 @@ def build_agents(config: HarnessConfig) -> AgentSet:
 
 
 try:
-    DEFAULT_HARNESS_CONFIG = load_harness_config(Path(__file__).parents[1] / "chrysopoeia.toml")
+    DEFAULT_HARNESS_CONFIG = load_harness_config(default_config_path())
 except ConfigurationError as exc:
     raise RuntimeError(f"Chrysopoeia startup configuration is invalid: {exc}") from None
 

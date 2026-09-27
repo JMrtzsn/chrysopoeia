@@ -117,14 +117,18 @@ gcp.artifactregistry.RepositoryIamMember(
     ),
 )
 
-image = pulumi.Output.concat(
-    repository.location,
-    "-docker.pkg.dev/",
-    repository.project,
-    "/",
-    repository.name,
-    "/harness:latest",
-)
+digest = config.get("image_digest")
+if digest:
+    image = digest
+else:
+    image = pulumi.Output.concat(
+        repository.location,
+        "-docker.pkg.dev/",
+        repository.project,
+        "/",
+        repository.name,
+        "/harness:latest",
+    )
 
 paper_cycle_job = gcp.cloudrunv2.Job(
     "paper-cycle",
@@ -144,8 +148,7 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                     gcp.cloudrunv2.JobTemplateTemplateContainerArgs(
                         name="chrysopoeia",
                         image=image,
-                        commands=["uv"],
-                        args=["run", "chrysopoeia", *job_args],
+                        args=job_args,
                         envs=[
                             gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
                                 name="GOOGLE_GENAI_USE_VERTEXAI",

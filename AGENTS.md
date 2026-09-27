@@ -10,6 +10,20 @@ future graph prerequisites are defined in `docs/agent-graphs.md`.
 The product specification is `.agents-cli-spec.md`; development and release
 gates are defined in `docs/development-lifecycle.md`.
 
+## Repo layout: two work units
+
+This is a monorepo with two independently owned folders. Each work unit must
+stay under its folder; touching the other side requires explicit operator
+approval in both plans:
+
+- `harness/` — application code: agent loop, papers， cost gates, accounting,
+  CLI, tests, local dev. Produces a wheel/container image the platform
+  consumes. Never runs `gcloud`/`pulumi`.
+- `platform/` — GCP deployment: Pulumi base, wheel-based Dockerfile, pinned
+  image digest, session plumbing. Never imports the harness package.
+
+Per-folder ownership details: `harness/AGENTS.md` and `platform/AGENTS.md`.
+
 ## Stack
 
 - Python 3.10 or later.
@@ -20,10 +34,15 @@ gates are defined in `docs/development-lifecycle.md`.
 
 ## Commands
 
-- Install: `uv sync`
+Run from `harness/` unless noted:
+
+- Install: `uv sync --all-groups --all-extras`
 - Test: `uv run python -m unittest discover`
 - Run CLI: `uv run adk run chrysopoeia`
 - Run development UI: `uv run adk web --port 8000`
+
+Platform work runs from `platform/` (see `platform/AGENTS.md` for the Pulumi
+venv and preview/up gates).
 
 ## Architecture
 

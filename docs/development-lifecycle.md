@@ -255,6 +255,30 @@ never include secrets, private user data, or hidden reasoning.
 - Cleanup: one durable bucket (`PROJECT_ID-chrs-journals-local`)
   remains deliberately for the next bounded session; no other paid state.
 
+### Monorepo split into harness and platform work units (2026-09-27)
+
+- Structural change only: `git mv` of the python package, tests, config, hooks
+  into `harness/` and the Pulumi program plus Docker artifacts into
+  `platform/`; no behavior change beyond two app-internal path resolutions
+  (config lookup now prefers the `CHRYSOPOEIA_CONFIG` env override before the
+  repo default, needed because the wheel-installed CLI has no repo layout).
+- Ownership fences: `harness/AGENTS.md` and `platform/AGENTS.md` now define
+  each unit's owned files, off-limits side, and gates (harness never runs
+  gcloud/pulumi; platform never imports the harness and consumes only the
+  image; `gcloud beta run jobs update --set-env-vars` is banned alongside
+  Pulumi-managed envs).
+- Offline verification: 175 unit tests (one new, for the config env override),
+  ruff, `ty`, and `chrysopoeia validate --json` all green from `harness/`;
+  `pulumi preview` from `platform/infra/` converged to 0 pending changes and
+  `pulumi up` no-ops — the pure-move commit did not disturb any resource.
+- Live: the wheel-built image
+  (`harness@sha256:98e7c3c100e1bfff4d45dd71a0e60fdac888f8ed2035d729a14b27766b99a317`,
+  validated offline inside the container first) pushed and pinned in Pulumi
+  config; job invocation form updated to the image ENTRYPOINT
+  (`args=[cycle ...]` without the wrapper), and one live execution completed
+  successfully against the journal bucket.
+- Cost: execution vCPU-seconds under one cent; nothing else created.
+
 ### Book marking (2026-09-15)
 
 - Command: `chrysopoeia mark --journal <temp dir>` over the open live-verified

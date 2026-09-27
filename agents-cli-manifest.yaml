@@ -1,6 +1,6 @@
 name: "chrysopoeia"
 acli_version: "1.4.2"
-agent_directory: "chrysopoeia"
+agent_directory: "harness/chrysopoeia"
 region: "us-east1"
 base_template: "local_chrysopoeia"
 generated_at: "2026-08-31T14:24:24.709521+00:00"
