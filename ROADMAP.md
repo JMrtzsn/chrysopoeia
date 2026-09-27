@@ -55,12 +55,14 @@ live-verification gates remain in `docs/development-lifecycle.md`.
 0. **Managed deployment, Level 2 (single operator).** Complete:
    container-first Pulumi base — versioned journal bucket, least-privileged
    runner SA, Artifact Registry repository, and one Cloud Run job whose every
-   execution runs one bounded paper cycle (zero idle cost, no boot scripts).
-   Live-verified 2026-09-18 with one journaled `cycle` execution and one
-   `book` execution against the mounted journal; see Recorded Live
-   Verification in `docs/development-lifecycle.md`. The journal bucket and
-   job remain the operator's durable session; multi-tenant hard isolation via
-   one GCP project per tenant is the Level 3 follow-up note in
+   execution runs one bounded paper cycle (zero idle cost, no boot scripts,
+   no SSH ever). Live-verified 2026-09-27 in the restored container shape at
+   `f0d87f1`/`bc00442`: idempotent-admission no-op, `book` execution, and a
+   fresh-capture cycle appending a new `turn_admitted` inside the deployed
+   container; see Recorded Live Verification in
+   `docs/development-lifecycle.md`. The journal bucket and job remain the
+   operator's durable session; multi-tenant hard isolation via one GCP
+   project per tenant is the Level 3 follow-up note in
    `docs/gcp-architecture.md`.
 0a. **Unattended multi-cycle operation** (Cloud Scheduler + loops) — only
    after turn-level recovery is complete; see Deferred.
