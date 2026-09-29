@@ -8,6 +8,7 @@ import math
 from types import SimpleNamespace
 
 from google.adk.models import BaseLlm
+from google.adk.models._capabilities import LlmCapabilities
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.runners import Runner
@@ -99,6 +100,13 @@ class StructuredFakeLlm(BaseLlm):
     calls: SkipValidation[list[str]]
     response: dict[str, object]
     agent_name: str
+
+    @property
+    def capabilities(self) -> LlmCapabilities:
+        # Declare explicitly: the deprecated name-based fallback reads
+        # GOOGLE_GENAI_USE_VERTEXAI from os.environ, which litellm's import-time
+        # load_dotenv() can flip mid-suite when .env sets it.
+        return LlmCapabilities(output_schema_and_tools=False)
 
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False,
