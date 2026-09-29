@@ -29,8 +29,11 @@ Per-folder ownership details: `harness/AGENTS.md` and `platform/AGENTS.md`.
 - Python 3.10 or later.
 - Google Agent Development Kit for Python as the current agent-runtime adapter.
 - `uv` for dependency and environment management.
-- Gemini through ADK. Current development and evaluation use Vertex AI with
-  Application Default Credentials (ADC), never copied API keys.
+- Gemini through ADK. Providers with ambient authentication use it (Vertex AI
+  with Application Default Credentials, never copied keys). Providers without
+  ambient authentication use a provider-standard environment-variable key (e.g.
+  OPENROUTER_API_KEY), never stored in files, configuration, prompts, session
+  state, or logs.
 
 ## Commands
 
@@ -149,8 +152,10 @@ venv and preview/up gates).
   provider behavior do require live verification.
 - Before a live run, obtain human approval for cost or external effects,
   estimate cost, and bound calls, time, and data. Exercise the smallest real
-  path with least privilege and ambient authentication (ADC for Vertex), never
-  copied keys. Sanitize evidence, record the exact command, result, and cost
+  path with least privilege and ambient authentication (ADC for Vertex) or, for
+  providers without ambient authentication, a provider-standard
+  environment-variable key that never enters files, configuration, prompts,
+  state, or logs. Sanitize evidence, record the exact command, result, and cost
   when applicable, then clean up or disable temporary services and resources.
 - A failed live verification blocks completion and any commit recommendation;
   fix and rerun it. An unavailable environment, insufficient IAM, or vendor

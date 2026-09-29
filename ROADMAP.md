@@ -53,6 +53,12 @@ live-verification gates remain in `docs/development-lifecycle.md`.
   positions feeds journal marks so unrealized P&L reflects live venue data.
   Live-verified 2026-09-15; see Recorded Live Verification in
   `docs/development-lifecycle.md`.
+- [x] Non-Gemini provider live proof: one bounded paper cycle over OpenRouter
+  (`openrouter/openai/gpt-4o`) through `adk-registry`/LiteLlm, authenticated
+  with a provider-standard env-var key (`OPENROUTER_API_KEY`) and priced
+  per-model under `[cost.models]`. The auth policy now permits env-var keys
+  for providers without ambient authentication. Live-verified 2026-09-27; see
+  Recorded Live Verification in `docs/development-lifecycle.md`.
 
 ## Next
 
@@ -70,10 +76,6 @@ live-verification gates remain in `docs/development-lifecycle.md`.
    `docs/gcp-architecture.md`.
 0a. **Unattended multi-cycle operation** (Cloud Scheduler + loops) — only
    after turn-level recovery is complete; see Deferred.
-1. **Non-Gemini provider live proof.** A bounded live run against a non-Gemini
-   provider (e.g. ollama with `google-adk[extensions]`) before calling that
-   registry-provider boundary proven. The registry routing itself is
-   live-verified for Gemini; no generic plugin framework exists.
 
 ## Deferred
 

@@ -107,8 +107,10 @@ refactors, and test-only tooling need offline verification only; runtime-affecti
 configuration changes are not exempt.
 
 Live runs require prior human approval for cost or external effects, a cost
-estimate, strict call/time/data bounds, least privilege with ADC or other ambient
-authentication rather than copied keys, sanitized command/result/cost evidence,
+estimate, strict call/time/data bounds, least privilege with ambient
+authentication (ADC for Vertex) or, for providers without ambient
+authentication, a provider-standard environment-variable key kept out of files,
+configuration, prompts, state, and logs, sanitized command/result/cost evidence,
 and cleanup of temporary resources. A failure must be fixed and rerun; a blocked
 environment/IAM/vendor dependency leaves the feature incomplete and is never a
 waiver. Offline pre-commit checks remain mandatory, but no paid or network check
@@ -125,8 +127,10 @@ requires explicit design.
 
 Run everything that follows from `harness/`. Python 3.10 or later and `uv`
 are required. Configure Gemini through ADK on Vertex AI with ADC for the
-current supported development and evaluation path; never copy credentials into
-source, prompts, session state, or logs.
+current supported development and evaluation path. Providers without ambient
+authentication (e.g. OpenRouter through `adk-registry`) read their key only
+from a provider-standard environment variable in the operator's shell. Never
+copy credentials into source, prompts, session state, or logs.
 
 `chrysopoeia.toml` is the checked-in operator configuration authority for the
 current `adk` runtime, paper mode, public Polymarket adapter, four ADK model

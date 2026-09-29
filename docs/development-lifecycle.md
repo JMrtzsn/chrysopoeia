@@ -124,6 +124,35 @@ never include secrets, private user data, or hidden reasoning.
 > 2026-09-27 split, the equivalent commands run from `harness/` and the
 > Pulumi commands from `platform/infra/` (see each folder's AGENTS.md).
 
+### Non-Gemini provider proof via OpenRouter (2026-09-27)
+
+- Commands: `uv run chrysopoeia discover --limit 5 --config <temp>`, then
+  `uv run chrysopoeia capture 559651 --config <temp> --output <tmp>`, then one
+  `uv run chrysopoeia cycle --snapshot <tmp> --config <temp>`. The temp config
+  used `[models] adapter = "adk-registry"`, all four roles
+  `openrouter/openai/gpt-4o`, and explicit per-model pricing $2.50/$10 per
+  million tokens, confirmed against `https://openrouter.ai/api/v1/models`
+  before the run.
+- Real boundary: ADK `LLMRegistry` to LiteLlm to OpenRouter chat completions
+  for `openai/gpt-4o`. Authentication came from the `OPENROUTER_API_KEY`
+  environment variable in the operator shell only, never written to files,
+  configuration, prompts, state, logs, or journals — the amended auth policy
+  (spec, AGENTS.md, README.md) permits provider-standard env-var keys for
+  providers without ambient authentication. This proves the non-Gemini
+  provider boundary that the 2026-09-15 registry run left unverified.
+- Result: terminal `abstained` (`trader_abstained`); trader called once;
+  reviewer correctly not invoked on abstention; cost ledger `completed`;
+  `actual_estimated_cost_usd` $0.004805 against the $0.06144 reserved ceiling.
+- Bounds: one bounded paper cycle, at most two model calls, no journal, no
+  venue calls during the cycle. Offline preconditions: full unit suite, ruff,
+  `ty`, and `chrysopoeia validate --config <temp> --json` all green before the
+  live run.
+- Approval: operator approved the bounded run at the $0.06144 worst-case
+  estimate.
+- Cost: ~$0.005 estimated model cost; no paid cloud services.
+- Cleanup: temp config and snapshot lived only in the OS temp directory and
+  were deleted after the run; no cloud resources created.
+
 
 ### Bounded market discovery (2026-09-15)
 
