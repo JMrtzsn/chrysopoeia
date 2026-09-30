@@ -1,10 +1,12 @@
 # Chrysopoeia
 
-Chrysopoeia is a specialized local trading-agent harness. It uses configured
-LLMs to assemble role-isolated agents, run and evaluate bounded paper-trading
-workflows, and audit deterministic evidence, policy, risk, and model-cost
-decisions. Its core contracts are agent-runtime-neutral; it is not currently an
-autonomous trading platform.
+Chrysopoeia is a specialized trading-agent harness built to find and make good
+trades across markets. An operator sets capital, a target win rate, a trading
+window, and hard limits—not strategies, theses, trade ideas, market picks, or
+evidence opinions. The harness chooses and researches markets, then runs bounded
+research-and-decide cycles at a cadence of minutes or longer; it has no overall
+strategy. Paper is the current mode; live trading is the eventual goal and
+remains gated.
 
 ![Chrysopoeia architecture](docs/architecture.svg)
 
@@ -37,11 +39,12 @@ configuration -> capture -> optional local evidence bundle -> trader
               -> audit/evaluation
 ```
 
-An operator explicitly configures limits, captures one market snapshot, and
-starts one cycle. The trader may propose a trade or abstain. A trade proposal
-goes to an independent reviewer, then to deterministic risk and cost gates.
-Only an allowed proposal receives a simulated quote and fill. Every terminal
-route reports a fill, rejection, or abstention reason.
+The planned bounded loop chooses markets and processes one market per cycle. The
+current CLI exposes its discover, capture, and cycle steps separately. For each
+cycle, the trader may propose a trade or abstain. A trade proposal goes to an
+independent reviewer, then to deterministic risk and cost gates. Only an allowed
+proposal receives a simulated quote and fill. Every terminal route reports a
+fill, rejection, or abstention reason.
 
 ## Architecture Boundaries
 
@@ -80,8 +83,10 @@ second concrete runtime is required.
 - One binary Polymarket market per cycle; paper-only and in-memory.
 - Separate single-turn trader and reviewer roles with no execution tools.
 - Canonical snapshot evidence is always present and authoritative. Optional
-  operator-supplied external evidence is validated locally, snapshot-bound, and
-  unverified. Search output remains unverified context and is not normalized.
+  operator-supplied external evidence is a development/testing input: it is
+  validated locally, snapshot-bound, and unverified. Product research tools are
+  planned to normalize search, financial, and company data with provenance
+  before it becomes citable.
 - Deterministic identity, freshness, schema, review, edge, exposure, executable
   depth, fee, and model-cost checks.
 - Durable local journal accounting (session, turns, fills, marks, settlement,
@@ -211,11 +216,12 @@ current market and total exposure default to zero, so operators with existing
 exposure must provide both exposure flags. Its reported maximum reserved cost is
 the two-call ceiling, not a guarantee that both calls occur or that the full
 amount is spent.
-The optional strict evidence file contains the canonical record first and 1–19
-external records with public HTTPS locators, titles, and retrieval timestamps.
-It is snapshot-bound, operator-supplied unverified local transport and is never
-fetched. Without it, the cycle remains canonical-snapshot-only. There is no
-command to create an evidence bundle. Its exact envelope contains only
+The optional strict evidence file is a development/testing input containing the
+canonical record first and 1–19 external records with public HTTPS locators,
+titles, and retrieval timestamps. It is snapshot-bound, operator-supplied
+unverified local transport and is never fetched. Without it, the cycle remains
+canonical-snapshot-only. There is no command to create an evidence bundle. Its
+exact envelope contains only
 `schema_version: 1`, `record_type: "evidence_bundle"`, `snapshot_id`,
 `market_id`, `evidence: [canonical, external...]`, and
 `provenance: "operator-supplied-unverified"`.
@@ -307,27 +313,31 @@ design first (per-tenant GCP project is the Level 3 shape).
 
 ## Current Non-goals
 
-- Live or authenticated execution, wallets, private keys, or geoblock bypass.
+- Live or authenticated execution now, wallets, private keys, or geoblock
+  bypass. Live trading is the eventual goal, subject to the gates below.
+- High-frequency or latency-sensitive trading; cadence is minutes or longer.
+- Operator-supplied strategy, theses, trade ideas, market picks, or evidence
+  opinions. The operator supplies only session parameters and hard limits.
 - Unbounded autonomous operation, platform-owned scheduling, lifecycle
-  management, or self-improvement. A bounded harness-owned autonomous paper
-  loop is planned.
+  management, or self-improvement. A bounded harness-owned loop is planned.
 - Durable authoritative multi-user storage, idempotent distributed triggers,
-  multi-market portfolios beyond the local journal, or two fully live
-  runtime/model adapters.
+  or two fully live runtime/model adapters.
 - Required RAG, vector search, Memory Bank, Cloud SQL.
 - A generic plugin architecture; per-tenant public offering (Level 3).
 
 ## Future Platform Evolution
 
-Measured need and explicit approval may add another runtime adapter, venue
-adapters, model configurations, lifecycle/versioning, RAG/memory, and
-per-tenant managed deployment. A bounded autonomous paper loop is a harness
-capability; the platform only hosts and launches its released entrypoint.
+Measured need and explicit approval may add another runtime adapter, later
+venue adapters beyond the current Polymarket adapter, model configurations,
+lifecycle/versioning, RAG/memory, and per-tenant managed deployment. Financial
+and company data tools are research inputs, not venues. A bounded autonomous
+paper loop is a harness capability; the platform only hosts and launches its
+released entrypoint.
 
 Any future authenticated execution must be a separate isolated adapter and
 capability with confirmation, least-privilege IAM, hard limits, a kill switch,
-and reconciliation. No agent may receive or infer that authority from a
-market-data adapter.
+idempotency, and reconciliation. No agent may receive or infer that authority
+from a market-data adapter.
 
 `.agents-cli-spec.md` is the authoritative product specification. The files in
 `docs/` describe graph, context, development, and optional deployment details.

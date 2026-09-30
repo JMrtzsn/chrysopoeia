@@ -102,16 +102,20 @@ divides session, context, tool, and terminal-state ownership with them.
 ### Bounded Autonomous Decision Graph
 
 ```text
-hard bounds + stop check -> deterministic scan/opportunity gate
+session capital + target win rate + window + hard limits
+  -> stop/deadline check -> discover and select a market
   -> capture canonical snapshot -> bounded harness decision graph
   -> mark/settle -> durable audit/recovery -> repeat or halt
+  -> end-of-window achieved-versus-target win-rate and net-P&L report
 ```
 
-The harness owns cadence and enforces maximum cycles, wall-clock deadline, cost
-budget, loss halt, and a kill switch or stop signal. Cheap scans and
-cooldown/model-call budgets gate expensive reasoning. Recovery and idempotent
-admission must prevent duplicate records or fills; graph versions remain fixed
-for active cycles.
+The harness discovers and selects markets without operator ideas or picks, owns
+cadence, and enforces the trading-window deadline, maximum cycles, cost budget,
+loss halt, and a kill switch or stop signal. Cheap scans and cooldown/model-call
+budgets gate expensive reasoning. Recovery and idempotent admission must prevent
+duplicate records or fills; graph versions remain fixed for active cycles. At
+the deadline it reports settled winning trades divided by settled trades against
+the target; the target never weakens risk limits or makes abstention invalid.
 
 ### Lifecycle Graph
 

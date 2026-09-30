@@ -17,6 +17,7 @@ authoritative, inspectable, and miss simpler-with-recovery.
 ## Scope
 
 - Multiple paper cycles across multiple markets with cross-cycle positions.
+- A session freezes operator-set capital, target win rate, and trading window.
 - Realized and unrealized P&L and bankroll evolution.
 - Hard maximum cumulative loss across the session.
 - Market resolution as the terminal settlement event.
@@ -58,6 +59,11 @@ class Book:
 Derived, never stored: `open_exposure = sum(open_positions.total_cost)`,
 `bankroll_now = config.bankroll + realized_pnl - open_exposure - open_fee_debt`,
 `unrealized_pnl = sum(shares * mark_price - total_cost)` over open positions.
+At the trading-window deadline, the session report compares its target with
+`win_rate = settled_winning_trades / settled_trades` and reports P&L net of
+costs. With no settled trades, the achieved win rate is unavailable rather than
+zero. The target does not alter exposure, edge, loss, or cost limits and does not
+require a trade.
 
 ### Marking
 

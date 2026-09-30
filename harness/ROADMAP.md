@@ -71,15 +71,25 @@ artifact (wheel/image version). Neither roadmap depends on the other's tasks.
 
 1. **Bounded autonomous trading loop.** Add a paper-only harness CLI entrypoint
    that repeats discover → capture → cycle → mark → settle under hard maximum
-   cycles, wall-clock deadline, cost budget, loss halt, and kill switch/stop
-   file or signal bounds. Trading logic, cadence, recovery, and halting remain
-   inside the harness.
+   cycles, operator-set capital and trading window, target win rate, cost budget,
+   loss halt, and kill switch/stop file or signal bounds. Trading logic, market
+   selection, cadence, recovery, and halting remain inside the harness. Stop at
+   the window deadline and report achieved settled-trade win rate versus target
+   plus P&L net of costs; the target never weakens risk limits or forces trades.
+2. **Research tools.** Add bounded information-search, financial-data, and
+   company-data inputs that produce validated, normalized, provenance-carrying
+   evidence the trader and reviewer can cite. These tools carry no execution
+   authority.
+3. **Later venue adapters.** Add each venue beyond the current Polymarket adapter
+   as its own milestone with canonical normalization and contract tests; research
+   data tools are not venues.
 
 ## Deferred
 
 - RAG/memory plus lifecycle and version management.
-- Authenticated execution; it requires confirmation, least-privilege IAM, hard
-  limits, a kill switch, idempotency, and reconciliation.
+- Authenticated execution is the eventual goal but remains prohibited; it
+  requires confirmation, least-privilege IAM, hard limits, a kill switch,
+  idempotency, and reconciliation.
 - A meta-harness/control plane, unless multiple independent harnesses exist.
 
 See [Agent Graphs](../docs/agent-graphs.md) for future graph prerequisites.

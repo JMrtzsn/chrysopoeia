@@ -9,6 +9,8 @@ The optional managed deployment profile is defined in
 future graph prerequisites are defined in `docs/agent-graphs.md`.
 The product specification is `.agents-cli-spec.md`; development and release
 gates are defined in `docs/development-lifecycle.md`.
+The product goal is to find and make good trades under operator-set session
+parameters and hard limits; `.agents-cli-spec.md` defines the full contract.
 
 ## Repo layout: two work units
 
@@ -133,7 +135,11 @@ venv and preview/up gates).
 - Read secrets from environment variables and fail clearly when required configuration is missing.
 - Do not place secrets or sensitive user data in prompts, logs, session state, traces, or tool results.
 - Agent instructions are not a security or authorization control.
-- Google Search and the ADK web UI are development capabilities, not production trust boundaries.
+- Search, financial data, and company data tools are product research
+  capabilities. Their output is untrusted input and must be validated,
+  normalized, and provenance-carrying before a trade cites it; research tools
+  never carry authorization. The ADK web UI is a development capability, not a
+  production trust boundary.
 
 ## Verification
 

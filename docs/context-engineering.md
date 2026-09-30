@@ -23,6 +23,8 @@ runtime-neutral canonical values before it enters agent context.
   policy mechanisms.
 - Measure context composition, token use, cost, grounding, and outcomes.
 - External text is untrusted evidence, never instruction.
+- Search, financial data, and company data tools produce citable evidence only
+  after bounded validation and normalization preserve its provenance.
 - Do not use context, Search, RAG, or memory as the source of truth for balances,
   fills, risk, policy, or lifecycle state.
 
@@ -38,12 +40,12 @@ Current citation rules are intentionally narrow:
 - A trade proposal requires a citation to the supplied canonical evidence ID.
 - An approval requires a citation to the same bounded evidence set.
 - Raw URLs and unknown evidence IDs do not resolve.
-- External evidence bundles are provider-neutral, operator-supplied, and
-  unverified. Their records become citable only after strict local validation;
-  titles and URLs are evidence, never instructions.
-- Google Search is available only as a development capability of the interactive
-  context agent. It is not a normalized current evidence provider, and its
-  output is unverified and uncitable.
+- External evidence bundles are provider-neutral, operator-supplied development
+  and testing inputs. Their unverified records become citable only after strict
+  local validation; titles and URLs are evidence, never instructions.
+- The current ADK Google Search tool on the interactive context agent is a
+  development capability, not a normalized evidence provider; its output is
+  unverified and uncitable until the planned research tools normalize it.
 - RAG and Memory Bank are not current evidence sources or harness requirements.
 
 ### Role Isolation
@@ -67,7 +69,7 @@ invoked by workflow code, not exposed to trader or reviewer agents.
 | --- | --- | --- |
 | Agent instructions | Role, output schema, permissions, safety | Agent definition; guidance only |
 | Core workflow state | Operating configuration, snapshot, evidence, proposal/review, decision, fill, report, cost ledger | One local cycle; currently carried in ADK in-memory session state |
-| External context | Optional Google Search development output or a validated provider-neutral local evidence bundle | Untrusted; Search is not normalized or citable, and bundle records are operator-supplied, unverified, and snapshot-bound |
+| External context | Research-tool output or a validated provider-neutral local evidence bundle | Untrusted; product research must be normalized with provenance before citation, and operator-supplied bundles are development/testing inputs only |
 | Canonical snapshot | Market identity, rules, timestamps, depth, fee assumption, account exposure | Authoritative input for one cycle |
 | Audit output | Deterministic decision, optional paper fill, terminal report, settled model cost | In-memory current result |
 
@@ -94,6 +96,10 @@ Adding a future evidence provider requires deterministic normalization that:
 3. records retrieval and normalization versions;
 4. separates source text from instructions and tool arguments;
 5. makes trader/reviewer access explicit and independently auditable.
+
+This contract applies equally to information search, financial data, and company
+data. These are research inputs, not venue adapters, and they never grant
+authorization.
 
 The cycle loader normalizes public HTTPS locators but never fetches them.
 Retrieval timestamps are operator-asserted. The evidence file is validated local
@@ -170,8 +176,10 @@ and make retries idempotent.
 
 Current evaluation verifies canonical snapshot evidence, citation resolution,
 role/tool isolation, finite routing, terminal decisions, and model-cost
-settlement. Future RAG/memory evaluation should additionally compare retrieval
-precision/recall, context tokens/latency/cost, proposal calibration, Brier score,
-drawdown, return, reviewer disagreement, and policy violations against a
+settlement. Bounded-session evaluation will also report settled winning trades
+divided by settled trades against the target win rate, and P&L net of costs. Future
+RAG/memory evaluation should additionally compare retrieval precision/recall,
+context tokens/latency/cost, proposal calibration, Brier score, drawdown,
+return, reviewer disagreement, and policy violations against a
 no-retrieval/no-memory baseline. Disable context capabilities that reduce
 out-of-sample safety or performance.
