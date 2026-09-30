@@ -109,26 +109,28 @@ venue fact.
 Durable state exists because *only* these need to survive process death:
 
 1. `Book` construction (config + realized P&L + positions + fills).
-2. The in-flight turn, marked resumable-but-unsettled if the process died
-   between fill and record.
+2. The in-flight turn, deterministically abandoned after process death unless
+   its fill was already recorded. Recovered turns never re-run models.
 
 Everything else (agent text, eval data, evidence) stays ephemeral/in-memory per
 the Phase 1 contract. Therefore milestone 3's implementation is deliberately
 small:
 
-- A local **atomic journal file** (JSON Lines, one record per event, written
-  with write-then-rename per line) in an operator-chosen directory. Records:
-  `session_opened`, `fill_recorded`, `mark_recorded`, `settled`,
-  `session_halted`, `session_closed`.
+- A local **atomic journal file** (JSON Lines, one record per event, appended
+  with one `O_APPEND` write followed by `fsync`) in an operator-chosen
+  directory. Records: `session_opened`, `turn_admitted`, `fill_recorded`,
+  `turn_finished`, `mark_recorded`, `settled`, `session_halted`,
+  `session_closed`.
 - The book is *derived* by replaying the journal; the journal is the truth, so
   corruption of one line cannot silently rewrite history (fail loudly, refuse
   to resume from a corrupt tail with a `skip`-or-`stop` operator choice).
 - **Idempotent turn admission** (milestone 4): a turn ID
-  (deterministic from snapshot_id + market_id + intent hash) is recorded
+  (deterministic from snapshot_id + market_id) is recorded
   before the model-call step in a `turn_admitted` record; admission replay
   makes a duplicate trigger a no-op that returns the prior record. Terminal
-  states: settled/abstained/rejected/halted (unresumable) vs admitted (resumed
-  by replaying remaining steps against the journal).
+  outcomes are recorded in `turn_finished`; admitted turns left unfinished are
+  recovered as filled when a linked fill exists and abandoned otherwise,
+  without replaying model steps.
 - Inspection CLI: `chrysopoeia book --journal DIR` prints positions, P&L,
   exposure, halted state. No agent tool may read or mutate the journal mid-turn
   except through deterministic core functions.

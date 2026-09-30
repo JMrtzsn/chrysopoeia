@@ -9,6 +9,8 @@ from unittest.mock import Mock, patch
 from chrysopoeia import cli
 from chrysopoeia.accounting import Position as BookPosition
 from chrysopoeia.accounting import (
+    admit_turn,
+    finish_turn,
     journal_path,
     open_session,
     record_fill,
@@ -18,9 +20,9 @@ from chrysopoeia.accounting import (
 
 def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
     open_session(journal, 1_000.0, 100.0)
+    admit_turn(journal, "turn-1", "snap-1", market_id)
     record_fill(
         journal,
-        replay(journal),
         BookPosition(
             market_id=market_id,
             snapshot_id="snap-1",
@@ -31,7 +33,9 @@ def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
             fee=2.4,
             total_cost=122.4,
         ),
+        "turn-1",
     )
+    finish_turn(journal, "turn-1", "filled")
 
 
 def capture_stub(price: float, captured_at: str):
@@ -73,7 +77,7 @@ class MarkCliTests(unittest.TestCase):
         self.assertAlmostEqual(report["unrealized_pnl"], 24_000.0 * 0.02 - 122.4)
         self.assertEqual(
             len(journal_path(self.journal).read_text().splitlines()),
-            3,  # session, fill, mark
+            5,  # session, admission, fill, turn finish, mark
         )
 
     def test_mark_with_no_open_positions_reports_without_captures(self) -> None:
@@ -95,7 +99,7 @@ class MarkCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("mark capture for market 559651 failed", stderr)
         # the failed capture must not have journaled a mark
-        self.assertEqual(len(journal_path(self.journal).read_text().splitlines()), 2)
+        self.assertEqual(len(journal_path(self.journal).read_text().splitlines()), 4)
         state = replay(self.journal)
         self.assertIn("559651", state.positions)
         self.assertNotIn("559651", state.marks)

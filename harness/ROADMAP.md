@@ -60,12 +60,16 @@ artifact (wheel/image version). Neither roadmap depends on the other's tasks.
   per-model under `[cost.models]`. The auth policy now permits env-var keys
   for providers without ambient authentication. Live-verified 2026-09-27; see
   Recorded Live Verification in `../docs/development-lifecycle.md`.
+- [x] Turn-level recovery (`chrysopoeia/accounting.py`, `chrysopoeia/cli.py`):
+  every admitted turn ends in exactly one `turn_finished`; fills link to their
+  turn; open turns are resolved `filled` or `abandoned` before admission
+  without model calls; finished-turn repeats are no-ops; appends fsync.
+  Live-verified 2026-09-30; see Recorded Live Verification in
+  `../docs/development-lifecycle.md`.
 
 ## Next
 
-1. **Turn-level recovery.** Detect admitted-but-unfinished turns in the journal
-   and resolve them deterministically, without double fills.
-2. **Bounded autonomous trading loop.** Add a paper-only harness CLI entrypoint
+1. **Bounded autonomous trading loop.** Add a paper-only harness CLI entrypoint
    that repeats discover → capture → cycle → mark → settle under hard maximum
    cycles, wall-clock deadline, cost budget, loss halt, and kill switch/stop
    file or signal bounds. Trading logic, cadence, recovery, and halting remain

@@ -9,6 +9,8 @@ from unittest.mock import Mock, patch
 from chrysopoeia import cli
 from chrysopoeia.accounting import Position as BookPosition
 from chrysopoeia.accounting import (
+    admit_turn,
+    finish_turn,
     journal_path,
     open_session,
     record_fill,
@@ -98,9 +100,9 @@ def venue_resolution(market_id: str, resolution: str):
 
 def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
     open_session(journal, 1_000.0, 100.0)
+    admit_turn(journal, "turn-1", "snap-1", market_id)
     record_fill(
         journal,
-        replay(journal),
         BookPosition(
             market_id=market_id,
             snapshot_id="snap-1",
@@ -111,7 +113,9 @@ def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
             fee=2.4,
             total_cost=122.4,
         ),
+        "turn-1",
     )
+    finish_turn(journal, "turn-1", "filled")
 
 
 class SettleCliTests(unittest.TestCase):
@@ -145,7 +149,7 @@ class SettleCliTests(unittest.TestCase):
         self.assertEqual(report["open_positions"], 0)
         self.assertEqual(
             len(journal_path(self.journal).read_text().splitlines()),
-            3,  # session, fill, settled
+            5,  # session, admission, fill, turn finish, settlement
         )
 
     def test_loss_settlement_crossing_the_budget_halts_the_session(self) -> None:
@@ -163,7 +167,7 @@ class SettleCliTests(unittest.TestCase):
         self.assertEqual(replay(self.journal).status, "halted_on_loss")
         self.assertEqual(
             len(journal_path(self.journal).read_text().splitlines()),
-            4,  # session, fill, settled, session_halted
+            6,  # session, admission, fill, turn finish, settlement, halt
         )
 
     def test_settle_refuses_markets_without_an_open_position(self) -> None:

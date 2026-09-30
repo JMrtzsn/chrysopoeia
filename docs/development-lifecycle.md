@@ -381,3 +381,25 @@ never include secrets, private user data, or hidden reasoning.
 - Cleanup: `job_args` reset; tofu/terraform remnants deleted; one durable
   bucket (`PROJECT_ID-chrs-journals-local`) remains deliberately for
   the next bounded session; nothing else created.
+
+### Turn-level recovery (2026-09-30)
+
+- Setup: fresh temp journal with an open session and one planted
+  admitted-but-unfinished turn (`turn-planted…`, market 999999); one public
+  capture of market 559651.
+- Commands: one `uv run chrysopoeia cycle --snapshot <capture> --config <temp
+  config> --journal <temp dir>`, then one identical re-run.
+- Real boundary: journal recovery before admission plus Gemini 2.5 Flash on
+  Vertex AI with ambient ADC (project PROJECT_ID, us-central1); no
+  copied keys.
+- Result: the first cycle wrote `turn_finished abandoned` for the planted turn
+  before admitting its own, abstained after one trader call, and wrote exactly
+  one `turn_finished abstained`. The re-run printed the prior outcome, made no
+  model call, and added no records (5 lines stayed 5); `book` reported zero
+  open turns. An earlier attempt without Vertex environment variables failed
+  at model construction and was journaled `failed`, exercising the
+  error-path finalization live.
+- Bounds: one paid cycle, one trader call; reviewer not invoked.
+- Approval: operator approved the local bounded run. Cost: ~$0.0022 estimated.
+- Cleanup: temp config, capture, and journals live only in the OS temp
+  directory.

@@ -505,6 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "bankroll_now": state.bankroll_now,
             "open_positions": positions,
             "admitted_turns": len(state.admitted_turns),
+            "open_turns": len(state.open_turns),
         }
         print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
         return 0
@@ -594,8 +595,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 admit_turn,
                 check_halt,
                 cycle_turn_id,
+                finish_turn,
                 open_session,
                 record_fill,
+                recover_open_turns,
                 replay,
             )
 
@@ -617,21 +620,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (OSError, TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid snapshot\n")
         if args.journal is not None and book_state is not None:
-            blocking = book_state.positions.get(snapshot.market_id)
-            if blocking is not None:
-                parser.exit(
-                    2,
-                    "cycle failed: market has an open journal position; "
-                    "settle it before restarting a cycle on the same market\n",
-                )
             try:
+                recover_open_turns(args.journal)
+                book_state = replay(args.journal)
+                blocking = book_state.positions.get(snapshot.market_id)
+                if blocking is not None:
+                    parser.exit(
+                        2,
+                        "cycle failed: market has an open journal position; "
+                        "settle it before restarting a cycle on the same market\n",
+                    )
+                turn_id = cycle_turn_id(snapshot.snapshot_id, snapshot.market_id)
+                prior_outcome = book_state.finished_turns.get(turn_id)
+                if prior_outcome is not None:
+                    result = {"status": prior_outcome}
+                    content = (
+                        json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+                    ).encode()
+                    if args.output is not None:
+                        _write_new(args.output, content)
+                    print(content.decode(), end="")
+                    return 0
                 admit_turn(
                     args.journal,
-                    cycle_turn_id(snapshot.snapshot_id, snapshot.market_id),
+                    turn_id,
                     snapshot.snapshot_id,
                     snapshot.market_id,
                 )
-            except (ValueError, JournalError) as exc:
+            except (OSError, ValueError, JournalError) as exc:
                 parser.exit(2, f"cycle failed: {exc}\n")
         try:
             evidence = (
@@ -640,6 +656,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else None
             )
         except (OSError, TypeError, ValueError):
+            if args.journal is not None and book_state is not None:
+                finish_turn(args.journal, turn_id, "failed")
             parser.exit(2, "cycle failed: invalid evidence\n")
         try:
             from chrysopoeia.cycle_runner import run_paper_cycle
@@ -648,6 +666,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_paper_cycle(config, snapshot, operating, evidence=evidence)
             )
         except BaseException as exc:
+            if args.journal is not None and book_state is not None:
+                finish_turn(args.journal, turn_id, "failed")
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             parser.exit(2, "cycle failed: model/workflow unavailable\n")
@@ -665,8 +685,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fee=fill_summary["fee"],
                         total_cost=fill_summary["total_cost"],
                     )
-                    record_fill(args.journal, replay(args.journal), position)
+                    record_fill(args.journal, position, turn_id)
                     check_halt(args.journal, replay(args.journal))
+                    finish_turn(args.journal, turn_id, "filled")
+                else:
+                    outcome = result.get("status")
+                    finish_turn(
+                        args.journal,
+                        turn_id,
+                        outcome if outcome in {"abstained", "rejected"} else "failed",
+                    )
                 book_state = replay(args.journal)
                 result["book_after"] = {
                     "status": book_state.status,
@@ -677,6 +705,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "open_positions": len(book_state.positions),
                 }
             except (JournalError, KeyError, TypeError, ValueError):
+                state = replay(args.journal)
+                if turn_id in state.open_turns:
+                    finish_turn(args.journal, turn_id, "failed")
                 parser.exit(2, "cycle failed: journal workflow rejected the fill\n")
         content = (
             json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"

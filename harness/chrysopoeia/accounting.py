@@ -19,12 +19,14 @@ JOURNAL_NAME = "chrysopoeia.jsonl"
 EVENT_TYPES = {
     "session_opened",
     "turn_admitted",
+    "turn_finished",
     "fill_recorded",
     "mark_recorded",
     "settled",
     "session_halted",
     "session_closed",
 }
+TURN_OUTCOMES = {"filled", "abstained", "rejected", "failed", "abandoned"}
 RESOLUTIONS = {"resolved_yes", "resolved_no"}
 OPEN_STATES = {"open"}
 HALTED_STATE = "halted_on_loss"
@@ -60,10 +62,11 @@ def append_record(directory: Path, record_type: str, payload: dict) -> dict:
     line = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
     journal = journal_path(directory)
     journal.parent.mkdir(parents=True, exist_ok=True)
-    # ponytail: single O_APPEND write; add rename journaling only if multi-host matters
     descriptor = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        os.write(descriptor, line)
+        if os.write(descriptor, line) != len(line):
+            raise JournalError(f"cannot append complete record to journal {journal}")
+        os.fsync(descriptor)
     finally:
         os.close(descriptor)
     return record
@@ -82,6 +85,8 @@ def _records(journal: Path) -> list[tuple[int, dict]]:
         return []
     except OSError as exc:
         raise JournalError(f"cannot read journal {journal}: {exc}") from None
+    if text and not text.endswith("\n"):
+        _fail_corrupt(journal, len(text.splitlines()))
     records = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -126,11 +131,21 @@ class Book:
     positions: dict[str, Position] = field(default_factory=dict)
     marks: dict[str, float] = field(default_factory=dict)
     admitted_turns: dict[str, dict] = field(default_factory=dict)
+    finished_turns: dict[str, str] = field(default_factory=dict)
+    filled_turns: set[str] = field(default_factory=set)
     status: str = "empty"
 
     @property
     def open_exposure(self) -> float:
         return sum(position.total_cost for position in self.positions.values())
+
+    @property
+    def open_turns(self) -> dict[str, dict]:
+        return {
+            turn_id: record
+            for turn_id, record in self.admitted_turns.items()
+            if turn_id not in self.finished_turns
+        }
 
     @property
     def unrealized_pnl(self) -> float:
@@ -175,6 +190,13 @@ def replay(directory: Path) -> Book:
                 _fail_corrupt(journal, number)
             book.admitted_turns[turn_id] = record
         elif kind == "fill_recorded":
+            turn_id = record.get("turn_id")
+            if turn_id is not None and (
+                not isinstance(turn_id, str)
+                or turn_id not in book.admitted_turns
+                or turn_id in book.finished_turns
+            ):
+                _fail_corrupt(journal, number)
             try:
                 position = _position_from_record(record)
             except (JournalError, KeyError, TypeError):
@@ -183,6 +205,19 @@ def replay(directory: Path) -> Book:
             if book.status != "open" or position.market_id in book.positions:
                 _fail_corrupt(journal, number)
             book.positions[position.market_id] = position
+            if turn_id is not None:
+                book.filled_turns.add(turn_id)
+        elif kind == "turn_finished":
+            turn_id = record.get("turn_id")
+            outcome = record.get("outcome")
+            if (
+                not isinstance(turn_id, str)
+                or turn_id not in book.admitted_turns
+                or turn_id in book.finished_turns
+                or outcome not in TURN_OUTCOMES
+            ):
+                _fail_corrupt(journal, number)
+            book.finished_turns[turn_id] = outcome
         elif kind == "mark_recorded":
             market_id = record.get("market_id")
             mark = record.get("mark_price")
@@ -327,16 +362,23 @@ def admit_turn(directory: Path, turn_id: str, snapshot_id: str, market_id: str) 
     return append_record(directory, "turn_admitted", payload)
 
 
-def record_fill(directory: Path, book: Book, position: Position) -> dict:
+def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
     """Persist one accepted paper fill as an open position."""
+    book = replay(directory)
     if book.status != "open":
         raise JournalError(f"session status {book.status} admits no further fills")
     if position.market_id in book.positions:
         raise JournalError(f"market {position.market_id} already has an open position")
+    _clean(turn_id, "turn_id")
+    if turn_id not in book.admitted_turns:
+        raise JournalError(f"turn_id {turn_id} was not admitted")
+    if turn_id in book.finished_turns:
+        raise JournalError(f"turn_id {turn_id} is already finished")
     return append_record(
         directory,
         "fill_recorded",
         {
+            "turn_id": turn_id,
             "market_id": position.market_id,
             "snapshot_id": position.snapshot_id,
             "price": position.price,
@@ -346,6 +388,32 @@ def record_fill(directory: Path, book: Book, position: Position) -> dict:
             "total_cost": position.total_cost,
         },
     )
+
+
+def finish_turn(directory: Path, turn_id: str, outcome: str) -> dict:
+    """Record the one terminal outcome for an admitted turn."""
+    _clean(turn_id, "turn_id")
+    if outcome not in TURN_OUTCOMES:
+        raise ValueError(f"unknown turn outcome {outcome}")
+    book = replay(directory)
+    if turn_id not in book.admitted_turns:
+        raise JournalError(f"turn_id {turn_id} was not admitted")
+    if turn_id in book.finished_turns:
+        raise JournalError(f"turn_id {turn_id} is already finished")
+    return append_record(
+        directory, "turn_finished", {"turn_id": turn_id, "outcome": outcome}
+    )
+
+
+def recover_open_turns(directory: Path) -> dict[str, str]:
+    """Finish interrupted turns from journal facts without rerunning their work."""
+    book = replay(directory)
+    recovered = {}
+    for turn_id in book.open_turns:
+        outcome = "filled" if turn_id in book.filled_turns else "abandoned"
+        finish_turn(directory, turn_id, outcome)
+        recovered[turn_id] = outcome
+    return recovered
 
 
 def record_mark(directory: Path, book: Book, market_id: str, mark_price: float) -> dict:

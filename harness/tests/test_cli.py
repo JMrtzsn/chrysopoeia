@@ -704,24 +704,169 @@ class OperatorCliTests(unittest.TestCase):
             state = replay(journal)
             self.assertIn("12345", state.positions)
             self.assertEqual(len(state.admitted_turns), 1)
+            self.assertEqual(set(state.finished_turns.values()), {"filled"})
             self.assertEqual(
                 len(journal_path(journal).read_text().splitlines()),
-                3,  # session_opened, turn_admitted, fill_recorded
+                4,  # session_opened, turn_admitted, fill_recorded, turn_finished
             )
 
-    def test_cycle_with_journal_refuses_same_market_position_before_operating(
+    def test_cycle_with_journal_finishes_abstain_review_reject_and_risk_reject(
         self,
     ) -> None:
-        from chrysopoeia.accounting import Position as BookPosition
-        from chrysopoeia.accounting import open_session, record_fill, replay
+        from chrysopoeia.accounting import replay
+
+        snapshot, result = self.cycle_fill_result()
+        for status, reason in (
+            ("abstained", "trader_abstained"),
+            ("rejected", "review_rejected"),
+            ("rejected", "maximum_market_exposure_exceeded"),
+        ):
+            with (
+                self.subTest(reason=reason),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                journal = Path(directory)
+                source = journal / "snapshot.json"
+                source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+                result = {**result, "status": status, "reason": reason, "fill": None}
+                with patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ):
+                    code, _stdout, stderr = self.invoke(
+                        "cycle", "--snapshot", str(source), "--journal", str(journal)
+                    )
+                self.assertEqual((code, stderr), (0, ""))
+                self.assertEqual(set(replay(journal).finished_turns.values()), {status})
+
+    def test_cycle_with_journal_finishes_invalid_evidence_and_model_failure(
+        self,
+    ) -> None:
+        from chrysopoeia.accounting import replay
+
+        snapshot, _result = self.cycle_fill_result()
+        for failure in ("evidence", "model"):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                journal = Path(directory)
+                source = journal / "snapshot.json"
+                source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+                arguments = [
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--journal",
+                    str(journal),
+                ]
+                if failure == "evidence":
+                    evidence = journal / "evidence.json"
+                    evidence.write_text("{}")
+                    arguments.extend(("--evidence", str(evidence)))
+                with patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(side_effect=RuntimeError("private")),
+                ) as run:
+                    code, _stdout, _stderr = self.invoke(*arguments)
+                self.assertEqual(code, 2)
+                self.assertEqual(
+                    set(replay(journal).finished_turns.values()), {"failed"}
+                )
+                if failure == "evidence":
+                    run.assert_not_called()
+
+    def test_cycle_with_journal_finishes_failed_when_fill_is_refused(self) -> None:
+        from chrysopoeia.accounting import replay
+
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            source = journal / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ),
+                patch(
+                    "chrysopoeia.accounting.record_fill",
+                    side_effect=ValueError("refused"),
+                ),
+            ):
+                code, _stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--journal", str(journal)
+                )
+            self.assertEqual(code, 2)
+            self.assertIn("journal workflow rejected", stderr)
+            self.assertEqual(set(replay(journal).finished_turns.values()), {"failed"})
+
+    def test_cycle_recovers_open_turns_before_admission_without_running_them(
+        self,
+    ) -> None:
+        from chrysopoeia.accounting import admit_turn, open_session, replay
 
         snapshot, result = self.cycle_fill_result()
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
             open_session(journal, 1_000.0, 100.0)
+            admit_turn(journal, "old-turn", "old-snapshot", "old-market")
+            source = journal / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value={**result, "status": "abstained", "fill": None}),
+            ) as run:
+                code, _stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--journal", str(journal)
+                )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(replay(journal).finished_turns["old-turn"], "abandoned")
+
+    def test_cycle_repeat_of_finished_turn_reports_outcome_without_model_or_records(
+        self,
+    ) -> None:
+        from chrysopoeia.accounting import (
+            admit_turn,
+            cycle_turn_id,
+            finish_turn,
+            journal_path,
+            open_session,
+        )
+
+        snapshot, _result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            open_session(journal, 1_000.0, 100.0)
+            turn_id = cycle_turn_id(snapshot.snapshot_id, snapshot.market_id)
+            admit_turn(journal, turn_id, snapshot.snapshot_id, snapshot.market_id)
+            finish_turn(journal, turn_id, "abstained")
+            before = journal_path(journal).read_bytes()
+            source = journal / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock()) as run:
+                code, stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--journal", str(journal)
+                )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertEqual(json.loads(stdout)["status"], "abstained")
+            self.assertEqual(journal_path(journal).read_bytes(), before)
+            run.assert_not_called()
+
+    def test_cycle_with_journal_refuses_same_market_position_before_operating(
+        self,
+    ) -> None:
+        from chrysopoeia.accounting import Position as BookPosition
+        from chrysopoeia.accounting import admit_turn, open_session, record_fill
+
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            open_session(journal, 1_000.0, 100.0)
+            admit_turn(journal, "existing", snapshot.snapshot_id, "12345")
             record_fill(
                 journal,
-                replay(journal),
                 BookPosition(
                     market_id="12345",
                     snapshot_id=snapshot.snapshot_id,
@@ -732,6 +877,7 @@ class OperatorCliTests(unittest.TestCase):
                     fee=0.2,
                     total_cost=10.2,
                 ),
+                "existing",
             )
             source = Path(directory) / "snapshot.json"
             source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
@@ -759,12 +905,13 @@ class OperatorCliTests(unittest.TestCase):
 
     def test_cycle_with_journal_derives_total_exposure_from_book(self) -> None:
         from chrysopoeia.accounting import Position as BookPosition
-        from chrysopoeia.accounting import open_session, record_fill, replay
+        from chrysopoeia.accounting import admit_turn, open_session, record_fill
 
         snapshot, result = self.cycle_fill_result()
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
             open_session(journal, 1_000.0, 100.0)
+            admit_turn(journal, "existing", snapshot.snapshot_id, "other-market")
             other = BookPosition(
                 market_id="other-market",
                 snapshot_id=snapshot.snapshot_id,
@@ -775,7 +922,7 @@ class OperatorCliTests(unittest.TestCase):
                 fee=0.2,
                 total_cost=10.2,
             )
-            record_fill(journal, replay(journal), other)
+            record_fill(journal, other, "existing")
             source = Path(directory) / "snapshot.json"
             source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
             with (
