@@ -1,9 +1,9 @@
 # Multi-Cycle Portfolio And Paper Accounting Design
 
-Status: design, not implemented. This document is the contract for roadmap
-milestones 2–4. It defines cross-cycle accounting and derives the persistence
-requirement from it; nothing here expands authenticated execution or Phase 1
-scope. The spec (`.agents-cli-spec.md`) remains authoritative.
+Status: design, not implemented. This document is the accounting contract
+referenced by the harness roadmap. It defines cross-cycle accounting and derives
+the persistence requirement from it; nothing here expands authenticated
+execution or Phase 1 scope. The spec (`.agents-cli-spec.md`) remains authoritative.
 
 ## Problem
 

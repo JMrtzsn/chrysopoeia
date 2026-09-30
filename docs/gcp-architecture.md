@@ -13,14 +13,15 @@ one Cloud Run job**, cost-sensitive, single operator, Level 2 scope.
   digest (`pulumi config set image_digest <name@sha256:...>`), never by a
   floating tag. There is no boot script; the container image is the entire
   runtime.
-- Ephemeral execution (the "instance on request"): every
-  `gcloud beta run jobs execute chrysopoeia-cycle-<operator>` runs exactly one
-  bounded paper cycle and bills only its own vCPU seconds; idle cost between
-  executions is exactly zero and no VM ever exists. The journal bucket is
-  mounted at `/mnt/journal` via a Cloud Run GCS volume, so journals persist
-  across executions without a database.
-- Deferred per the adoption triggers below: Cloud Scheduler, Cloud SQL, RAG
-  Engine, Memory Bank, managed runtime, and any multi-tenant or public-facing
+- Ephemeral execution (the "instance on request"):
+  `gcloud beta run jobs execute chrysopoeia-cycle-<operator>` launches the
+  configured harness entrypoint and bills only its own vCPU seconds; idle cost
+  between executions is exactly zero and no VM ever exists. The harness owns
+  any bounded multi-cycle loop, cadence, recovery, and halting. The journal
+  bucket is mounted at `/mnt/journal` via a Cloud Run GCS volume, so journals
+  persist across executions without a database.
+- Deferred per the adoption triggers below: Cloud SQL, RAG Engine, Memory Bank,
+  managed runtime, and any multi-tenant or public-facing
   posture (Level 3 requires explicit design before anything exists).
 
 The harness itself never provisions or mutates cloud resources and must not
@@ -36,6 +37,8 @@ This is one work unit inside the two-folder monorepo: `platform/` owns
 everything declared above and never imports the harness package — it consumes
 only the image built from the harness wheel (see `platform/AGENTS.md`). The
 application loop code lives in `harness/` and never runs `gcloud` or `pulumi`.
+The platform hosts and launches a released harness artifact; it never drives
+individual cycles.
 
 ## Adoption Triggers
 
@@ -43,7 +46,7 @@ Adopt this profile only with explicit approval and a measured requirement for
 one or more of:
 
 - durable authoritative trading/audit records;
-- idempotent remote triggers or managed scheduling;
+- launching a released harness autonomous-loop entrypoint;
 - managed runtime identity, scaling, tracing, or recovery;
 - provenance-filtered document retrieval or consolidated long-term memories;
 - controlled behavior evaluation against a managed model endpoint.
@@ -56,7 +59,6 @@ needed; do not scaffold the entire profile preemptively.
 | Future need | Candidate service | Boundary |
 | --- | --- | --- |
 | Managed agent runtime | Agent Platform Runtime | Deployment, identity, tracing, scaling |
-| Scheduled triggers | Cloud Scheduler | Emits authenticated idempotent triggers; no trading logic |
 | Conversation sessions | Agent Platform Sessions | Working history, never authoritative ledger |
 | Authoritative records | Cloud SQL for PostgreSQL | Snapshots, decisions, fills, metrics, versions, provenance |
 | Document retrieval | Agent Platform RAG Engine with `RagManagedDb` | Source-linked context, never balances or policy |

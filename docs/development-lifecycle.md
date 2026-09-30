@@ -67,10 +67,11 @@ dependency; `.agents-cli-spec.md` contains Chrysopoeia's normative rules.
    observable behavior change, and test-only tooling do not require a live run;
    verify the no-behavior-change claim offline. Configuration-only changes that
    affect runtime or provider behavior are not exempt.
-10. **Evolve the platform later:** durable storage, scheduling, RAG/memory,
-    managed deployment, publication, and production observability each require a
-    demonstrated need, explicit architecture/acceptance criteria, deterministic
-    checks, bounded live verification, and approval.
+10. **Evolve deliberately:** harness-owned autonomous operation, durable storage,
+    RAG/memory, managed deployment, publication, and production observability
+    each require a demonstrated need, explicit architecture/acceptance criteria,
+    deterministic checks, bounded live verification, and approval. The platform
+    may launch the harness loop but does not schedule or drive cycles.
 
 The checked-in harness model is Gemini through ADK. The supported bounded live
 model verification is the manual Vertex behavior evaluation, explicitly gated

@@ -3,6 +3,7 @@
 GCP deployment: container image build/publish, Pulumi base (bucket, runner
 identity, Artifact Registry, Cloud Run job), and digest pinning. The sibling
 `harness/` folder is a separate work unit — application loop code lives there.
+Ordered platform work lives in `ROADMAP.md`.
 
 ## Owned
 
@@ -22,7 +23,8 @@ identity, Artifact Registry, Cloud Run job), and digest pinning. The sibling
 - Pinned image digest: `pulumi config set image_digest <name@sha256:...>`
   (never `:latest` on a live stack; `:latest` is only a build-tag alias).
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
-  `job_args` Pulumi config (default: one bounded paper cycle).
+  `job_args` Pulumi config. The platform launches the selected harness
+  entrypoint; loop ownership remains in the harness.
 - Journal durability: the volume-mounted bucket behaves as `/mnt/journal`;
   record semantics belong to the harness, not here.
 

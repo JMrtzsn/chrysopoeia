@@ -3,8 +3,8 @@
 ## Current Harness Graph
 
 The current graph is one explicit, bounded core workflow integrated through the
-ADK runtime adapter. It does not schedule itself, scan markets, manage agent
-lifecycles, or persist durable records.
+ADK runtime adapter. It does not yet loop or scan markets, manage agent
+lifecycles, or recover unfinished turns.
 
 ```text
 START (operator already configured and captured one market)
@@ -88,29 +88,30 @@ wrappers bridge ADK Context to the core, so isolation is not complete. Do not
 introduce an abstract runtime interface until a second concrete runtime is
 required.
 
-## Future Platform Graphs
+## Future Harness Graphs
 
 The following graphs are retained as future design, not current behavior. They
-require durable authoritative records, idempotent triggers, explicit operating
-approval, and contract-tested adapter/configuration choices before implementation.
-Scheduling, durability, queues, cancellation, deadlines, recovery, and managed
-workers would be Level 2 operational evolution of this same harness. A Level 3
-meta-harness exists only when a control plane coordinates multiple independent
-harnesses and explicitly divides session, context, tool, and terminal-state
-ownership with them.
+require durable authoritative records, idempotent turn admission, explicit
+operating approval, and contract-tested adapter/configuration choices before
+implementation. Looping, cancellation, deadlines, and recovery are Level 2
+operational evolution owned by this same harness. A platform may launch the
+harness entrypoint but does not drive cycles. A Level 3 meta-harness exists only
+when a control plane coordinates multiple independent harnesses and explicitly
+divides session, context, tool, and terminal-state ownership with them.
 
-### Scheduled Decision Graph
+### Bounded Autonomous Decision Graph
 
 ```text
-idempotent trigger -> deterministic scan/opportunity gate
+hard bounds + stop check -> deterministic scan/opportunity gate
   -> capture canonical snapshot -> bounded harness decision graph
-  -> durable audit/reconciliation
+  -> mark/settle -> durable audit/recovery -> repeat or halt
 ```
 
-A scheduler may emit triggers but must contain no trading logic or invoke an LLM
-directly. Cheap scans and cooldown/model-call budgets gate expensive reasoning.
-Duplicate triggers must not duplicate records or fills; graph versions remain
-fixed for active cycles.
+The harness owns cadence and enforces maximum cycles, wall-clock deadline, cost
+budget, loss halt, and a kill switch or stop signal. Cheap scans and
+cooldown/model-call budgets gate expensive reasoning. Recovery and idempotent
+admission must prevent duplicate records or fills; graph versions remain fixed
+for active cycles.
 
 ### Lifecycle Graph
 

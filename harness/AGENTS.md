@@ -3,6 +3,7 @@
 Loop internals: paper-cycle core, agents, accounting, CLI, and the host
 runtime adapter. This is application code — infrastructure lives in the
 sibling `platform/` folder and is a different work unit.
+Ordered harness work lives in `ROADMAP.md`.
 
 ## Owned
 

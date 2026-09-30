@@ -19,7 +19,7 @@ harness/     application code: agent loop, accounting, CLI, tests, config,
              offline gates (never runs gcloud/pulumi)
 platform/    GCP deployment: Pulumi base, wheel-based Dockerfile, build script,
              pinned image digest (never imports the harness package)
-docs/        shared documentation (root): ROADMAP, lifecycle, architecture,
+docs/        shared documentation (root): lifecycle, architecture,
              accounting, and the product spec `../spec`-equivalent
 ```
 
@@ -93,8 +93,9 @@ second concrete runtime is required.
 
 ## Roadmap
 
-See [`ROADMAP.md`](ROADMAP.md) for ordered work. `.agents-cli-spec.md` remains
-authoritative for product scope and acceptance.
+See [`harness/ROADMAP.md`](harness/ROADMAP.md) and
+[`platform/ROADMAP.md`](platform/ROADMAP.md) for each independent work flow.
+`.agents-cli-spec.md` remains authoritative for product scope and acceptance.
 
 ## Verification Policy
 
@@ -247,10 +248,11 @@ failed capture records no mark and no state change.
 
 Cost-sensitive Level 2 deployment: the container image built from the harness
 wheel plus a Cloud Run **job** — no boot scripts, no maintained VMs, and no
-SSH, ever. Every `gcloud beta run jobs execute ...` runs one paper cycle and
-bills only its own vCPU seconds, so idle cost is exactly zero. Unattended
-operation, Cloud Scheduler, and Cloud SQL are deliberately not provisioned
-yet (`docs/gcp-architecture.md`).
+SSH, ever. A job execution launches the selected harness entrypoint and bills
+only its own vCPU seconds, so idle cost is exactly zero. The harness owns any
+bounded multi-cycle loop, including cadence, recovery, and halting; the platform
+does not schedule or drive cycles. Cloud SQL is not provisioned
+(`docs/gcp-architecture.md`).
 
 ```sh
 # 1. build + publish + (offline) validate the image from the harness wheel
@@ -269,7 +271,7 @@ pulumi preview                                      # the offline evidence gate
 # live base apply only with explicit operator approval
 pulumi up
 
-# 3. run a bounded paper cycle on demand (this is the "instance on request")
+# 3. launch the configured harness entrypoint on demand
 gcloud storage cp snapshot.json gs://<project>-chrs-journals-<operator>/
 gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region> --wait
 gcloud storage cat gs://<project>-chrs-journals-<operator>/chrysopoeia.jsonl
@@ -306,8 +308,9 @@ design first (per-tenant GCP project is the Level 3 shape).
 ## Current Non-goals
 
 - Live or authenticated execution, wallets, private keys, or geoblock bypass.
-- Autonomous scanning, scheduling, lifecycle management, self-improvement, or
-  unattended operation.
+- Unbounded autonomous operation, platform-owned scheduling, lifecycle
+  management, or self-improvement. A bounded harness-owned autonomous paper
+  loop is planned.
 - Durable authoritative multi-user storage, idempotent distributed triggers,
   multi-market portfolios beyond the local journal, or two fully live
   runtime/model adapters.
@@ -316,10 +319,10 @@ design first (per-tenant GCP project is the Level 3 shape).
 
 ## Future Platform Evolution
 
-Measured need and explicit approval may add durable records, idempotent
-triggers, scanning/scheduling, another runtime adapter, venue adapters, model
-configurations, lifecycle/versioning, RAG/memory, and per-tenant managed
-deployment. These are optional platform capabilities, not harness prerequisites.
+Measured need and explicit approval may add another runtime adapter, venue
+adapters, model configurations, lifecycle/versioning, RAG/memory, and
+per-tenant managed deployment. A bounded autonomous paper loop is a harness
+capability; the platform only hosts and launches its released entrypoint.
 
 Any future authenticated execution must be a separate isolated adapter and
 capability with confirmation, least-privilege IAM, hard limits, a kill switch,

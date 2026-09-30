@@ -22,7 +22,8 @@ approval in both plans:
 - `platform/` — GCP deployment: Pulumi base, wheel-based Dockerfile, pinned
   image digest, session plumbing. Never imports the harness package.
 
-Per-folder ownership details: `harness/AGENTS.md` and `platform/AGENTS.md`.
+Per-folder ownership details and roadmaps live in `harness/AGENTS.md`,
+`harness/ROADMAP.md`, `platform/AGENTS.md`, and `platform/ROADMAP.md`.
 
 ## Stack
 
@@ -101,6 +102,8 @@ venv and preview/up gates).
 - ADK owns the current inner model loop and runtime context mechanics;
   deterministic Chrysopoeia core contracts own money, policy, paper execution,
   and terminal outcomes.
+- The harness owns trading cadence, bounded multi-cycle looping, recovery, and
+  halting; the platform may launch the harness but never drives its cycles.
 - Do not call Chrysopoeia a meta-harness until a second independent harness and
   a coordinating control plane exist. Scheduling, persistence, or managed
   deployment of this harness alone remains Level 2.
