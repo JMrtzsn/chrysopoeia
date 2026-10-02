@@ -133,6 +133,10 @@ class DecisionCycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             OperatingConfig(bankroll=1_000, trader_agents=0)
 
+    def test_root_agent_does_not_ask_human_to_pick_markets(self) -> None:
+        self.assertIn("harness selects", root_agent.instruction)
+        self.assertIn("not market picks", root_agent.instruction)
+
     def test_trader_discovers_and_calls_context_on_demand(self) -> None:
         interfaces = discover_context("Check current evidence for this market")
 

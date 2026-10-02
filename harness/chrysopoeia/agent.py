@@ -273,8 +273,8 @@ def build_agents(config: HarnessConfig) -> AgentSet:
         instruction=(
             "Own onboarding and operation for paper trading. Ask only for missing user limits, then call configure_operation. "
             "Default to a $1,000 bankroll and one trader when the user does not specify them. Treat bankroll, exposure, "
-            "maximum loss, agent count, and cloud-cost budget as hard user controls. After configuration, capture the requested "
-            "market snapshot before coordinating market "
+            "maximum loss, agent count, and cloud-cost budget as hard user controls. The user supplies limits, not market picks "
+            "or trade ideas; the harness selects and captures market snapshots before coordinating market "
             "research and independent review with minimal user input. Agents may propose or review, but deterministic Python "
             "owns risk, cost gates, simulated execution, accounting, pausing, and versioned replacement. Report net performance "
             "as trading profit and loss minus trading and cloud costs."

@@ -2,10 +2,12 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 import stat
+import sys
 import tempfile
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from chrysopoeia.configuration import (
@@ -324,6 +326,57 @@ def _write_new(path: Path, content: bytes) -> None:
         raise
 
 
+def _finite_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("invalid number") from None
+    if not number == number or abs(number) == float("inf"):
+        raise argparse.ArgumentTypeError("invalid number")
+    return number
+
+
+def _positive_float(value: str) -> float:
+    number = _finite_float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("invalid positive number")
+    return number
+
+
+def _fraction_arg(value: str) -> float:
+    number = _finite_float(value)
+    if not 0 <= number <= 1:
+        raise argparse.ArgumentTypeError("invalid fraction")
+    return number
+
+
+def _exposure_arg(value: str) -> float:
+    number = _finite_float(value)
+    if not 0 < number <= 1:
+        raise argparse.ArgumentTypeError("invalid exposure fraction")
+    return number
+
+
+def _cycles_arg(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("invalid cycle count") from None
+    if not 1 <= number <= 1_000:
+        raise argparse.ArgumentTypeError("invalid cycle count")
+    return number
+
+
+def _cost_arg(value: str) -> Decimal:
+    try:
+        number = Decimal(value)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError("invalid cost budget") from None
+    if not number.is_finite() or number < 0:
+        raise argparse.ArgumentTypeError("invalid cost budget")
+    return number
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chrysopoeia")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -351,6 +404,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle.add_argument("--total-exposure", type=float, default=0)
     cycle.add_argument("--journal", type=Path)
     cycle.add_argument("--output", type=Path)
+    run = commands.add_parser("run")
+    run.add_argument("--journal", type=Path, required=True)
+    run.add_argument("--config", type=Path)
+    run.add_argument("--bankroll", type=_positive_float, default=1_000)
+    run.add_argument("--maximum-loss", type=_positive_float, default=100)
+    run.add_argument("--target-win-rate", type=_fraction_arg, default=0.5)
+    run.add_argument("--window-minutes", type=_positive_float, default=60)
+    run.add_argument("--max-cycles", type=_cycles_arg, required=True)
+    run.add_argument("--cost-budget", type=_cost_arg, default=Decimal("5"))
+    run.add_argument("--stop-file", type=Path)
+    run.add_argument("--interval-seconds", type=_finite_float, default=30)
+    run.add_argument("--maximum-market-exposure", type=_exposure_arg, default=0.01)
+    run.add_argument("--maximum-total-exposure", type=_exposure_arg, default=0.10)
+    run.add_argument("--daily-cloud-cost-budget", type=_positive_float, default=5)
     book = commands.add_parser("book")
     book.add_argument("--journal", type=Path, required=True)
     settle_command = commands.add_parser("settle")
@@ -360,11 +427,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     mark.add_argument("--journal", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "mark":
-        from chrysopoeia.accounting import (
-            JournalError,
-            record_mark,
-            replay,
-        )
+        from chrysopoeia.accounting import JournalError, replay
+        from chrysopoeia.operations import mark_positions
 
         try:
             journal_state = replay(args.journal)
@@ -387,31 +451,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
                 return 0
-            marked: list[dict[str, object]] = []
-            for market_id, position in journal_state.positions.items():
-                try:
-                    fresh = load_market_snapshot(
-                        market_id,
-                        journal_state.bankroll,
-                        position.total_cost,
-                        journal_state.open_exposure,
-                        fetch=polymarket_fetch,
-                        paper_fee_rate=0.0,
-                        paper_fee_source="paper-assumption:no-fee-v1",
-                    )
-                except Exception:
-                    raise JournalError(
-                        f"mark capture for market {market_id} failed"
-                    ) from None
-                record_mark(args.journal, replay(args.journal), market_id, fresh.price)
-                marked.append(
-                    {
-                        "market_id": market_id,
-                        "entry_price": position.price,
-                        "mark_price": fresh.price,
-                        "mark_captured_at": fresh.captured_at,
-                    }
+            try:
+                marked = mark_positions(
+                    args.journal,
+                    tuple(journal_state.positions),
+                    fetch=polymarket_fetch,
+                    load=load_market_snapshot,
                 )
+            except Exception as exc:
+                market_id = next(iter(journal_state.positions))
+                raise JournalError(
+                    f"mark capture for market {market_id} failed"
+                ) from exc
             final = replay(args.journal)
         except (ValueError, JournalError) as exc:
             parser.exit(2, f"mark failed: {exc}\n")
@@ -429,28 +480,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "settle":
-        from chrysopoeia.accounting import (
-            JournalError,
-            check_halt,
-            replay,
-            settle,
-        )
+        from chrysopoeia.accounting import JournalError, replay
+        from chrysopoeia.operations import settle_positions
         from chrysopoeia.polymarket import load_market_resolution
 
         try:
             journal_state = replay(args.journal)
             if args.market not in journal_state.positions:
                 raise JournalError(f"no open position for market {args.market}")
-            resolution_record = load_market_resolution(
-                args.market, fetch=polymarket_fetch
-            ).as_dict()
-            settle(
+            resolution_record = settle_positions(
                 args.journal,
-                journal_state,
-                resolution_record["market_id"],
-                resolution_record["resolution"],
-            )
-            check_halt(args.journal, replay(args.journal))
+                (args.market,),
+                fetch=polymarket_fetch,
+                load=load_market_resolution,
+            )[0]
             settled_state = replay(args.journal)
         except (ValueError, JournalError) as exc:
             parser.exit(2, f"settle failed: {exc}\n")
@@ -514,7 +557,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_harness_config(path)
     except (ConfigurationError, OSError, TypeError, ValueError) as exc:
-        if args.command in {"capture", "discover"}:
+        if args.command in {"capture", "discover", "run"}:
+            if args.command == "run":
+                parser.exit(2, "run failed: invalid configuration\n")
             if args.command == "discover":
                 parser.exit(2, "discovery failed: invalid configuration\n")
             parser.exit(2, "capture failed: invalid configuration\n")
@@ -524,6 +569,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         if str(path) in message:
             message = "could not load harness configuration"
         parser.exit(2, f"configuration invalid: {message}\n")
+    if args.command == "run":
+        from chrysopoeia.accounting import JournalError
+        from chrysopoeia.loop import LoopParams, StopFlag, run_loop
+
+        if (
+            args.interval_seconds < 0
+            or args.maximum_loss > args.bankroll
+            or args.maximum_market_exposure > args.maximum_total_exposure
+        ):
+            parser.exit(2, "run failed: invalid operating configuration\n")
+        flag = StopFlag()
+        previous = {}
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous[signum] = signal.signal(signum, flag.stop)
+            report, iterations = asyncio.run(
+                run_loop(
+                    LoopParams(
+                        args.journal,
+                        args.bankroll,
+                        args.maximum_loss,
+                        args.target_win_rate,
+                        args.window_minutes,
+                        args.max_cycles,
+                        args.cost_budget,
+                        args.interval_seconds,
+                        args.maximum_market_exposure,
+                        args.maximum_total_exposure,
+                        args.daily_cloud_cost_budget,
+                        args.stop_file,
+                        flag,
+                    ),
+                    config,
+                    sleep=asyncio.sleep,
+                    fetch=polymarket_fetch,
+                )
+            )
+        except (JournalError, OSError, TypeError, ValueError) as exc:
+            parser.exit(2, f"run failed: {exc}\n")
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        for iteration in iterations:
+            print(
+                json.dumps(iteration, sort_keys=True, separators=(",", ":")),
+                file=sys.stderr,
+            )
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        return 0
     if args.command == "capture":
         try:
             snapshot = load_market_snapshot(
@@ -589,18 +683,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         total_exposure = args.total_exposure
         book_state = None
         if args.journal is not None:
-            from chrysopoeia.accounting import (
-                JournalError,
-                Position,
-                admit_turn,
-                check_halt,
-                cycle_turn_id,
-                finish_turn,
-                open_session,
-                record_fill,
-                recover_open_turns,
-                replay,
-            )
+            from chrysopoeia.accounting import JournalError, open_session
 
             try:
                 book_state = open_session(
@@ -619,96 +702,58 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except (OSError, TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid snapshot\n")
-        if args.journal is not None and book_state is not None:
+        evidence = None
+        if args.journal is None:
             try:
-                recover_open_turns(args.journal)
-                book_state = replay(args.journal)
-                blocking = book_state.positions.get(snapshot.market_id)
-                if blocking is not None:
-                    parser.exit(
-                        2,
-                        "cycle failed: market has an open journal position; "
-                        "settle it before restarting a cycle on the same market\n",
-                    )
-                turn_id = cycle_turn_id(snapshot.snapshot_id, snapshot.market_id)
-                prior_outcome = book_state.finished_turns.get(turn_id)
-                if prior_outcome is not None:
-                    result = {"status": prior_outcome}
-                    content = (
-                        json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
-                    ).encode()
-                    if args.output is not None:
-                        _write_new(args.output, content)
-                    print(content.decode(), end="")
-                    return 0
-                admit_turn(
-                    args.journal,
-                    turn_id,
-                    snapshot.snapshot_id,
-                    snapshot.market_id,
+                evidence = (
+                    load_evidence_bundle(args.evidence, snapshot)
+                    if args.evidence is not None
+                    else None
                 )
-            except (OSError, ValueError, JournalError) as exc:
-                parser.exit(2, f"cycle failed: {exc}\n")
-        try:
-            evidence = (
-                load_evidence_bundle(args.evidence, snapshot)
-                if args.evidence is not None
-                else None
-            )
-        except (OSError, TypeError, ValueError):
-            if args.journal is not None and book_state is not None:
-                finish_turn(args.journal, turn_id, "failed")
-            parser.exit(2, "cycle failed: invalid evidence\n")
+            except (OSError, TypeError, ValueError):
+                parser.exit(2, "cycle failed: invalid evidence\n")
         try:
             from chrysopoeia.cycle_runner import run_paper_cycle
 
-            result = asyncio.run(
-                run_paper_cycle(config, snapshot, operating, evidence=evidence)
-            )
+            if args.journal is None:
+                result = asyncio.run(
+                    run_paper_cycle(config, snapshot, operating, evidence=evidence)
+                )
+            else:
+                from chrysopoeia.operations import run_journal_turn
+
+                result = asyncio.run(
+                    run_journal_turn(
+                        args.journal,
+                        config,
+                        snapshot,
+                        operating,
+                        run=run_paper_cycle,
+                        load_evidence=(
+                            lambda: (
+                                load_evidence_bundle(args.evidence, snapshot)
+                                if args.evidence is not None
+                                else ()
+                            )
+                        ),
+                    )
+                )
         except BaseException as exc:
-            if args.journal is not None and book_state is not None:
-                finish_turn(args.journal, turn_id, "failed")
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
-            parser.exit(2, "cycle failed: model/workflow unavailable\n")
-        if book_state is not None and args.journal is not None:
-            fill_summary = result.get("fill")
-            try:
-                if isinstance(fill_summary, dict):
-                    position = Position(
-                        market_id=snapshot.market_id,
-                        snapshot_id=snapshot.snapshot_id,
-                        entered_at=datetime.now(timezone.utc).isoformat(),
-                        price=fill_summary["price"],
-                        amount=fill_summary["amount"],
-                        shares=fill_summary["shares"],
-                        fee=fill_summary["fee"],
-                        total_cost=fill_summary["total_cost"],
-                    )
-                    record_fill(args.journal, position, turn_id)
-                    check_halt(args.journal, replay(args.journal))
-                    finish_turn(args.journal, turn_id, "filled")
-                else:
-                    outcome = result.get("status")
-                    finish_turn(
-                        args.journal,
-                        turn_id,
-                        outcome if outcome in {"abstained", "rejected"} else "failed",
-                    )
-                book_state = replay(args.journal)
-                result["book_after"] = {
-                    "status": book_state.status,
-                    "realized_pnl": book_state.realized_pnl,
-                    "unrealized_pnl": book_state.unrealized_pnl,
-                    "open_exposure": book_state.open_exposure,
-                    "bankroll_now": book_state.bankroll_now,
-                    "open_positions": len(book_state.positions),
-                }
-            except (JournalError, KeyError, TypeError, ValueError):
-                state = replay(args.journal)
-                if turn_id in state.open_turns:
-                    finish_turn(args.journal, turn_id, "failed")
+            from chrysopoeia.accounting import JournalError
+            from chrysopoeia.operations import (
+                InvalidTurnInputError,
+                JournalWorkflowError,
+            )
+
+            if isinstance(exc, InvalidTurnInputError):
+                parser.exit(2, "cycle failed: invalid evidence\n")
+            if isinstance(exc, JournalWorkflowError):
                 parser.exit(2, "cycle failed: journal workflow rejected the fill\n")
+            if isinstance(exc, JournalError):
+                parser.exit(2, f"cycle failed: {exc}\n")
+            parser.exit(2, "cycle failed: model/workflow unavailable\n")
         content = (
             json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()

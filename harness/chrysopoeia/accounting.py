@@ -11,6 +11,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
 
@@ -127,7 +128,13 @@ class Position:
 class Book:
     bankroll: float = 0.0
     maximum_loss: float = 0.0
+    target_win_rate: float | None = None
+    window_end: str | None = None
+    window_minutes: float | None = None
     realized_pnl: float = 0.0
+    settled_trades: int = 0
+    winning_trades: int = 0
+    model_cost_usd: Decimal = Decimal(0)
     positions: dict[str, Position] = field(default_factory=dict)
     marks: dict[str, float] = field(default_factory=dict)
     admitted_turns: dict[str, dict] = field(default_factory=dict)
@@ -181,6 +188,33 @@ def replay(directory: Path) -> Book:
                 _fail_corrupt(journal, number)
             book.bankroll = float(record["bankroll"])
             book.maximum_loss = float(record["maximum_loss"])
+            target = record.get("target_win_rate")
+            window = record.get("window_end")
+            try:
+                parsed_window = (
+                    datetime.fromisoformat(window) if isinstance(window, str) else None
+                )
+            except ValueError:
+                parsed_window = None
+            if (target is None) != (window is None) or (
+                target is not None
+                and (
+                    not isinstance(target, (int, float))
+                    or isinstance(target, bool)
+                    or not 0 <= target <= 1
+                    or not isinstance(window, str)
+                    or not window.strip()
+                    or parsed_window is None
+                    or parsed_window.tzinfo is None
+                )
+            ):
+                _fail_corrupt(journal, number)
+            book.target_win_rate = float(target) if target is not None else None
+            book.window_end = window
+            duration = record.get("window_minutes")
+            if duration is not None and not _positive(duration):
+                _fail_corrupt(journal, number)
+            book.window_minutes = float(duration) if duration is not None else None
             book.status = "open"
         elif kind == "turn_admitted":
             turn_id = record.get("turn_id")
@@ -218,6 +252,13 @@ def replay(directory: Path) -> Book:
             ):
                 _fail_corrupt(journal, number)
             book.finished_turns[turn_id] = outcome
+            try:
+                cost = Decimal(str(record.get("model_cost_usd", "0")))
+            except InvalidOperation:
+                _fail_corrupt(journal, number)
+            if not cost.is_finite() or cost < 0:
+                _fail_corrupt(journal, number)
+            book.model_cost_usd += cost
         elif kind == "mark_recorded":
             market_id = record.get("market_id")
             mark = record.get("mark_price")
@@ -235,6 +276,8 @@ def replay(directory: Path) -> Book:
             if market_id not in book.positions or book.status != "open":
                 _fail_corrupt(journal, number)
             book.realized_pnl += pnl
+            book.settled_trades += 1
+            book.winning_trades += pnl > 0
             del book.positions[market_id]
         elif kind == "session_halted":
             if book.status != "open":
@@ -301,7 +344,15 @@ def _settlement_from_record(record: dict) -> tuple[str, str, float]:
     return market_id, resolution, float(pnl)
 
 
-def open_session(directory: Path, bankroll: float, maximum_loss: float) -> Book:
+def open_session(
+    directory: Path,
+    bankroll: float,
+    maximum_loss: float,
+    *,
+    target_win_rate: float | None = None,
+    window_end: datetime | None = None,
+    window_minutes: float | None = None,
+) -> Book:
     """Start a new session in a fresh journal, or resume the only open one."""
     if (
         not _positive(bankroll)
@@ -311,12 +362,41 @@ def open_session(directory: Path, bankroll: float, maximum_loss: float) -> Book:
         raise ValueError(
             "bankroll and maximum_loss must be positive and loss no greater than bankroll"
         )
+    if (target_win_rate is None) != (window_end is None) or (
+        target_win_rate is not None
+        and (
+            isinstance(target_win_rate, bool)
+            or not isinstance(target_win_rate, (int, float))
+            or not 0 <= target_win_rate <= 1
+            or not isinstance(window_end, datetime)
+            or window_end.tzinfo is None
+            or (window_minutes is not None and not _positive(window_minutes))
+        )
+    ):
+        raise ValueError("target_win_rate and UTC window_end must be supplied together")
+    window_iso = window_end.astimezone(timezone.utc).isoformat() if window_end else None
     book = replay(directory)
     if book.status == "empty":
         append_record(
             directory,
             "session_opened",
-            {"bankroll": bankroll, "maximum_loss": maximum_loss},
+            {
+                "bankroll": bankroll,
+                "maximum_loss": maximum_loss,
+                **(
+                    {
+                        "target_win_rate": target_win_rate,
+                        "window_end": window_iso,
+                        **(
+                            {"window_minutes": window_minutes}
+                            if window_minutes is not None
+                            else {}
+                        ),
+                    }
+                    if target_win_rate is not None
+                    else {}
+                ),
+            },
         )
         return replay(directory)
     if book.status != "open":
@@ -327,6 +407,14 @@ def open_session(directory: Path, bankroll: float, maximum_loss: float) -> Book:
     if (
         abs(book.bankroll - bankroll) > 1e-9
         or abs(book.maximum_loss - maximum_loss) > 1e-9
+        or book.target_win_rate != target_win_rate
+        or (
+            (book.window_minutes is None and book.window_end != window_iso)
+            or (
+                book.window_minutes is not None
+                and book.window_minutes != window_minutes
+            )
+        )
     ):
         raise JournalError(
             "resumed session configuration differs from the requested configuration"
@@ -390,18 +478,28 @@ def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
     )
 
 
-def finish_turn(directory: Path, turn_id: str, outcome: str) -> dict:
+def finish_turn(
+    directory: Path, turn_id: str, outcome: str, *, model_cost_usd: str = "0"
+) -> dict:
     """Record the one terminal outcome for an admitted turn."""
     _clean(turn_id, "turn_id")
     if outcome not in TURN_OUTCOMES:
         raise ValueError(f"unknown turn outcome {outcome}")
+    try:
+        cost = Decimal(model_cost_usd)
+    except InvalidOperation:
+        raise ValueError("model_cost_usd must be a non-negative decimal") from None
+    if not cost.is_finite() or cost < 0:
+        raise ValueError("model_cost_usd must be a non-negative decimal")
     book = replay(directory)
     if turn_id not in book.admitted_turns:
         raise JournalError(f"turn_id {turn_id} was not admitted")
     if turn_id in book.finished_turns:
         raise JournalError(f"turn_id {turn_id} is already finished")
     return append_record(
-        directory, "turn_finished", {"turn_id": turn_id, "outcome": outcome}
+        directory,
+        "turn_finished",
+        {"turn_id": turn_id, "outcome": outcome, "model_cost_usd": str(cost)},
     )
 
 

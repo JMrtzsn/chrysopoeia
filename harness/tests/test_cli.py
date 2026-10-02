@@ -92,6 +92,75 @@ class OperatorCliTests(unittest.TestCase):
 
         return fetch
 
+    def test_run_command_validates_all_session_arguments(self) -> None:
+        invalid = (
+            ("--bankroll", "0"),
+            ("--maximum-loss", "nan"),
+            ("--target-win-rate", "1.1"),
+            ("--window-minutes", "0"),
+            ("--max-cycles", "0"),
+            ("--max-cycles", "1001"),
+            ("--cost-budget", "-1"),
+            ("--interval-seconds", "-1"),
+            ("--maximum-market-exposure", "0"),
+            ("--maximum-total-exposure", "2"),
+            ("--daily-cloud-cost-budget", "0"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for flag, value in invalid:
+                with self.subTest(flag=flag, value=value):
+                    code, output, error = self.invoke(
+                        "run",
+                        "--journal",
+                        directory,
+                        "--max-cycles",
+                        "1",
+                        flag,
+                        value,
+                    )
+                    self.assertEqual((code, output), (2, ""))
+                    self.assertIn("invalid", error)
+
+    def test_run_command_prints_iteration_lines_and_session_report(self) -> None:
+        report = {"stop_reason": "max_cycles", "cycles_run": 1}
+        iterations = [{"iteration": 1, "result": {"status": "abstained"}}]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "chrysopoeia.loop.run_loop",
+                AsyncMock(return_value=(report, iterations)),
+            ) as run,
+        ):
+            code, output, error = self.invoke(
+                "run", "--journal", directory, "--max-cycles", "1"
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output), report)
+        self.assertEqual(json.loads(error), iterations[0])
+        self.assertEqual(run.call_args.args[0].interval_seconds, 30)
+
+    def test_run_command_allows_zero_interval(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "chrysopoeia.loop.run_loop",
+                AsyncMock(return_value=({"stop_reason": "max_cycles"}, [])),
+            ) as run,
+        ):
+            code, _, _ = self.invoke(
+                "run",
+                "--journal",
+                directory,
+                "--max-cycles",
+                "1",
+                "--interval-seconds",
+                "0",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_args.args[0].interval_seconds, 0)
+
     def run_cli(
         self, *arguments: str, cwd: str | Path | None = None, console: bool = False
     ) -> subprocess.CompletedProcess[str]:
@@ -775,6 +844,7 @@ class OperatorCliTests(unittest.TestCase):
                 )
                 if failure == "evidence":
                     run.assert_not_called()
+                    self.assertEqual(replay(journal).model_cost_usd, 0)
 
     def test_cycle_with_journal_finishes_failed_when_fill_is_refused(self) -> None:
         from chrysopoeia.accounting import replay

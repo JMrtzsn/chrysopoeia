@@ -403,3 +403,24 @@ never include secrets, private user data, or hidden reasoning.
 - Approval: operator approved the local bounded run. Cost: ~$0.0022 estimated.
 - Cleanup: temp config, capture, and journals live only in the OS temp
   directory.
+
+### Bounded autonomous trading loop (2026-09-30)
+
+- Command: `uv run chrysopoeia run --journal <temp dir> --config <temp config>
+  --bankroll 1000 --maximum-loss 100 --target-win-rate 0.6 --window-minutes 5
+  --max-cycles 2 --cost-budget 0.1 --interval-seconds 5 --stop-file <temp>`,
+  then a resume with the stop file present and a resume with a different
+  target.
+- Real boundary: live public Polymarket discovery and capture selected by the
+  harness (markets 559651 and 560317, no operator pick) and Gemini 2.5 Flash
+  on Vertex AI with ambient ADC (project PROJECT_ID, us-central1).
+- Result: two cycles, both abstained after one trader call each; journal holds
+  exactly one `turn_admitted`/`turn_finished` pair per market with per-turn
+  model cost; report `stop_reason: max_cycles`, `win_rate: null` with no
+  settlements, model cost $0.004459, net P&L -$0.004459. Resume with the stop
+  file stopped before any model call (`stop_reason: stopped`, original
+  `window_end` kept); resume with a different target was refused with no
+  records added.
+- Bounds: max 2 cycles, 5-minute window, $0.10 session cost cap.
+- Approval: operator approved the local bounded run. Cost: ~$0.0045.
+- Cleanup: temp config, stop file, and journal only in the OS temp directory.

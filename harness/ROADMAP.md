@@ -66,21 +66,20 @@ artifact (wheel/image version). Neither roadmap depends on the other's tasks.
   without model calls; finished-turn repeats are no-ops; appends fsync.
   Live-verified 2026-09-30; see Recorded Live Verification in
   `../docs/development-lifecycle.md`.
+- [x] Bounded autonomous paper trading loop (`chrysopoeia/loop.py`,
+  `chrysopoeia/operations.py`, `chrysopoeia run`): harness-selected markets,
+  persisted capital/target win rate/window, max-cycle, cost-budget, loss-halt,
+  deadline, stop-file and signal stops, and an end-of-window win-rate versus
+  target report. Live-verified 2026-09-30; see Recorded Live Verification in
+  `../docs/development-lifecycle.md`.
 
 ## Next
 
-1. **Bounded autonomous trading loop.** Add a paper-only harness CLI entrypoint
-   that repeats discover → capture → cycle → mark → settle under hard maximum
-   cycles, operator-set capital and trading window, target win rate, cost budget,
-   loss halt, and kill switch/stop file or signal bounds. Trading logic, market
-   selection, cadence, recovery, and halting remain inside the harness. Stop at
-   the window deadline and report achieved settled-trade win rate versus target
-   plus P&L net of costs; the target never weakens risk limits or forces trades.
-2. **Research tools.** Add bounded information-search, financial-data, and
+1. **Research tools.** Add bounded information-search, financial-data, and
    company-data inputs that produce validated, normalized, provenance-carrying
    evidence the trader and reviewer can cite. These tools carry no execution
    authority.
-3. **Later venue adapters.** Add each venue beyond the current Polymarket adapter
+2. **Later venue adapters.** Add each venue beyond the current Polymarket adapter
    as its own milestone with canonical normalization and contract tests; research
    data tools are not venues.
 

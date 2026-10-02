@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +68,53 @@ class AccountingTests(unittest.TestCase):
         self.book()
         with self.assertRaises(JournalError):
             open_session(self.directory, 2_000.0, 100.0)
+
+    def test_loop_session_persists_params_and_resume_keeps_window(self) -> None:
+        end = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        first = open_session(
+            self.directory, 1_000.0, 100.0, target_win_rate=0.6, window_end=end
+        )
+        resumed = open_session(
+            self.directory, 1_000.0, 100.0, target_win_rate=0.6, window_end=end
+        )
+
+        self.assertEqual(first.target_win_rate, 0.6)
+        self.assertEqual(first.window_end, end.isoformat())
+        self.assertEqual(resumed.window_end, first.window_end)
+
+    def test_loop_session_resume_refuses_mismatched_params(self) -> None:
+        end = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        open_session(
+            self.directory, 1_000.0, 100.0, target_win_rate=0.6, window_end=end
+        )
+
+        with self.assertRaises(JournalError):
+            open_session(
+                self.directory,
+                1_000.0,
+                100.0,
+                target_win_rate=0.7,
+                window_end=end,
+            )
+
+    def test_replay_counts_settled_trades_and_wins(self) -> None:
+        self.book()
+        _record_fill(self.directory, _position("winner"))
+        settle(self.directory, replay(self.directory), "winner", "resolved_yes")
+        _record_fill(self.directory, _position("loser"))
+        settle(self.directory, replay(self.directory), "loser", "resolved_no")
+
+        book = replay(self.directory)
+
+        self.assertEqual(book.settled_trades, 2)
+        self.assertEqual(book.winning_trades, 1)
+
+    def test_finished_turn_cost_is_replayed_for_session_budget(self) -> None:
+        self.book()
+        admit_turn(self.directory, "t1", "snap-1", "m1")
+        finish_turn(self.directory, "t1", "abstained", model_cost_usd="0.25")
+
+        self.assertEqual(str(replay(self.directory).model_cost_usd), "0.25")
 
     def test_turn_admission_is_a_no_op_for_a_repeated_identity(self) -> None:
         self.book()
