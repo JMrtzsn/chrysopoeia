@@ -4,6 +4,9 @@ Loop internals: paper-cycle core, agents, accounting, CLI, and the host
 runtime adapter. This is application code — infrastructure lives in the
 sibling `platform/` folder and is a different work unit.
 Ordered harness work lives in `ROADMAP.md`.
+The current and proposed harness architecture map lives in
+`docs/architecture.md`; update it when a major boundary or flow changes.
+Unapproved future ideas are consolidated in `docs/proposals.md`.
 
 ## Owned
 
@@ -19,7 +22,7 @@ Ordered harness work lives in `ROADMAP.md`.
 - `platform/**` (GCP deployment shape; needs operator approval to touch)
 - Any `gcloud`, `pulumi`, or GCP-SDK invocation from application code (the
   harness never provisions or mutates cloud resources; rule from
-  `docs/gcp-architecture.md`)
+  `../platform/docs/deployment.md`)
 
 ## Contract published to the platform
 

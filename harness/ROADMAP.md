@@ -1,106 +1,57 @@
-# Harness Roadmap
+# Harness roadmap
 
-`../.agents-cli-spec.md` is authoritative for product scope and acceptance. This
-roadmap only orders approved harness work and cannot expand that scope.
-Development and live-verification gates remain in
-`../docs/development-lifecycle.md`. Paths below are relative to `harness/` unless
-otherwise stated.
-
-The only coupling between the harness and platform flows is a released harness
-artifact (wheel/image version). Neither roadmap depends on the other's tasks.
+`.agents-cli-spec.md` defines product scope and acceptance. This roadmap orders
+approved harness work only. Paths are relative to `harness/` unless noted.
+Verification policy and harness evidence are in `docs/verification.md`.
+The platform consumes a released harness artifact; the roadmaps are otherwise
+independent.
 
 ## Complete
 
-- [x] Runtime-neutral core contracts with ADK at the runtime edge
-  (`chrysopoeia/paper_cycle.py`, `chrysopoeia/trading.py`,
-  `chrysopoeia/agent.py`; spec: Harness Definition And Ownership).
-- [x] Validated configuration and offline `inspect`/`validate` CLI
-  (`chrysopoeia/configuration.py`, `chrysopoeia/cli.py`; spec: Adapter And
-  Configuration Model).
-- [x] Public Polymarket capture with depth and fee provenance
-  (`chrysopoeia/polymarket.py`; spec: Core Capability Boundaries).
-- [x] Snapshot-driven paper cycle with abstention, review, risk, and fill routes
-  (`chrysopoeia/paper_cycle.py`, `chrysopoeia/trading.py`; spec: Workflow).
-- [x] Provider-neutral local `evidence_bundle` validation and cycle support
-  (`chrysopoeia/context.py`, `chrysopoeia/cycle_runner.py`; spec: Core
-  Capability Boundaries).
-- [x] Deterministic cost gate, offline pre-commit gate, and mandatory bounded
-  live-verification policy (`chrysopoeia/cost.py`, `.githooks/pre-commit`,
-  `../docs/development-lifecycle.md`; spec: Phase 1 Acceptance Criteria).
-- [x] Agents CLI and A2A prototype surface (`agents-cli-manifest.yaml`,
-  `chrysopoeia/fast_api_app.py`; spec: Adapter And Configuration Model).
-- [x] Bounded public market discovery and capture handoff over a deterministic
-  75-market sample (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`; spec:
-  Core Capability Boundaries). Live-verified 2026-09-15; see Recorded Live
-  Verification in `../docs/development-lifecycle.md`.
-- [x] Durable local session, turn, and accounting records
-  (`chrysopoeia/accounting.py`, `chrysopoeia/cli.py`; contract:
-  `../docs/portfolio-accounting.md`). The `book` inspection CLI and
-  `cycle --journal` admission, exposure, fill recording, halt checking, and
-  `book_after` reporting are live-verified 2026-09-15, including the full
-  abstain→review→reject→fill route and same-market preemption; see Recorded
-  Live Verification in `../docs/development-lifecycle.md`.
-- [x] Idempotent turn admission (`chrysopoeia/accounting.py`): deterministic
-  `turn-<sha24>` IDs, no-op repeats, and pre-model same-market preemption,
-  also covered by the 2026-09-15 live verification.
-- [x] Venue-derived resolution and paper settlement
-  (`chrysopoeia/polymarket.py`, `chrysopoeia/cli.py`: `settle`): read-only
-  Gamma resolution capture normalized to canonical `resolved_yes|resolved_no`,
-  deterministic settlement against open positions, cumulative-loss halt on
-  settlement, refusal of unresolved or ambiguous markets. Live-verified
-  2026-09-15 against a real resolved market; see Recorded Live Verification in
-  `../docs/development-lifecycle.md`.
-- [x] Venue price marking (`chrysopoeia/cli.py`: `mark`): re-capture of open
-  positions feeds journal marks so unrealized P&L reflects live venue data.
-  Live-verified 2026-09-15; see Recorded Live Verification in
-  `../docs/development-lifecycle.md`.
-- [x] Non-Gemini provider live proof: one bounded paper cycle over OpenRouter
-  (`openrouter/openai/gpt-4o`) through `adk-registry`/LiteLlm, authenticated
-  with a provider-standard env-var key (`OPENROUTER_API_KEY`) and priced
-  per-model under `[cost.models]`. The auth policy now permits env-var keys
-  for providers without ambient authentication. Live-verified 2026-09-27; see
-  Recorded Live Verification in `../docs/development-lifecycle.md`.
-- [x] Turn-level recovery (`chrysopoeia/accounting.py`, `chrysopoeia/cli.py`):
-  every admitted turn ends in exactly one `turn_finished`; fills link to their
-  turn; open turns are resolved `filled` or `abandoned` before admission
-  without model calls; finished-turn repeats are no-ops; appends fsync.
-  Live-verified 2026-09-30; see Recorded Live Verification in
-  `../docs/development-lifecycle.md`.
-- [x] Bounded autonomous paper trading loop (`chrysopoeia/loop.py`,
-  `chrysopoeia/operations.py`, `chrysopoeia run`): harness-selected markets,
-  persisted capital/target win rate/window, max-cycle, cost-budget, loss-halt,
-  deadline, stop-file and signal stops, and an end-of-window win-rate versus
-  target report. Live-verified 2026-09-30; see Recorded Live Verification in
-  `../docs/development-lifecycle.md`.
+- Runtime-neutral paper-cycle contracts with ADK at the runtime edge; validated
+  configuration and local `inspect`/`validate` commands.
+- Public Polymarket discovery and capture, canonical snapshot evidence, and a
+  snapshot-driven cycle with abstention, review, risk checks, and depth/fee-aware
+  paper fills.
+- Deterministic model-cost gates and offline evaluation/pre-commit checks.
+- Durable local journal for sessions, turns, fills, marks, settlement, model
+  costs, and book inspection. Admission is idempotent; interrupted turns recover
+  without repeating model work. Venue resolution and price marks are
+  read-only/public. Live verified 2026-09-15 and 2026-09-30.
+- Bounded `chrysopoeia run`: harness-selected markets, persisted session limits,
+  max-cycle/cost/loss/deadline/stop controls, recovery, and target win-rate/net
+  P&L report. Live verified 2026-09-30.
+- One bounded live paper cycle through a non-Gemini provider (OpenRouter via ADK
+  registry). Live verified 2026-09-27.
+
+The recorded commands and evidence for harness milestones are in
+`docs/verification.md`.
 
 ## Next
 
-1. **Research tools.** Add bounded information-search, financial-data, and
-   company-data inputs that produce validated, normalized, provenance-carrying
-   evidence the trader and reviewer can cite. These tools carry no execution
-   authority.
-2. **Later venue adapters.** Add each venue beyond the current Polymarket adapter
-   as its own milestone with canonical normalization and contract tests; research
-   data tools are not venues.
+1. **Research tools:** bounded search, financial-data, and company-data inputs
+   normalized into provenance-carrying evidence the trader and reviewer can
+   cite. They carry no execution authority.
+2. **Additional venues:** one adapter milestone at a time, with canonical
+   normalization and contract tests. Research providers are not venues.
+
+See `docs/proposals.md` for unapproved feature proposals; proposals do not expand
+this roadmap.
 
 ## Deferred
 
-- RAG/memory plus lifecycle and version management.
-- Authenticated execution is the eventual goal but remains prohibited; it
-  requires confirmation, least-privilege IAM, hard limits, a kill switch,
-  idempotency, and reconciliation.
-- A meta-harness/control plane, unless multiple independent harnesses exist.
+- RAG/memory, lifecycle and version management.
+- Authenticated execution, which remains prohibited pending the spec's explicit
+  prerequisites.
+- A meta-harness/control plane unless multiple independent harnesses exist.
 
-See [Agent Graphs](../docs/agent-graphs.md) for future graph prerequisites.
+## Updating this roadmap
 
-## Updating This Roadmap
-
-- Change only work owned by `harness/`.
+- Change only harness-owned work. Cross-work-unit changes require approval in
+  both plans.
 - Start a milestone only with explicit user approval and an agreed contract.
-- Every externally observable feature addition or change requires both offline
-  checks and bounded live verification against the real changed boundary, as
-  defined in `../docs/development-lifecycle.md`. A failed or unavailable live check
-  leaves the feature incomplete and blocks any commit recommendation.
-- Mark work **Complete** only after acceptance evidence exists and the change is
-  committed.
-- Do not add speculative abstractions or plugin systems.
+- Externally observable changes require offline checks and bounded live
+  verification against the changed boundary. A failed or unavailable check
+  leaves the milestone incomplete.
+- Mark work complete only after acceptance evidence exists and the change is
+  committed. Do not add speculative abstractions or plugin systems.

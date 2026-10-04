@@ -37,6 +37,6 @@ pulumi preview    # offline evidence gate: 0 pending changes is the pass mark
 ```
 
 Live apply or job executions need explicit operator approval (per
-`docs/development-lifecycle.md`), and Cloud Run / Artifact Registry env edits
+`docs/deployment.md`), and Cloud Run / Artifact Registry env edits
 outside Pulumi are banned: `gcloud beta run jobs update --set-env-vars`
 replaces ALL envs and desyncs Pulumi state.

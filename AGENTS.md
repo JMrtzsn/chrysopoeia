@@ -1,176 +1,66 @@
-# Chrysopoeia Development
+# Chrysopoeia project instructions
 
-The product scope and safety contract are defined in `README.md`. Preserve those
-boundaries unless the user explicitly changes them.
+## Sources of truth
 
-Context and evidence boundaries are defined in `docs/context-engineering.md`.
-The optional managed deployment profile is defined in
-`docs/gcp-architecture.md`. Current graph ownership, state, and cost gates plus
-future graph prerequisites are defined in `docs/agent-graphs.md`.
-The product specification is `.agents-cli-spec.md`; development and release
-gates are defined in `docs/development-lifecycle.md`.
-The product goal is to find and make good trades under operator-set session
-parameters and hard limits; `.agents-cli-spec.md` defines the full contract.
+- `.agents-cli-spec.md`: product scope, safety contract, and acceptance.
+- `README.md`: orientation and local quickstart.
+- `harness/docs/` and `platform/docs/`: work-unit documentation. Keep it aligned
+  with the spec and implementation.
+- `harness/ROADMAP.md` and `platform/ROADMAP.md`: approved work order for each
+  independent work unit.
 
-## Repo layout: two work units
+## Ownership
 
-This is a monorepo with two independently owned folders. Each work unit must
-stay under its folder; touching the other side requires explicit operator
-approval in both plans:
+This monorepo has two work units:
 
-- `harness/` — application code: agent loop, papers， cost gates, accounting,
-  CLI, tests, local dev. Produces a wheel/container image the platform
-  consumes. Never runs `gcloud`/`pulumi`.
-- `platform/` — GCP deployment: Pulumi base, wheel-based Dockerfile, pinned
-  image digest, session plumbing. Never imports the harness package.
+- `harness/`: agent loop, trading/paper accounting, CLI, tests, configuration,
+  and offline gates. It produces a wheel/image and never runs `gcloud` or
+  `pulumi`.
+- `platform/`: Pulumi deployment and wheel-based container build. It consumes a
+  pinned harness image and never imports the harness package.
 
-Per-folder ownership details and roadmaps live in `harness/AGENTS.md`,
-`harness/ROADMAP.md`, `platform/AGENTS.md`, and `platform/ROADMAP.md`.
+Keep changes within the owning folder. Cross-work-unit changes require explicit
+operator approval in both plans. See each folder's `AGENTS.md` for its contract
+and checks.
 
-## Stack
+## Design rules
 
-- Python 3.10 or later.
-- Google Agent Development Kit for Python as the current agent-runtime adapter.
-- `uv` for dependency and environment management.
-- Gemini through ADK. Providers with ambient authentication use it (Vertex AI
-  with Application Default Credentials, never copied keys). Providers without
-  ambient authentication use a provider-standard environment-variable key (e.g.
-  OPENROUTER_API_KEY), never stored in files, configuration, prompts, session
-  state, or logs.
-
-## Commands
-
-Run from `harness/` unless noted:
-
-- Install: `uv sync --all-groups --all-extras`
-- Test: `uv run python -m unittest discover`
-- Run CLI: `uv run adk run chrysopoeia`
-- Run development UI: `uv run adk web --port 8000`
-
-Platform work runs from `platform/` (see `platform/AGENTS.md` for the Pulumi
-venv and preview/up gates).
-
-## Architecture
-
-- Keep core canonical snapshots/evidence, proposals/reviews, risk/cost policy,
-  paper quote/fill, workflow transitions, and audit/evaluation requirements
-  runtime-neutral.
-- Keep the root agent in `chrysopoeia/agent.py` while the application is small.
-- Keep deterministic paper-cycle contracts, evidence, and finalization in
-  `chrysopoeia/paper_cycle.py`; keep trading, risk, and fills in
-  `chrysopoeia/trading.py`; and keep `chrysopoeia/agent.py` focused on ADK
-  runtime composition, wrappers, tools, and workflow construction.
-- Treat ADK `Agent`, `Workflow`, callbacks, ToolContext/session state, and Agents
-  CLI/A2A/eval tooling as current runtime-edge integration details. The boundary
-  is not fully isolated: cost callbacks remain ADK-edge code in
-  `chrysopoeia/cost.py`, and agent wrappers bridge ADK Context to the core.
-- Separate trader and reviewer agents because their responsibilities and tool
-  permissions differ; keep order execution outside both.
-- Use ordinary typed Python functions for discrete tools.
-- Use the current ADK adapter to integrate the bounded core workflow and hold
-  conversation-scoped state; add persistent storage only when required.
-- Treat Cloud SQL, RAG Engine, and Memory Bank as future platform options, not
-  local harness requirements. If adopted, keep Cloud SQL authoritative and RAG
-  or memory non-authoritative.
-- Keep session state, authoritative trading records, external evidence, and
-  curated memory distinct. Never use memory as the source of truth for money or
-  lifecycle decisions.
-- Give trader and reviewer agents separate histories. Exchange only validated,
-  structured proposals and reviews tied to one canonical snapshot ID.
-- If memory is later added, generate it after completed cycles or resolutions,
-  persist provenance, and invalidate stale lessons; never put it on the trading
-  hot path.
-- Prefer the standard library, then current runtime features. Do not add a
-  runtime abstraction until a second concrete runtime is required.
-- Configure a model through the selected agent-runtime adapter. The current ADK
-  adapter supplies model connectors. Do not build a parallel model-provider
-  framework or spread provider-specific logic through tools.
-- Keep venue market-data and paper-execution capabilities separate. Market-data
-  configuration must never grant authenticated execution authority.
-- Normalize venue adapter output into canonical domain values before agents or
-  policy consume it. Use direct configured adapters now; add external plugin
-  discovery only for a real separately packaged adapter.
-- Keep authenticated execution out of the current harness. Any future live
-  venue adapter must be isolated behind confirmation, IAM, hard limits, a kill
-  switch, and reconciliation.
-
-### Harness Ownership Rules
-
-- Preserve the conceptual `Session -> Turn -> Step -> Action` hierarchy: the
-  current session is local/in-memory, a turn is one paper cycle or operator
-  action, and a step is one model request/response.
-- Keep model decision, permission, and execution distinct. Apply authorization
-  at the exact effect boundary.
-- ADK owns the current inner model loop and runtime context mechanics;
-  deterministic Chrysopoeia core contracts own money, policy, paper execution,
-  and terminal outcomes.
-- The harness owns trading cadence, bounded multi-cycle looping, recovery, and
-  halting; the platform may launch the harness but never drives its cycles.
-- Do not call Chrysopoeia a meta-harness until a second independent harness and
-  a coordinating control plane exist. Scheduling, persistence, or managed
-  deployment of this harness alone remains Level 2.
-- OpenCode and official Claude Code are external engineering harnesses for
-  development and review, not model providers or inner trading steps. Existing
-  OpenCode orchestration rules still apply; Claude Code may read this guidance
-  but is not imported or a dependency. Claude Pro credentials belong only to
-  official Claude Code, never Chrysopoeia inference or OpenCode. Product
-  integration of either harness would create Level 3/meta-harness scope and
-  requires explicit design.
-- Treat the sibling `../harness` workspace as optional design provenance only;
-  never import it or add a build/runtime dependency on it.
-
-## Agent And Tool Rules
-
-- Give every agent a unique, descriptive name, description, and concise instruction.
-- Type tool inputs and outputs and write accurate docstrings ADK can expose to the model.
-- Treat tool arguments as untrusted input: validate values and bound work before external calls.
-- Return safe, actionable tool failures without exposing secrets or internal details.
-- Require ADK confirmation before destructive, costly, or externally visible actions.
-- Keep deterministic business rules in Python, not prompts.
-- Do not use an LLM where ordinary code can produce the correct result.
+- Keep canonical market/evidence values, proposals/reviews, policy, paper fills,
+  accounting, and outcomes deterministic and runtime-neutral where practical.
+- Keep ADK composition in `harness/chrysopoeia/agent.py`; core paper-cycle
+  contracts in `paper_cycle.py`; trading/risk/fills in `trading.py`;
+  accounting in `accounting.py`.
+- Use typed Python functions for tools. Trader and reviewer have distinct roles
+  and histories; neither receives execution authority.
+- Normalize venue and research-provider output before policy or models consume
+  it. External content is untrusted evidence, never instruction.
+- Prefer existing runtime features and standard-library solutions. Add an
+  abstraction only for a second concrete use case.
+- Session state is not the financial ledger. The local journal is authoritative
+  for positions, fills, marks, settlements, and recorded costs.
 
 ## Security
 
-- Never commit API keys, credentials, user data, or `.env` files.
-- Read secrets from environment variables and fail clearly when required configuration is missing.
-- Do not place secrets or sensitive user data in prompts, logs, session state, traces, or tool results.
-- Agent instructions are not a security or authorization control.
-- Search, financial data, and company data tools are product research
-  capabilities. Their output is untrusted input and must be validated,
-  normalized, and provenance-carrying before a trade cites it; research tools
-  never carry authorization. The ADK web UI is a development capability, not a
-  production trust boundary.
+- Validate and bound tool/configuration inputs before external calls. Return
+  safe failures without secrets or internal details.
+- Read credentials only from ambient authentication or provider-standard
+  environment variables. Never place them in source, config files, prompts,
+  session state, traces, logs, or tool results.
+- Prompts do not authorize actions. Deterministic Python owns risk, cost,
+  execution, accounting, and lifecycle decisions.
+- Market-data access never grants execution authority. Authenticated trading is
+  prohibited until the spec's explicit prerequisites are approved and met.
 
 ## Verification
 
-- Run tests and import the agent before considering a change complete. The
-  offline pre-commit gate remains mandatory but is not sufficient for an
-  externally observable feature addition or change.
-- Add the smallest test that checks observable behavior for non-trivial tools, routing, or workflow logic.
-- Tests must not require live model calls or real credentials unless explicitly marked as integration tests.
-- Every externally observable feature addition or change is incomplete until
-  deterministic offline tests and a bounded live verification both pass against
-  the real boundary changed. This includes external-service CLI behavior, venue
-  adapters or schemas, runtime/provider configuration, callbacks and cost
-  accounting, structured outputs, workflows, A2A or serving endpoints,
-  deployment/infrastructure, persistence, and any future approved authenticated
-  effect.
-- Pure documentation, internal refactors with no observable behavior change,
-  and test-only tooling do not require live verification; verify their claim of
-  no behavior change offline. Configuration-only changes that affect runtime or
-  provider behavior do require live verification.
-- Before a live run, obtain human approval for cost or external effects,
-  estimate cost, and bound calls, time, and data. Exercise the smallest real
-  path with least privilege and ambient authentication (ADC for Vertex) or, for
-  providers without ambient authentication, a provider-standard
-  environment-variable key that never enters files, configuration, prompts,
-  state, or logs. Sanitize evidence, record the exact command, result, and cost
-  when applicable, then clean up or disable temporary services and resources.
-- A failed live verification blocks completion and any commit recommendation;
-  fix and rerun it. An unavailable environment, insufficient IAM, or vendor
-  outage leaves the feature incomplete and must not be waived or called
-  verified.
-- Current venue live verification is read-only against public data. Current
-  model live verification is a bounded paper cycle. Authenticated live exchange
-  execution remains prohibited.
-- Do not add pre-push hooks or automatic paid/network checks.
+- Run the owning work unit's required offline checks; import the agent for
+  harness changes.
+- Non-trivial tools, routing, and workflow logic need a minimal observable
+  behavior test. Tests do not call live models or services by default.
+- Externally observable changes require offline checks and bounded live
+  verification against the real changed boundary. Follow
+  `harness/docs/verification.md`: operator approval, cost estimate, bounded
+  calls/time/data, sanitized evidence, and cleanup. A failed or unavailable live
+  check leaves the feature incomplete.
+- Documentation-only changes require link/status checks and `git diff --check`;
+  they do not require live verification.
