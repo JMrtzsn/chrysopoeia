@@ -29,20 +29,30 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Research tools:** bounded search, financial-data, and company-data inputs
-   normalized into provenance-carrying evidence the trader and reviewer can
-   cite. They carry no execution authority.
-2. **Additional venues:** one adapter milestone at a time, with canonical
-   normalization and contract tests. Research providers are not venues.
+1. **Paper trade plans and exits:** add an entry/exit-plan contract to opening
+   proposals; persist it with the position; evaluate profit, risk, and
+   time/resolution exits from fresh public quotes; journal closes and recovery.
+   No authenticated orders.
+2. **Polymarket live execution foundation:** verify the official Python SDK and
+   supported EOA flow; implement the isolated execution boundary, structural
+   limits, preflight, durable intent/reconciliation, and kill switch. Keep live
+   mode disabled until all spec gates pass.
+3. **Bounded live activation:** only after gates pass, run separately approved
+   smallest-possible live order and exit verification with the dedicated $10
+   wallet, locally.
+4. **Citable research tools:** bounded providers normalized into provenance-
+   carrying evidence shared by trader and reviewer; no execution authority.
+5. **Additional venues and NO-side positions:** separate milestones after the
+   Polymarket YES-only live path is verified.
 
-See `docs/proposals.md` for unapproved feature proposals; proposals do not expand
-this roadmap.
+See `docs/proposals.md` for the accepted live-trading design and other unapproved
+feature proposals; proposals do not expand this roadmap.
 
 ## Deferred
 
 - RAG/memory, lifecycle and version management.
-- Authenticated execution, which remains prohibited pending the spec's explicit
-  prerequisites.
+- Authenticated order submission until all spec gates pass and each bounded live
+  verification is separately approved.
 - A meta-harness/control plane unless multiple independent harnesses exist.
 
 ## Updating this roadmap
