@@ -3,8 +3,8 @@
 `.agents-cli-spec.md` defines product scope and acceptance. This roadmap orders
 approved harness work only. Paths are relative to `harness/` unless noted.
 Verification policy and harness evidence are in `docs/verification.md`.
-The platform consumes a released harness artifact. Live trade management is a
-coordinated harness/platform work item recorded in both roadmaps.
+The platform consumes a released harness artifact. Event adapters and consumers
+are coordinated harness/platform work recorded in both roadmaps.
 
 ## Complete
 
@@ -21,6 +21,9 @@ coordinated harness/platform work item recorded in both roadmaps.
 - Bounded `chrysopoeia run`: harness-selected markets, persisted session limits,
   max-cycle/cost/loss/deadline/stop controls, recovery, and target win-rate/net
   P&L report. Live verified 2026-09-30.
+- Reviewer-approved entry/exit plans and the in-process paper bracket simulator:
+  fresh executable bids, full closes, journal recovery, and resolution handling.
+  This remains current paper behavior, not an event consumer.
 - One bounded live paper cycle through a non-Gemini provider (OpenRouter via ADK
   registry). Live verified 2026-09-27.
 
@@ -29,25 +32,22 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Paper trade plans and exits:** add an entry/exit-plan contract to opening
-   proposals; persist it with the position; evaluate profit, risk, and
-   time/resolution exits from fresh public quotes; journal simulated closes and
-   recovery. This local simulator is not the live position manager. No
-   authenticated orders.
-2. **Trade-intent and manager contract:** define the durable approved-intent
-   handoff, event ledger, idempotency/recovery rules, venue reconciliation, and
-   required manager availability. The agent/harness creates approved plans; a
-   separate deterministic process manages actual orders and positions. Platform
-   deployment is ordered in `../platform/ROADMAP.md`. Operator-approved
-   architecture direction, 2026-10-05; implementation remains gated on this
-   agreed contract.
+1. **Trade-plan event producer and paper consumer:** make CLI invocation, and any
+   future request adapter through the same core, produce `trade_plan_ready` only
+   after review approval and hard-policy acceptance. Refactor paper simulation
+   to consume that contract with event-ID deduplication and its own ledger while
+   preserving current bracket behavior. Do not select transport yet.
+2. **GCP/other event consumer:** after transport and delivery guarantees are
+   selected, deploy an independent consumer adapter. Specify quote freshness,
+   idempotency, ledger ownership, recovery, and exit monitoring/protection before
+   any live activation. Platform work is ordered in `../platform/ROADMAP.md`.
 3. **Polymarket live execution foundation:** verify the official Python SDK and
-   supported EOA/order flow; implement the isolated manager execution boundary,
-   structural limits, preflight, durable intent/reconciliation, and kill switch.
-   Keep live mode disabled until all spec gates pass.
+   supported EOA/order flow; implement isolated execution, structural limits,
+   preflight, reconciliation, and kill switch in the consumer. Keep live mode
+   disabled until all spec gates pass.
 4. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
-   wallet through the separately deployed deterministic manager.
+   wallet through the independently deployed event consumer.
 5. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
 6. **Additional venues and NO-side positions:** separate milestones after the

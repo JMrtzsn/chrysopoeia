@@ -32,12 +32,13 @@ flowchart TD
     Journal --> Loop
     Journal --> Report["Cycle/session report"]
 
-    Policy -. "approved live terms" .-> Intent["Durable trade intent<br/>not an order or fill"]
-    Intent -. "idempotent handoff" .-> Manager["Separate deterministic trade manager"]
-    Manager -. "bounded orders and reconciliation" .-> Execution["Isolated venue execution adapter"]
-    Execution -.-> LiveVenue["Venue order/fill state"]
-    Manager -. "reconciled events" .-> LiveJournal[("Live execution ledger")]
-    Platform["Platform runtime lifecycle"] -. "starts, monitors, restarts" .-> Manager
+    Policy -. "review approved + policy accepted" .-> Ready["trade_plan_ready<br/>verified plan, not a fill"]
+    Ready -. "same contract" .-> PaperConsumer["Independent paper consumer"]
+    Ready -. "same contract" .-> ExecutionConsumer["Future GCP/other execution consumer"]
+    PaperConsumer -.-> PaperLedger[("Consumer-owned paper ledger")]
+    ExecutionConsumer -. "fresh quote + bounded order" .-> LiveVenue["Venue order/fill state"]
+    ExecutionConsumer -.-> LiveLedger[("Consumer-owned execution ledger")]
+    Platform["Platform deployment/trigger adapter"] -.-> ExecutionConsumer
 
     subgraph Planned["Proposed citable research tools"]
         Tool["Typed ADK tool"]
@@ -53,7 +54,7 @@ flowchart TD
     Tool -. "tool response" .-> Trader
 
     classDef planned fill:#fff,stroke:#777,stroke-dasharray:5 5;
-    class Tool,Core,Integration,Source,Intent,Manager,Execution,LiveVenue,LiveJournal,Platform planned;
+    class Tool,Core,Integration,Source,Ready,PaperConsumer,ExecutionConsumer,PaperLedger,LiveVenue,LiveLedger,Platform planned;
     style Planned fill:#fff,stroke:#777,stroke-dasharray:5 5;
 ```
 
@@ -70,12 +71,26 @@ flowchart TD
 - Deterministic Python validates identity/citations, applies risk and cost
   policy, simulates paper entry fills and exits, updates the paper journal, and
   decides terminal outcomes. Paper exit triggers do not call the models again.
-- In live mode the harness records a durable, approved trade intent. A separate
-  deterministic manager consumes it and owns actual order submission, position
-  monitoring, restart recovery, and venue reconciliation. It has no model calls.
-  Its policy and adapter code can ship in the harness wheel, but it runs as a
-  separate process/entrypoint from ADK. The platform owns that process's
-  lifecycle; the on-demand Cloud Run Job is not an always-on manager.
+- In the target architecture, one bounded harness invocation produces
+  `trade_plan_ready` only after reviewer approval and deterministic hard-policy
+  acceptance. The event is a verified request/plan, never an order, fill, open
+  position, or completed execution. Abstentions and rejections produce no event.
+- The minimal event envelope contains version and type, stable `event_id`,
+  creation time, market and snapshot identity, outcome, stake, maximum entry
+  price, immutable ROI/time exit plan, review approval and policy/evidence
+  references, and expiry/market end. Redelivery keeps the same `event_id`.
+- Independent paper and future execution consumers deduplicate by `event_id`,
+  fetch fresh executable quotes, and own their effects, outcomes, and ledgers.
+  They never treat the proposal snapshot as the current execution price or share
+  the producer's paper journal.
+- The current implementation does not publish or subscribe to this contract:
+  `cycle` results still include an in-process simulated fill and `run` performs
+  local paper lifecycle simulation. The producer and paper consumer refactor is
+  next.
+- No always-on harness or manager process is required. CLI or future request
+  adapters invoke the same core. Transport, persistence/delivery guarantees, and
+  live order mechanisms are deferred. Any consumer/venue exit monitoring and
+  protection guarantees must be specified before live activation.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.
 
@@ -101,8 +116,9 @@ authorization.
 | Agent instructions | Guidance only; cannot authorize or enforce policy |
 | ADK session state | Working context for the current cycle |
 | Paper journal | Authoritative paper records; see [accounting](accounting.md) |
-| Live intent | Durable request for execution; never evidence that an order filled |
-| Live venue state | Authority for actual accepted orders and fills; manager reconciles it into the live ledger |
+| `trade_plan_ready` event (planned) | Verified plan/request; never evidence of an order, fill, or position |
+| Consumer ledger (planned) | Owned by that consumer; deduplicates redelivery and records its own effects/outcomes |
+| Live venue state | Authority for actual accepted orders and fills; the execution consumer reconciles it |
 | External content | Untrusted; citable only after deterministic validation |
 
 RAG, long-term memory, and context catalogs are deferred. They cannot become

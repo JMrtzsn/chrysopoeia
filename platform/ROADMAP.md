@@ -6,9 +6,8 @@ Development and live-verification gates are in
 `../harness/docs/verification.md`; deployment details are in
 `docs/deployment.md`. Paths below are relative to `platform/`.
 
-The platform consumes a released harness artifact. Ordinary work is independent;
-live trade management is coordinated with the harness contract and appears in
-both roadmaps.
+The platform consumes a released harness artifact. Future event adapters and
+consumers are coordinated with the harness contract and appear in both roadmaps.
 
 ## Complete
 
@@ -26,17 +25,14 @@ both roadmaps.
 ## Next
 
 1. Launch bounded paper `run` sessions from the Cloud Run Job once a released
-   harness artifact includes it. This job remains on-demand; it is not an HTTP
-   server or an always-on live position manager.
-2. **Live trade-manager runtime:** after the harness trade-intent and lifecycle
-   contract is approved, select and deploy a separate deterministic manager
-   runtime. It must remain available while live positions need software
-   supervision, use its own least-privilege execution identity, and durably
-   reconcile venue state. Evaluate venue-native conditional orders and latency
-   requirements before choosing an always-on Cloud Run service or another
-   runtime. Do not run the ADK proposal/review loop inside this manager. This
-   cross-work-unit architecture was operator-approved 2026-10-05; detailed
-   contract and deployment choices remain gated.
+   harness artifact includes it. The job remains request-triggered; no always-on
+   harness process is required.
+2. **GCP/other event consumer:** after the harness event producer and paper
+   consumer are implemented and transport is selected, deploy an
+   independent least-privilege consumer. Its runtime follows specified delivery,
+   quote-freshness, reconciliation, and exit-protection requirements; it is not
+   assumed to be an always-on manager. Keep each consumer's ledger separate,
+   never import harness code, and keep authenticated execution disabled.
 
 ## Deferred
 

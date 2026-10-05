@@ -14,10 +14,13 @@ Cloud.
   mounted at `/mnt/journal`; journal semantics belong to the harness.
 - The harness owns market selection, cadence, recovery, and stopping. The
   platform launches the process but does not drive cycles.
-- This job is not an HTTP server or an always-on live-position manager. Paper
-  exits are simulated only while the paper loop runs. A future live manager is a
-  separate deterministic process; platform must own its availability and
-  restart lifecycle after the harness publishes its durable-intent contract.
+- This job is not an HTTP server. Paper fills and exits are currently simulated
+  in-process only while the paper loop runs; event publishing/subscription is not
+  implemented. No always-on harness or manager is required by the target design.
+- A future HTTP/request adapter calls the same harness core as the CLI. The
+  platform remains a deployment/trigger adapter and never imports harness code.
+  Independent paper and execution consumers use the same `trade_plan_ready`
+  contract and own separate ledgers and outcomes.
 - Google API authentication uses the runner's ambient identity. Harness code
   never provisions cloud resources or invokes `gcloud`/`pulumi`.
 
@@ -52,7 +55,7 @@ measured need and explicit approval.
 | Document retrieval | Vertex AI RAG Engine | Provenance-linked evidence only |
 | Long-term lessons | Vertex AI Memory Bank | Never authoritative for balances, risk, or lifecycle |
 | Managed agent runtime | Vertex AI Agent Engine | Alternative runtime/deployment boundary |
-| Live trade-manager runtime | Cloud Run service or another continuously available worker | Select only after venue-native order behavior and required exit latency are verified |
+| Event transport/consumer runtime | Pub/Sub, HTTP, local stream, Cloud Run, or another runtime | Select only after delivery and consumer exit-protection guarantees are specified |
 | Secrets | Secret Manager | Credentials never enter prompts or session state |
 
 Any authenticated execution remains prohibited under

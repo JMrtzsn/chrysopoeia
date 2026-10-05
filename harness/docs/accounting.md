@@ -8,9 +8,9 @@ record validation and replay behavior.
 
 For paper mode, `chrysopoeia.jsonl` is the authoritative financial record. Each
 append is a versioned event; the book is derived by replay. Invalid or corrupt
-records fail closed. Agents do not read or mutate the journal. A live trade
-intent is not a live position; live order and fill state requires a separate
-deterministic manager and venue reconciliation.
+records fail closed. Agents do not read or mutate the journal. The future
+`trade_plan_ready` event is a verified plan/request, not a position or fill.
+Each consumer owns a separate ledger and reconciles its own effects.
 
 The journal records session configuration, admitted/finished turns, paper
 fills, marks, closes, settlements, loss halts, session closure, and model cost. It is
@@ -32,7 +32,8 @@ ledger.
   cannot close all shares, it stays open for the next loop iteration. Close P&L
   includes exit fees and counts toward the paper cumulative-loss halt. Partial
   paper closes are not implemented.
-- Paper exits run only while `chrysopoeia run` is active. A stop is a trigger,
+- Paper entry fills and exits are currently simulated in-process. Exits run only
+  while `chrysopoeia run` is active. A stop is a trigger,
   not a guaranteed execution price. This bounded loop must not be treated as a
   live-position monitor.
 
@@ -58,5 +59,7 @@ weaken risk limits or force trades.
 - `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
 
 Authenticated execution, non-YES positions, plan changes after entry, and
-partial paper exits are not part of the current accounting contract. Live
-execution has a separate manager/ledger contract that is not implemented here.
+partial paper exits are not part of the current accounting contract. Event
+publishing/subscription and consumer ledgers are not implemented. The planned
+paper consumer will preserve this bracket behavior but will not share this
+producer journal.

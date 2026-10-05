@@ -1,9 +1,9 @@
 # Harness Work Unit
 
-Paper-cycle core, agents, paper accounting, deterministic execution policy, and
-the host runtime adapter live here. A future live-manager entrypoint will be a
-separate process from the ADK proposal/review runtime; infrastructure and its
-availability live in sibling `platform/` as a different work unit.
+Paper-cycle core, agents, paper accounting, deterministic policy, and the host
+runtime adapter live here. The harness owns the future `trade_plan_ready` event
+contract and producer. Independent paper and execution consumers own their
+effects and ledgers; deployment and trigger adapters live in sibling `platform/`.
 Ordered harness work lives in `ROADMAP.md`.
 The current and proposed harness architecture map lives in
 `docs/architecture.md`; update it when a major boundary or flow changes.
@@ -31,9 +31,9 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   change; the platform consumes the resulting image digest pin via Pulumi.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
-- The paper journal path/record format is here; platform selects *where* it
-  lives (`/mnt/journal`), not what it contains. A live manager needs a separate
-  durable intent/event contract before deployment.
+- The current paper journal path/record format is here; platform selects *where*
+  it lives (`/mnt/journal`), not what it contains. It is not shared with future
+  event consumers. The event transport and delivery guarantees are deferred.
 
 ## Local verification gates (all from this folder, pre-commit enforced)
 

@@ -10,13 +10,14 @@ execution is not implemented.
 
 - A bounded local loop discovers public Polymarket markets, captures data,
   proposes or abstains, reviews proposals, applies deterministic risk/cost
-  gates, and records paper fills and outcomes.
+  gates, and currently records in-process paper fills and outcomes.
 - The journal records paper sessions, turns, positions, marks, exits, settlements,
-  and model cost. Live order management is a separate deterministic manager and
-  is not included in the current on-demand Cloud Run Job.
+  and model cost. The target architecture instead emits a reviewed and
+  policy-accepted `trade_plan_ready` event for independent paper or execution
+  consumers; that event boundary is not implemented yet.
 - Google Search context is currently uncitable. Paper exits are simulated by the
-  bounded local loop; citable research tools and live trade management remain
-  planned work.
+  bounded local loop; citable research tools and event consumers remain planned
+  work. No always-on harness or manager is required.
 
 ## Start locally
 
