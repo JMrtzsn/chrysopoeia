@@ -23,6 +23,7 @@ from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
+    TRADE_PLAN_READY_KEY,
     VALIDATED_EXTERNAL_EVIDENCE_KEY,
     EvidenceRecord,
     PaperCycleReportOutput,
@@ -155,6 +156,7 @@ def summarize_cycle(
     if actual > maximum:
         raise ValueError("model cost exceeded reserved ceiling")
     fill = state.get(PAPER_CYCLE_FILL_KEY)
+    event = state.get(TRADE_PLAN_READY_KEY)
     public_fill = None
     if fill is not None:
         if not isinstance(fill, Mapping):
@@ -181,6 +183,7 @@ def summarize_cycle(
         "trader_called": True,
         "reviewer_called": proposal.action == "trade",
         "fill": public_fill,
+        "event": event,
         "ledger_statuses": statuses,
         "actual_estimated_cost_usd": str(actual),
         "maximum_reserved_cost_usd": str(maximum),

@@ -9,6 +9,7 @@ from chrysopoeia.accounting import (
     JournalError,
     Position,
     admit_turn,
+    cycle_turn_id,
     finish_turn,
     open_session,
     record_fill,
@@ -67,6 +68,7 @@ def snapshot(market: str, exposure: float = 0) -> MarketSnapshot:
 def abstained(cost: str = "0.01") -> dict[str, object]:
     return {
         "status": "abstained",
+        "event": None,
         "fill": None,
         "actual_estimated_cost_usd": cost,
     }
@@ -376,6 +378,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             "shares": 10.0,
             "fee": 0.08,
             "total_cost": 4.08,
+            "levels_consumed": 1,
             "exit_plan": {
                 "take_profit_roi": 0.1,
                 "stop_loss_roi": -0.2,
@@ -383,7 +386,30 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 "hold_to_resolution": False,
             },
         }
-        result = {**abstained(), "status": "filled", "fill": fill}
+        async def filled_cycle(
+            _config: object, current: MarketSnapshot, _operating: object, **_: object
+        ) -> dict[str, object]:
+            event = {
+                "schema_version": 1,
+                "record_type": "trade_plan_ready",
+                "event_id": cycle_turn_id(current.snapshot_id, current.market_id),
+                "created_at": NOW.isoformat(),
+                "market_id": current.market_id,
+                "snapshot_id": current.snapshot_id,
+                "instrument_id": current.yes_token_id,
+                "outcome": "YES",
+                "probability": 0.46,
+                "stake": 4.0,
+                "max_entry_price": 0.41,
+                "exit_plan": fill["exit_plan"],
+                "reviewer_approved": True,
+                "reviewer_citations": ["market_snapshot"],
+                "policy_references": ["hard-policy-v1"],
+                "evidence_references": ["market_snapshot"],
+                "expires_at": (NOW + timedelta(days=1)).isoformat(),
+                "market_end": (NOW + timedelta(days=1)).isoformat(),
+            }
+            return {**abstained(), "status": "filled", "event": event, "fill": fill}
         with (
             patch(
                 "chrysopoeia.loop.discover_markets",
@@ -395,7 +421,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "chrysopoeia.cycle_runner.run_paper_cycle",
-                AsyncMock(return_value=result),
+                AsyncMock(side_effect=filled_cycle),
             ),
             patch("chrysopoeia.loop.evaluate_exits", return_value=[]),
         ):
@@ -406,7 +432,12 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 sleep=AsyncMock(),
             )
         self.assertEqual(report["trades_filled"], 2)
-        self.assertEqual(set(replay(self.journal).positions), {"1", "2"})
+        positions = replay(self.journal).positions
+        self.assertEqual(set(positions), {"1", "2"})
+        self.assertEqual(
+            positions["1"].trade_plan.event_id,
+            cycle_turn_id(snapshot("1").snapshot_id, "1"),
+        )
 
     async def test_loop_evaluates_open_brackets_before_discovering_a_new_market(self) -> None:
         open_session(

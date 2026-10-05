@@ -25,14 +25,16 @@ bounded live verification.
 
 ## Current in-process paper trade plans and exits
 
-The current simulator stores reviewer-approved entry terms, immutable exit
-brackets, and achieved paper fills separately. While `chrysopoeia run` is
+The harness emits a strict `trade_plan_ready` event after review and hard-policy
+acceptance. Its in-process paper consumer validates the event and supplied
+snapshot, then stores reviewer-approved entry terms, immutable exit brackets,
+and achieved paper fills separately. While `chrysopoeia run` is
 active, it evaluates profit, risk, time, and resolution exits against fresh,
 depth-aware executable bids and fees. It supports full closes only, leaves a
 position open when depth is insufficient, and journals closes so replay
 recovers the correct state. This is an in-process paper simulation with no
-signing or live orders. The `trade_plan_ready` event producer and independent
-paper-consumer refactor is the next milestone.
+signing or live orders. External transport and independently deployed consumers
+remain deferred.
 
 ## Research tools
 
@@ -90,8 +92,8 @@ adapter calling the same core. Event transport (Pub/Sub, HTTP, local stream, or
 other), persistence and delivery guarantees, and live order mechanisms are
 intentionally deferred. Exit monitoring/protection is consumer/venue behavior;
 its guarantees must be specified before live activation. The current cycle and
-`run` do not publish or subscribe: they simulate paper fills and brackets
-in-process until the planned producer/paper-consumer refactor.
+`run` do not publish or subscribe: the local paper consumer receives the event
+in-process.
 
 ## Later position-management details
 

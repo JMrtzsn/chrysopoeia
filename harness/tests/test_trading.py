@@ -1,9 +1,20 @@
 import math
 import unittest
+from unittest.mock import patch
 
 from chrysopoeia.agent import context_agent, reviewer_agent, root_agent, trader_agent
 from chrysopoeia.context import discover_context
-from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig, Proposal, Review, quote_exit, run_decision_cycle
+from chrysopoeia.trading import (
+    BookLevel,
+    ExitPlan,
+    MarketSnapshot,
+    OperatingConfig,
+    Proposal,
+    Review,
+    consume_trade_plan,
+    quote_exit,
+    run_decision_cycle,
+)
 
 
 class DecisionCycleTests(unittest.TestCase):
@@ -25,33 +36,98 @@ class DecisionCycleTests(unittest.TestCase):
         values.update(changes)
         return MarketSnapshot("snapshot-1", "market-1", 0.4, 1_000, 0, 0, **values)
 
-    def test_approved_proposal_produces_fill_and_report(self) -> None:
+    def test_approved_proposal_without_complete_event_terms_produces_no_fill(self) -> None:
         report = run_decision_cycle(self.snapshot, self.proposal, self.review)
 
         self.assertTrue(report.decision.allowed)
-        self.assertEqual(report.fill.amount, 10)
-        self.assertEqual(report.fill.price, 0.40)
+        self.assertIsNone(report.fill)
+        self.assertIsNone(report.event)
         self.assertIn("snapshot-1", report.summary)
         self.assertIn("market-1", report.summary)
 
-    def test_depth_and_fee_produce_exact_vwap_shares_and_total_cost(self) -> None:
+    def test_consumer_preserves_depth_and_fee_quote(self) -> None:
         snapshot = self.rich_snapshot(
             asks=(BookLevel(0.4, 10), BookLevel(0.5, 20)),
             fee_rate=0.02,
             fee_source="paper-assumption:flat-2pct-v1",
         )
 
-        report = run_decision_cycle(snapshot, Proposal("snapshot-1", "market-1", 0.56, 9), self.review)
+        proposal = Proposal(
+            "snapshot-1",
+            "market-1",
+            0.56,
+            9,
+            0.5,
+            ExitPlan(0.1, -0.2, "2026-09-01T12:00:00+00:00"),
+        )
+        review = Review("snapshot-1", "market-1", True, "supported", ("evidence-1",))
+        report = run_decision_cycle(snapshot, proposal, review)
+        fill = consume_trade_plan(report.event, snapshot)
 
         self.assertTrue(report.decision.allowed)
-        self.assertAlmostEqual(report.fill.shares, 20)
-        self.assertAlmostEqual(report.fill.price, 0.45)
-        self.assertEqual(report.fill.amount, 9)
-        self.assertEqual(report.fill.fee, 0.18)
-        self.assertEqual(report.fill.total_cost, 9.18)
-        self.assertEqual(report.fill.levels_consumed, 2)
-        for value in ("VWAP 0.45", "gross 9", "fee 0.18", "total 9.18", "shares 20"):
-            self.assertIn(value, report.summary)
+        self.assertIsNone(report.fill)
+        self.assertAlmostEqual(fill.shares, 20)
+        self.assertAlmostEqual(fill.price, 0.45)
+        self.assertEqual(fill.amount, 9)
+        self.assertEqual(fill.fee, 0.18)
+        self.assertEqual(fill.total_cost, 9.18)
+        self.assertEqual(fill.levels_consumed, 2)
+
+    def test_accepted_review_emits_stable_strict_trade_plan_without_filling(self) -> None:
+        snapshot = self.rich_snapshot(asks=(BookLevel(0.4, 100),))
+        proposal = Proposal(
+            "snapshot-1", "market-1", 0.56, 9, 0.41,
+            ExitPlan(0.1, -0.2, "2026-09-01T12:00:00+00:00"),
+        )
+        review = Review("snapshot-1", "market-1", True, "supported", ("evidence-1",))
+
+        with patch("chrysopoeia.trading.consume_trade_plan") as consume:
+            first = run_decision_cycle(snapshot, proposal, review)
+            second = run_decision_cycle(snapshot, proposal, review)
+        consume.assert_not_called()
+
+        event = first.event
+        self.assertIsNotNone(event)
+        self.assertEqual(event, second.event)
+        self.assertIsNone(first.fill)
+        self.assertIsNone(second.fill)
+        self.assertEqual(event.schema_version, 1)
+        self.assertEqual(event.record_type, "trade_plan_ready")
+        self.assertEqual(event.created_at, "2026-09-01T00:00:00+00:00")
+        self.assertEqual((event.market_id, event.snapshot_id), ("market-1", "snapshot-1"))
+        self.assertEqual((event.outcome, event.instrument_id), ("YES", "yes-token"))
+        self.assertEqual((event.probability, event.stake, event.max_entry_price), (0.56, 9, 0.41))
+        self.assertEqual(event.exit_plan, proposal.exit_plan)
+        self.assertTrue(event.reviewer_approved)
+        self.assertEqual(event.reviewer_citations, ("evidence-1",))
+        self.assertEqual(event.evidence_references, ("evidence-1",))
+        self.assertEqual(event.expires_at, snapshot.end_time)
+        self.assertFalse(hasattr(event, "review_reason"))
+
+        self.assertEqual(consume_trade_plan(event, snapshot).amount, 9)
+
+    def test_trade_plan_consumer_rejects_wrong_identity_and_unsupported_terms(self) -> None:
+        snapshot = self.rich_snapshot(asks=(BookLevel(0.4, 100),))
+        proposal = Proposal(
+            "snapshot-1", "market-1", 0.56, 9, 0.41,
+            ExitPlan(0.1, -0.2, "2026-09-01T12:00:00+00:00"),
+        )
+        review = Review(
+            "snapshot-1", "market-1", True, "supported", ("evidence-1",)
+        )
+        event = run_decision_cycle(snapshot, proposal, review).event
+        self.assertIsNotNone(event)
+
+        from dataclasses import replace
+
+        for changed, reason in (
+            (replace(event, event_id="turn-wrong"), "event identity"),
+            (replace(event, snapshot_id="other"), "identity"),
+            (replace(event, outcome="NO"), "YES"),
+            (replace(event, max_entry_price=0.39), "maximum entry"),
+        ):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
+                consume_trade_plan(changed, snapshot)
 
     def test_insufficient_depth_rejects_without_partial_fill(self) -> None:
         snapshot = self.rich_snapshot(
@@ -125,6 +201,7 @@ class DecisionCycleTests(unittest.TestCase):
                 report = run_decision_cycle(snapshot, proposal, review)
                 self.assertFalse(report.decision.allowed)
                 self.assertIsNone(report.fill)
+                self.assertIsNone(report.event)
                 self.assertIn(reason, report.decision.reason)
 
     def test_invalid_boundary_values_are_rejected(self) -> None:

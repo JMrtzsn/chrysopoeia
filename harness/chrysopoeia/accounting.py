@@ -17,7 +17,7 @@ from math import isfinite
 from pathlib import Path
 from typing import NoReturn
 
-from chrysopoeia.trading import ExitPlan
+from chrysopoeia.trading import ExitPlan, TradePlanReady, parse_trade_plan
 
 SCHEMA_VERSION = 1
 JOURNAL_NAME = "chrysopoeia.jsonl"
@@ -122,6 +122,7 @@ class Position:
     fee: float
     total_cost: float
     exit_plan: ExitPlan | None = None
+    trade_plan: TradePlanReady | None = None
 
     @property
     def fee_rate(self) -> float:
@@ -407,6 +408,15 @@ def _position_from_record(record: dict) -> Position:
             raise JournalError("invalid position exit plan") from None
     else:
         raise JournalError("invalid position exit plan")
+    raw_trade_plan = record.get("trade_plan")
+    try:
+        trade_plan = (
+            parse_trade_plan(raw_trade_plan)
+            if isinstance(raw_trade_plan, dict)
+            else None
+        )
+    except ValueError:
+        raise JournalError("invalid position trade plan") from None
     position = Position(
         market_id=record["market_id"],
         snapshot_id=record["snapshot_id"],
@@ -417,6 +427,7 @@ def _position_from_record(record: dict) -> Position:
         fee=float(record["fee"]),
         total_cost=float(record["total_cost"]),
         exit_plan=exit_plan,
+        trade_plan=trade_plan,
     )
     for name in ("price", "amount", "shares", "fee", "total_cost"):
         value = getattr(position, name)
@@ -430,6 +441,18 @@ def _position_from_record(record: dict) -> Position:
         raise JournalError("invalid position economics")
     if abs(position.amount + position.fee - position.total_cost) > 1e-9:
         raise JournalError("inconsistent fill totals")
+    if position.trade_plan is not None and (
+        position.trade_plan.market_id != position.market_id
+        or position.trade_plan.snapshot_id != position.snapshot_id
+        or position.trade_plan.stake != position.amount
+        or position.price > position.trade_plan.max_entry_price
+        or position.trade_plan.exit_plan != position.exit_plan
+        or (
+            isinstance(record.get("turn_id"), str)
+            and position.trade_plan.event_id != record["turn_id"]
+        )
+    ):
+        raise JournalError("fill does not match its trade plan")
     return position
 
 
@@ -581,6 +604,11 @@ def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
             **(
                 {"exit_plan": asdict(position.exit_plan)}
                 if position.exit_plan is not None
+                else {}
+            ),
+            **(
+                {"trade_plan": asdict(position.trade_plan)}
+                if position.trade_plan is not None
                 else {}
             ),
         },

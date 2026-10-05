@@ -1,12 +1,12 @@
+import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
-import json
 from math import isfinite
-import re
 from urllib.parse import urlparse
-
 
 MINIMUM_NET_EDGE = 0.05
 MAXIMUM_MARKET_EXPOSURE = 0.01
@@ -244,6 +244,7 @@ class Proposal:
     amount: float
     max_entry_price: float | None = None
     exit_plan: ExitPlan | None = None
+    citations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier(self.snapshot_id, "snapshot_id")
@@ -260,6 +261,8 @@ class Proposal:
                 raise ValueError("max_entry_price must be between 0 and 1")
         if self.exit_plan is not None and not isinstance(self.exit_plan, ExitPlan):
             raise ValueError("exit_plan must be a validated ExitPlan")
+        if any(not isinstance(value, str) or not value.strip() for value in self.citations):
+            raise ValueError("proposal citations must be non-empty strings")
 
 
 @dataclass(frozen=True)
@@ -268,6 +271,7 @@ class Review:
     market_id: str
     approved: bool
     reason: str
+    citations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier(self.snapshot_id, "snapshot_id")
@@ -275,6 +279,8 @@ class Review:
         if not isinstance(self.approved, bool):
             raise ValueError("review approval must be boolean")
         _identifier(self.reason, "review reason")
+        if any(not isinstance(value, str) or not value.strip() for value in self.citations):
+            raise ValueError("review citations must be non-empty strings")
 
 
 @dataclass(frozen=True)
@@ -296,6 +302,28 @@ class SimulatedFill:
 
 
 @dataclass(frozen=True)
+class TradePlanReady:
+    schema_version: int
+    record_type: str
+    event_id: str
+    created_at: str
+    market_id: str
+    snapshot_id: str
+    instrument_id: str
+    outcome: str
+    probability: float
+    stake: float
+    max_entry_price: float
+    exit_plan: ExitPlan
+    reviewer_approved: bool
+    reviewer_citations: tuple[str, ...]
+    policy_references: tuple[str, ...]
+    evidence_references: tuple[str, ...]
+    expires_at: str
+    market_end: str
+
+
+@dataclass(frozen=True)
 class ExitQuote:
     price: float
     shares: float
@@ -310,6 +338,120 @@ class CycleReport:
     decision: RiskDecision
     fill: SimulatedFill | None
     summary: str
+    event: TradePlanReady | None = None
+
+
+def _trade_plan_ready(
+    snapshot: MarketSnapshot, proposal: Proposal, review: Review
+) -> TradePlanReady:
+    if (
+        proposal.max_entry_price is None
+        or proposal.exit_plan is None
+        or not snapshot.captured_at
+        or not snapshot.end_time
+        or not snapshot.yes_token_id
+    ):
+        raise ValueError("complete event terms are required")
+    created = _offset_timestamp(snapshot.captured_at, "captured_at")
+    event_id = "turn-" + sha256(
+        json.dumps(
+            [snapshot.snapshot_id, snapshot.market_id], separators=(",", ":")
+        ).encode()
+    ).hexdigest()[:24]
+    evidence = tuple(dict.fromkeys((*proposal.citations, *review.citations)))
+    return TradePlanReady(
+        1,
+        "trade_plan_ready",
+        event_id,
+        created.astimezone(timezone.utc).isoformat(),
+        snapshot.market_id,
+        snapshot.snapshot_id,
+        snapshot.yes_token_id,
+        "YES",
+        proposal.probability,
+        proposal.amount,
+        proposal.max_entry_price,
+        proposal.exit_plan,
+        review.approved,
+        review.citations,
+        ("hard-policy-v1",),
+        evidence,
+        snapshot.end_time,
+        snapshot.end_time,
+    )
+
+
+def consume_trade_plan(
+    event: TradePlanReady, snapshot: MarketSnapshot, operating: OperatingConfig | None = None
+) -> SimulatedFill:
+    """Validate an accepted plan against a snapshot and independently simulate it."""
+    if not isinstance(event, TradePlanReady) or event.schema_version != 1 or event.record_type != "trade_plan_ready":
+        raise ValueError("unsupported trade plan event")
+    expected_event_id = "turn-" + sha256(
+        json.dumps(
+            [snapshot.snapshot_id, snapshot.market_id], separators=(",", ":")
+        ).encode()
+    ).hexdigest()[:24]
+    if event.event_id != expected_event_id:
+        raise ValueError("trade plan event identity is inconsistent")
+    if (event.snapshot_id, event.market_id, event.instrument_id) != (
+        snapshot.snapshot_id,
+        snapshot.market_id,
+        snapshot.yes_token_id,
+    ):
+        raise ValueError("trade plan snapshot identity is inconsistent")
+    if event.outcome != "YES":
+        raise ValueError("only YES trade plans are supported")
+    if (
+        event.created_at != _offset_timestamp(snapshot.captured_at, "captured_at").astimezone(timezone.utc).isoformat()
+        or event.expires_at != snapshot.end_time
+        or event.market_end != snapshot.end_time
+        or not event.reviewer_approved
+        or event.policy_references != ("hard-policy-v1",)
+        or not event.reviewer_citations
+        or not set(event.reviewer_citations) <= set(event.evidence_references)
+    ):
+        raise ValueError("trade plan terms are unsupported")
+    proposal = Proposal(
+        event.snapshot_id,
+        event.market_id,
+        event.probability,
+        event.stake,
+        event.max_entry_price,
+        event.exit_plan,
+        event.evidence_references,
+    )
+    quote = _quote(snapshot, proposal, event.max_entry_price)
+    limits = operating or OperatingConfig(bankroll=snapshot.bankroll)
+    decision = check_risk(
+        snapshot,
+        proposal,
+        Review(event.snapshot_id, event.market_id, event.reviewer_approved, "event approval"),
+        quote,
+        maximum_market_exposure=limits.maximum_market_exposure,
+        maximum_total_exposure=limits.maximum_total_exposure,
+    )
+    if not decision.allowed:
+        raise ValueError(decision.reason)
+    return quote
+
+
+def parse_trade_plan(value: Mapping[str, object]) -> TradePlanReady:
+    """Parse the strict serialized event envelope at a consumer boundary."""
+    fields = set(TradePlanReady.__dataclass_fields__)
+    if set(value) != fields or not isinstance(value.get("exit_plan"), Mapping):
+        raise ValueError("invalid trade plan event")
+    data = dict(value)
+    try:
+        data["exit_plan"] = ExitPlan(**dict(data["exit_plan"]))
+        for key in ("reviewer_citations", "policy_references", "evidence_references"):
+            raw = data[key]
+            if not isinstance(raw, (list, tuple)):
+                raise TypeError
+            data[key] = tuple(raw)
+        return TradePlanReady(**data)
+    except (TypeError, ValueError):
+        raise ValueError("invalid trade plan event") from None
 
 
 def _quote(
@@ -416,7 +558,7 @@ def run_decision_cycle(
     review: Review,
     operating: OperatingConfig | None = None,
 ) -> CycleReport:
-    """Run proposal, review, risk, paper execution, and reporting in order."""
+    """Run proposal, review, and risk policy without consuming an accepted plan."""
     quote = None
     quote_error = None
     if proposal.exit_plan is not None:
@@ -443,10 +585,10 @@ def run_decision_cycle(
         limits.maximum_market_exposure,
         limits.maximum_total_exposure,
     )
-    fill = quote if decision.allowed else None
-    outcome = (
-        f"filled VWAP {fill.price:g}, gross {fill.amount:g}, fee {fill.fee:g}, "
-        f"total {fill.total_cost:g}, shares {fill.shares:g}"
-        if fill else f"no fill: {decision.reason}"
+    event = None
+    if decision.allowed and proposal.exit_plan is not None:
+        event = _trade_plan_ready(snapshot, proposal, review)
+    outcome = "trade plan ready" if event else f"no trade plan: {decision.reason}"
+    return CycleReport(
+        decision, None, f"{snapshot.snapshot_id}/{snapshot.market_id}: {outcome}", event
     )
-    return CycleReport(decision, fill, f"{snapshot.snapshot_id}/{snapshot.market_id}: {outcome}")

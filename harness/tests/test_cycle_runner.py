@@ -203,7 +203,7 @@ class CycleRunnerTests(unittest.TestCase):
     ) -> None:
         for action, count, status in (
             ("abstain", 1, "abstained"),
-            ("trade", 2, "filled"),
+            ("trade", 2, "approved"),
         ):
             trader, reviewer, calls = self.models(action)
             summary = asyncio.run(
@@ -232,12 +232,20 @@ class CycleRunnerTests(unittest.TestCase):
                         "trader_called",
                         "reviewer_called",
                         "fill",
+                        "event",
                         "ledger_statuses",
                         "actual_estimated_cost_usd",
                         "maximum_reserved_cost_usd",
                     },
                 )
-                self.assertNotIn("probability", json.dumps(summary))
+                if action == "abstain":
+                    self.assertNotIn("probability", json.dumps(summary))
+                if action == "trade":
+                    self.assertEqual(summary["event"]["record_type"], "trade_plan_ready")
+                    self.assertEqual(summary["event"]["event_id"], "turn-acf2dcd35e81b75dc8316170")
+                    self.assertIsNone(summary["fill"])
+                else:
+                    self.assertIsNone(summary["event"])
 
     def test_one_call_budget_allows_abstention_but_not_a_second_call(self) -> None:
         budget = Decimal("0.011264")
@@ -306,7 +314,7 @@ class CycleRunnerTests(unittest.TestCase):
             state["paper_cycle_evidence"],
             [record.model_dump() for record in evidence],
         )
-        self.assertEqual(state["paper_cycle_report"]["status"], "filled")
+        self.assertEqual(state["paper_cycle_report"]["status"], "approved")
         self.assertEqual((function_calls, available_tools), ([], []))
         self.assertTrue(all(not request.config.tools for request in trader.requests))
 

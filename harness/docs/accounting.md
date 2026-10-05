@@ -9,8 +9,10 @@ record validation and replay behavior.
 For paper mode, `chrysopoeia.jsonl` is the authoritative financial record. Each
 append is a versioned event; the book is derived by replay. Invalid or corrupt
 records fail closed. Agents do not read or mutate the journal. The future
-`trade_plan_ready` event is a verified plan/request, not a position or fill.
-Each consumer owns a separate ledger and reconciles its own effects.
+`trade_plan_ready` event is a verified plan/request, not a position or fill. The
+local paper journal stores that approved plan separately from its achieved fill.
+The journal-backed local path consumes that event once and records its achieved
+fill. Future external consumers own separate ledgers and reconcile their effects.
 
 The journal records session configuration, admitted/finished turns, paper
 fills, marks, closes, settlements, loss halts, session closure, and model cost. It is
@@ -60,6 +62,6 @@ weaken risk limits or force trades.
 
 Authenticated execution, non-YES positions, plan changes after entry, and
 partial paper exits are not part of the current accounting contract. Event
-publishing/subscription and consumer ledgers are not implemented. The planned
-paper consumer will preserve this bracket behavior but will not share this
-producer journal.
+publishing/subscription and external consumer ledgers are not implemented. The
+local paper consumer preserves this bracket behavior in the current journal;
+future external consumers do not share it.

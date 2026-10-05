@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
@@ -27,6 +28,7 @@ EVIDENCE_KEY = "paper_cycle_evidence"
 VALIDATED_EXTERNAL_EVIDENCE_KEY = "validated_external_evidence"
 PAPER_CYCLE_DECISION_KEY = "paper_cycle_decision"
 PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
+TRADE_PLAN_READY_KEY = "trade_plan_ready"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
 MAX_EVIDENCE_ID_LENGTH = 200
 MAX_SNAPSHOT_ID_LENGTH = 128
@@ -449,8 +451,12 @@ def finalize_paper_cycle(
             if proposal_output.exit_plan is not None
             else None
         ),
+        citations=tuple(proposal_output.citations),
     )
-    review = Review(**review_output.model_dump(exclude={"citations"}))
+    review = Review(
+        **review_output.model_dump(exclude={"citations"}),
+        citations=tuple(review_output.citations),
+    )
     try:
         cycle = run_decision_cycle(snapshot, proposal, review, operating)
     except ValueError:
@@ -458,10 +464,15 @@ def finalize_paper_cycle(
 
     decision = asdict(cycle.decision)
     fill = asdict(cycle.fill) if cycle.fill else None
+    event = (
+        json.loads(json.dumps(asdict(cycle.event), sort_keys=True))
+        if cycle.event
+        else None
+    )
     if fill is not None and proposal_output.exit_plan is not None:
         fill["exit_plan"] = proposal_output.exit_plan.model_dump()
-    if cycle.fill:
-        status, reason = "filled", "filled"
+    if cycle.event:
+        status, reason = "approved", cycle.decision.reason
     elif not review.approved:
         status, reason = "rejected", "review_rejected"
     else:
@@ -471,5 +482,6 @@ def finalize_paper_cycle(
     ).model_dump()
     state[PAPER_CYCLE_DECISION_KEY] = decision
     state[PAPER_CYCLE_FILL_KEY] = fill
+    state[TRADE_PLAN_READY_KEY] = event
     state[PAPER_CYCLE_REPORT_KEY] = report
     return report

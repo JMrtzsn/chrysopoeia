@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from chrysopoeia import cli
+from chrysopoeia.accounting import cycle_turn_id
 from chrysopoeia.polymarket import PolymarketError
 from chrysopoeia.trading import (
     BookLevel,
@@ -740,16 +741,55 @@ class OperatorCliTests(unittest.TestCase):
             "record_type": "paper_cycle_result",
             "snapshot_id": snapshot.snapshot_id,
             "market_id": "12345",
-            "status": "filled",
+            "status": "approved",
             "reason": "approved by review and deterministic risk policy",
             "trader_called": True,
             "reviewer_called": True,
-            "fill": fill,
+            "fill": None,
+            "event": {
+                "schema_version": 1,
+                "record_type": "trade_plan_ready",
+                "event_id": cycle_turn_id(snapshot.snapshot_id, snapshot.market_id),
+                "created_at": snapshot.captured_at,
+                "market_id": snapshot.market_id,
+                "snapshot_id": snapshot.snapshot_id,
+                "instrument_id": snapshot.yes_token_id,
+                "outcome": "YES",
+                "probability": 0.46,
+                "stake": fill["amount"],
+                "max_entry_price": 0.41,
+                "exit_plan": fill["exit_plan"],
+                "reviewer_approved": True,
+                "reviewer_citations": ["market_snapshot"],
+                "policy_references": ["hard-policy-v1"],
+                "evidence_references": ["market_snapshot"],
+                "expires_at": snapshot.end_time,
+                "market_end": snapshot.end_time,
+            },
             "ledger_statuses": ["completed", "completed"],
             "actual_estimated_cost_usd": "0.000064",
             "maximum_reserved_cost_usd": "0.022528",
         }
         return snapshot, result
+
+    def test_cycle_without_journal_returns_event_without_consuming_it(self) -> None:
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with (
+                patch(
+                    "chrysopoeia.cycle_runner.run_paper_cycle",
+                    AsyncMock(return_value=result),
+                ),
+                patch("chrysopoeia.operations.consume_trade_plan") as consume,
+            ):
+                code, stdout, stderr = self.invoke("cycle", "--snapshot", str(source))
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["event"], result["event"])
+        self.assertIsNone(json.loads(stdout)["fill"])
+        consume.assert_not_called()
 
     def test_cycle_with_journal_records_fill_and_book_after(self) -> None:
         from chrysopoeia.accounting import journal_path, replay
@@ -765,6 +805,10 @@ class OperatorCliTests(unittest.TestCase):
                     "chrysopoeia.cycle_runner.run_paper_cycle",
                     AsyncMock(return_value=result),
                 ),
+                patch(
+                    "chrysopoeia.operations.consume_trade_plan",
+                    wraps=__import__("chrysopoeia.trading", fromlist=["consume_trade_plan"]).consume_trade_plan,
+                ) as consume,
                 patch("chrysopoeia.cli.polymarket_fetch"),
             ):
                 code, stdout, stderr = self.invoke(
@@ -778,17 +822,38 @@ class OperatorCliTests(unittest.TestCase):
                 )
             self.assertEqual((code, stderr), (0, ""))
             reported = json.loads(stdout)
+            consume.assert_called_once()
+            self.assertEqual(reported["event"], result["event"])
+            self.assertEqual(reported["fill"]["amount"], result["event"]["stake"])
             self.assertEqual(reported["book_after"]["open_positions"], 1)
             self.assertAlmostEqual(reported["book_after"]["open_exposure"], 4.08)
             self.assertEqual(reported["book_after"]["status"], "open")
             state = replay(journal)
             self.assertIn("12345", state.positions)
+            position = state.positions["12345"]
+            self.assertEqual(position.trade_plan.event_id, result["event"]["event_id"])
+            self.assertEqual(position.trade_plan.stake, result["event"]["stake"])
+            self.assertEqual(position.amount, reported["fill"]["amount"])
             self.assertEqual(len(state.admitted_turns), 1)
             self.assertEqual(set(state.finished_turns.values()), {"filled"})
             self.assertEqual(
                 len(journal_path(journal).read_text().splitlines()),
                 4,  # session_opened, turn_admitted, fill_recorded, turn_finished
             )
+
+            before = journal_path(journal).read_bytes()
+            with (
+                patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock()) as run,
+                patch("chrysopoeia.operations.consume_trade_plan") as consume_again,
+            ):
+                code, stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--journal", str(journal)
+                )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertEqual(json.loads(stdout), {"status": "filled"})
+            self.assertEqual(journal_path(journal).read_bytes(), before)
+            run.assert_not_called()
+            consume_again.assert_not_called()
 
     def test_cycle_with_journal_finishes_abstain_review_reject_and_risk_reject(
         self,
@@ -808,7 +873,13 @@ class OperatorCliTests(unittest.TestCase):
                 journal = Path(directory)
                 source = journal / "snapshot.json"
                 source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
-                result = {**result, "status": status, "reason": reason, "fill": None}
+                result = {
+                    **result,
+                    "status": status,
+                    "reason": reason,
+                    "fill": None,
+                    "event": None,
+                }
                 with patch(
                     "chrysopoeia.cycle_runner.run_paper_cycle",
                     AsyncMock(return_value=result),

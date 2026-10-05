@@ -1,8 +1,9 @@
 # Harness Work Unit
 
 Paper-cycle core, agents, paper accounting, deterministic policy, and the host
-runtime adapter live here. The harness owns the future `trade_plan_ready` event
-contract and producer. Independent paper and execution consumers own their
+runtime adapter live here. The harness owns the `trade_plan_ready` event contract
+and producer. The local paper consumer receives it in-process; independently
+deployed paper and execution consumers own their
 effects and ledgers; deployment and trigger adapters live in sibling `platform/`.
 Ordered harness work lives in `ROADMAP.md`.
 The current and proposed harness architecture map lives in

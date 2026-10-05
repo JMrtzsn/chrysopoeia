@@ -26,7 +26,14 @@ from chrysopoeia.polymarket import (
     load_market_resolution,
     load_market_snapshot,
 )
-from chrysopoeia.trading import ExitPlan, MarketSnapshot, OperatingConfig, quote_exit
+from chrysopoeia.trading import (
+    ExitPlan,
+    MarketSnapshot,
+    OperatingConfig,
+    consume_trade_plan,
+    parse_trade_plan,
+    quote_exit,
+)
 
 
 class JournalWorkflowError(JournalError):
@@ -58,15 +65,15 @@ async def run_journal_turn(
 
     recover_open_turns(journal)
     book = replay(journal)
+    turn_id = cycle_turn_id(snapshot.snapshot_id, snapshot.market_id)
+    prior = book.finished_turns.get(turn_id)
+    if prior is not None:
+        return {"status": prior}
     if snapshot.market_id in book.positions:
         raise JournalError(
             "market has an open journal position; settle it before restarting a cycle "
             "on the same market"
         )
-    turn_id = cycle_turn_id(snapshot.snapshot_id, snapshot.market_id)
-    prior = book.finished_turns.get(turn_id)
-    if prior is not None:
-        return {"status": prior}
     admit_turn(journal, turn_id, snapshot.snapshot_id, snapshot.market_id)
     try:
         evidence = load_evidence() if load_evidence is not None else None
@@ -75,9 +82,27 @@ async def run_journal_turn(
         raise InvalidTurnInputError("invalid turn input") from exc
     try:
         result = await run(config, snapshot, operating, evidence=evidence)
-        fill = result.get("fill")
+        event = result.get("event")
         cost = result.get("actual_estimated_cost_usd", "0")
-        if isinstance(fill, dict):
+        if isinstance(event, dict):
+            trade_plan = parse_trade_plan(event)
+            simulated = consume_trade_plan(trade_plan, snapshot, operating)
+            fill = {
+                "price": simulated.price,
+                "amount": simulated.amount,
+                "shares": simulated.shares,
+                "fee": simulated.fee,
+                "total_cost": simulated.total_cost,
+                "levels_consumed": simulated.levels_consumed,
+                "exit_plan": {
+                    "take_profit_roi": trade_plan.exit_plan.take_profit_roi,
+                    "stop_loss_roi": trade_plan.exit_plan.stop_loss_roi,
+                    "exit_by": trade_plan.exit_plan.exit_by,
+                    "hold_to_resolution": trade_plan.exit_plan.hold_to_resolution,
+                },
+            }
+            result["fill"] = fill
+            result["status"] = "filled"
             accounting.record_fill(
                 journal,
                 Position(
@@ -94,12 +119,15 @@ async def run_journal_turn(
                         if isinstance(fill.get("exit_plan"), dict)
                         else None
                     ),
+                    trade_plan=trade_plan,
                 ),
                 turn_id,
             )
             check_halt(journal, replay(journal))
             outcome = "filled"
         else:
+            if result.get("fill") is not None:
+                raise ValueError("producer result contains a fill without a trade plan event")
             status = result.get("status")
             outcome = status if status in {"abstained", "rejected"} else "failed"
         finish_turn(journal, turn_id, outcome, model_cost_usd=str(cost))

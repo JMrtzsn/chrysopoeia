@@ -35,7 +35,6 @@ from chrysopoeia.trading import (
     BookLevel,
     MarketSnapshot,
     OperatingConfig,
-    SimulatedFill,
 )
 
 SNAPSHOT_ID = "paper-eval-snapshot-1"
@@ -302,34 +301,9 @@ def grade(
             or decision != {"allowed": False, "reason": "trader_abstained"}
         ):
             raise ValueError("abstained paper-cycle decision is inconsistent")
-    elif report.status == "filled":
-        if report.reason != "filled" or decision.get("allowed") is not True:
-            raise ValueError("filled paper-cycle decision is inconsistent")
-        if not isinstance(fill, Mapping):
-            raise ValueError("filled paper cycle has no simulated fill")
-        simulated_fill = SimulatedFill(
-            **{
-                key: fill[key]
-                for key in (
-                    "snapshot_id",
-                    "market_id",
-                    "price",
-                    "amount",
-                    "shares",
-                    "fee",
-                    "total_cost",
-                    "levels_consumed",
-                )
-            }
-        )
-        if (
-            (simulated_fill.snapshot_id, simulated_fill.market_id)
-            != (SNAPSHOT_ID, MARKET_ID)
-            or simulated_fill.price != expected["market_snapshot"]["price"]
-            or simulated_fill.amount != proposal.amount
-            or fill.get("exit_plan") != proposal.exit_plan.model_dump()
-        ):
-            raise ValueError("simulated fill is inconsistent")
+    elif report.status == "approved":
+        if decision.get("allowed") is not True or fill is not None:
+            raise ValueError("approved paper-cycle decision is inconsistent")
     elif report.status == "rejected":
         if (
             report.reason not in _ALLOWED_REJECTION_REASONS

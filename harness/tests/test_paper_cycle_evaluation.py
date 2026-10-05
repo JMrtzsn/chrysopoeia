@@ -107,10 +107,10 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             calls,
         )
 
-    def test_real_runner_passes_fill_and_rejection_with_exact_cost_settlement(
+    def test_real_runner_passes_approval_and_rejection_with_exact_cost_settlement(
         self,
     ) -> None:
-        for approved, expected_status in ((True, "filled"), (False, "rejected")):
+        for approved, expected_status in ((True, "approved"), (False, "rejected")):
             trader, reviewer, calls = self.models(approved)
             initial = evaluation.setup_state()
 

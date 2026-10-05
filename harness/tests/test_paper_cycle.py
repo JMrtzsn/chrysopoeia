@@ -1,10 +1,10 @@
 import asyncio
-from collections.abc import AsyncGenerator
 import copy
-import unittest
-from dataclasses import asdict
 import json
 import math
+import unittest
+from collections.abc import AsyncGenerator
+from dataclasses import asdict
 from types import SimpleNamespace
 
 from google.adk.models import BaseLlm
@@ -20,8 +20,9 @@ from google.genai._transformers import process_schema
 from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
-    complete_paper_cycle,
+    DEFAULT_HARNESS_CONFIG,
     complete_abstention,
+    complete_paper_cycle,
     paper_cycle_workflow,
     prepare_reviewer_input,
     prepare_trader_input,
@@ -30,6 +31,7 @@ from chrysopoeia.agent import (
     route_proposal,
     trader_agent,
 )
+from chrysopoeia.cost import after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
@@ -37,18 +39,16 @@ from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
     REVIEW_KEY,
+    TRADE_PLAN_READY_KEY,
     EvidenceRecord,
-    ProposalOutput,
     ExitPlanOutput,
-    ReviewOutput,
     PaperCycleRequest,
-    finalize_paper_cycle,
+    ProposalOutput,
     ReviewerInput,
+    ReviewOutput,
+    finalize_paper_cycle,
 )
-from chrysopoeia.agent import DEFAULT_HARNESS_CONFIG
-from chrysopoeia.cost import after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
-
 
 EVIDENCE_ID = "market_snapshot:snapshot-1"
 EXIT_PLAN = {
@@ -151,7 +151,7 @@ class PaperCycleTests(unittest.TestCase):
 
         report = finalize_paper_cycle(state, ReviewOutput.model_validate(values[REVIEW_KEY]))
 
-        self.assertEqual(report["status"], "filled")
+        self.assertEqual(report["status"], "approved")
         self.assertEqual(state[PAPER_CYCLE_REPORT_KEY], report)
 
     def test_finalizer_rejects_malformed_partial_state_shape(self) -> None:
@@ -341,11 +341,11 @@ class PaperCycleTests(unittest.TestCase):
 
         report = complete_paper_cycle(SimpleNamespace(state=state), routed)
 
-        self.assertEqual(report.status, "filled")
+        self.assertEqual(report.status, "approved")
         self.assertTrue(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
         self.assertEqual(state[REVIEW_KEY], routed.model_dump())
 
-    def test_approved_state_cycle_fills_and_records_outputs(self) -> None:
+    def test_approved_state_cycle_emits_event_without_fill(self) -> None:
         state = cycle_state()
         state["model_cost_policy"] = {"version": "test"}
         state["model_cost_ledger"] = [{"status": "completed"}]
@@ -355,9 +355,13 @@ class PaperCycleTests(unittest.TestCase):
 
         report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
 
-        self.assertEqual(report["status"], "filled")
-        self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["price"], 0.4)
-        self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["amount"], 10)
+        self.assertEqual(report["status"], "approved")
+        self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
+        event = state[TRADE_PLAN_READY_KEY]
+        self.assertEqual(event["record_type"], "trade_plan_ready")
+        self.assertEqual(event["reviewer_citations"], [EVIDENCE_ID])
+        self.assertEqual(event["evidence_references"], [EVIDENCE_ID])
+        self.assertNotIn("reason", event)
         self.assertTrue(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
         self.assertEqual(state[PAPER_CYCLE_REPORT_KEY], report)
         self.assertEqual({key: state[key] for key in preserved}, preserved)
@@ -386,8 +390,8 @@ class PaperCycleTests(unittest.TestCase):
         report = complete_paper_cycle(ctx, review)
 
         self.assertEqual(order, expected_order)
-        self.assertEqual(report.status, "filled")
-        self.assertEqual(state[PAPER_CYCLE_FILL_KEY]["amount"], 10)
+        self.assertEqual(report.status, "approved")
+        self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
         self.assertEqual(state[REVIEW_KEY], review.model_dump())
 
     def test_serialized_rich_snapshot_rehydrates_and_reaches_both_agents(self) -> None:
@@ -486,9 +490,8 @@ class PaperCycleTests(unittest.TestCase):
             [(trader_agent.name, "completed", 11, 7), (reviewer_agent.name, "completed", 11, 7)],
         )
         self.assertTrue(result[PAPER_CYCLE_DECISION_KEY]["allowed"])
-        self.assertEqual(result[PAPER_CYCLE_FILL_KEY]["snapshot_id"], "snapshot-1")
-        self.assertEqual(result[PAPER_CYCLE_FILL_KEY]["market_id"], "market-1")
-        self.assertEqual(result[PAPER_CYCLE_REPORT_KEY]["status"], "filled")
+        self.assertIsNone(result[PAPER_CYCLE_FILL_KEY])
+        self.assertEqual(result[PAPER_CYCLE_REPORT_KEY]["status"], "approved")
         for key, value in authoritative.items():
             self.assertEqual(result[key], value)
 
@@ -500,6 +503,7 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(report["status"], "rejected")
         self.assertEqual(report["reason"], "review_rejected")
         self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
+        self.assertIsNone(state[TRADE_PLAN_READY_KEY])
         self.assertFalse(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
 
     def test_existing_risk_rejections_record_no_fill(self) -> None:
@@ -516,6 +520,7 @@ class PaperCycleTests(unittest.TestCase):
                 report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
                 self.assertEqual(report, {"status": "rejected", "reason": reason, "summary": state[PAPER_CYCLE_REPORT_KEY]["summary"]})
                 self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
+                self.assertIsNone(state[TRADE_PLAN_READY_KEY])
 
     def test_invalid_or_inconsistent_state_rejects_before_fill(self) -> None:
         invalid_states = []
