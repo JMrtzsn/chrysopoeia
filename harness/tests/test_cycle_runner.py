@@ -93,6 +93,13 @@ class CycleRunnerTests(unittest.TestCase):
                 "probability": 0.46 if action == "trade" else 0.4,
                 "amount": 9 if action == "trade" else 0,
                 "citations": ["market_snapshot:snapshot"] if action == "trade" else [],
+                "max_entry_price": 0.41 if action == "trade" else None,
+                "exit_plan": {
+                    "take_profit_roi": 0.1,
+                    "stop_loss_roi": -0.2,
+                    "exit_by": "2026-10-01T00:00:00+00:00",
+                    "hold_to_resolution": False,
+                } if action == "trade" else None,
             },
         )
         reviewer = FakeLlm(
@@ -136,6 +143,13 @@ class CycleRunnerTests(unittest.TestCase):
             probability=1.0,
             amount=1.0,
             citations=[str(index) * 128 for index in range(10)],
+            max_entry_price=0.5,
+            exit_plan={
+                "take_profit_roi": 0.1,
+                "stop_loss_roi": -0.2,
+                "exit_by": "2026-10-01T00:00:00+00:00",
+                "hold_to_resolution": False,
+            },
         )
 
         properties = ProposalOutput.model_json_schema()["properties"]

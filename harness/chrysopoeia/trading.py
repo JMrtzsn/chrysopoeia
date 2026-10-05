@@ -121,6 +121,7 @@ class MarketSnapshot:
     fee_rate: float = 0
     fee_source: str = "paper-assumption:no-fee-v1"
     book_captured_at: str = ""
+    bids: tuple[BookLevel, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier(self.snapshot_id, "snapshot_id")
@@ -149,6 +150,17 @@ class MarketSnapshot:
             raise ValueError("asks cannot exceed 50 levels")
         if any(left.price > right.price for left, right in zip(levels, levels[1:])):
             raise ValueError("asks must be sorted cheapest first")
+        try:
+            bids = tuple(level if isinstance(level, BookLevel) else BookLevel(**level) for level in self.bids)
+        except (TypeError, ValueError):
+            raise ValueError("bids must contain valid book levels") from None
+        object.__setattr__(self, "bids", bids)
+        if len(bids) > 50:
+            raise ValueError("bids cannot exceed 50 levels")
+        if any(left.price < right.price for left, right in zip(bids, bids[1:])):
+            raise ValueError("bids must be sorted highest first")
+        if bids and levels and bids[0].price >= levels[0].price:
+            raise ValueError("market book cannot be crossed")
         _finite(self.fee_rate, "fee_rate")
         if not 0 <= self.fee_rate < 1:
             raise ValueError("fee_rate must be a fraction between 0 and 1")
@@ -189,6 +201,7 @@ def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
             "source_url": snapshot.source_url,
             "yes_token_id": snapshot.yes_token_id,
             "asks": [(float(level.price), float(level.size)) for level in snapshot.asks],
+            "bids": [(float(level.price), float(level.size)) for level in snapshot.bids],
             "fee_rate": float(snapshot.fee_rate),
             "fee_source": snapshot.fee_source,
         },
@@ -199,11 +212,38 @@ def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
 
 
 @dataclass(frozen=True)
+class ExitPlan:
+    take_profit_roi: float
+    stop_loss_roi: float | None = None
+    exit_by: str | None = None
+    hold_to_resolution: bool = False
+
+    def __post_init__(self) -> None:
+        _finite(self.take_profit_roi, "take_profit_roi")
+        if self.take_profit_roi <= 0:
+            raise ValueError("take_profit_roi must be positive")
+        if self.stop_loss_roi is not None:
+            _finite(self.stop_loss_roi, "stop_loss_roi")
+            if not -1 <= self.stop_loss_roi < 0:
+                raise ValueError("stop_loss_roi must be between -1 and 0")
+        if not isinstance(self.hold_to_resolution, bool):
+            raise ValueError("hold_to_resolution must be boolean")
+        if self.exit_by is not None:
+            _offset_timestamp(self.exit_by, "exit_by")
+        if self.stop_loss_roi is None and not self.hold_to_resolution:
+            raise ValueError("a stop loss or hold-to-resolution choice is required")
+        if self.exit_by is None and not self.hold_to_resolution:
+            raise ValueError("exit_by or hold_to_resolution is required")
+
+
+@dataclass(frozen=True)
 class Proposal:
     snapshot_id: str
     market_id: str
     probability: float
     amount: float
+    max_entry_price: float | None = None
+    exit_plan: ExitPlan | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.snapshot_id, "snapshot_id")
@@ -214,6 +254,12 @@ class Proposal:
             raise ValueError("probability must be between 0 and 1")
         if self.amount <= 0:
             raise ValueError("proposal amount must be positive")
+        if self.max_entry_price is not None:
+            _finite(self.max_entry_price, "max_entry_price")
+            if not 0 < self.max_entry_price < 1:
+                raise ValueError("max_entry_price must be between 0 and 1")
+        if self.exit_plan is not None and not isinstance(self.exit_plan, ExitPlan):
+            raise ValueError("exit_plan must be a validated ExitPlan")
 
 
 @dataclass(frozen=True)
@@ -250,19 +296,35 @@ class SimulatedFill:
 
 
 @dataclass(frozen=True)
+class ExitQuote:
+    price: float
+    shares: float
+    gross_proceeds: float
+    fee: float
+    net_proceeds: float
+    levels_consumed: int
+
+
+@dataclass(frozen=True)
 class CycleReport:
     decision: RiskDecision
     fill: SimulatedFill | None
     summary: str
 
 
-def _quote(snapshot: MarketSnapshot, proposal: Proposal) -> SimulatedFill:
+def _quote(
+    snapshot: MarketSnapshot,
+    proposal: Proposal,
+    max_entry_price: float | None = None,
+) -> SimulatedFill:
     remaining = Decimal(str(proposal.amount))
     shares = Decimal(0)
     levels_consumed = 0
     # ponytail: six-field local snapshots keep their historical unlimited-price fill.
     levels = snapshot.asks or (BookLevel(snapshot.price, float("1e308")),)
     for level in levels:
+        if max_entry_price is not None and level.price > max_entry_price:
+            raise ValueError("maximum entry price exceeded")
         price = Decimal(str(level.price))
         spend = min(remaining, price * Decimal(str(level.size)))
         if spend:
@@ -278,6 +340,37 @@ def _quote(snapshot: MarketSnapshot, proposal: Proposal) -> SimulatedFill:
     return SimulatedFill(
         snapshot.snapshot_id, snapshot.market_id, float(gross / shares), float(gross),
         float(shares), float(fee), float(gross + fee), levels_consumed,
+    )
+
+
+def quote_exit(snapshot: MarketSnapshot, shares: float) -> ExitQuote:
+    """Quote a complete YES close against executable bid depth."""
+    _finite(shares, "shares")
+    if shares <= 0:
+        raise ValueError("shares must be positive")
+    remaining = Decimal(str(shares))
+    gross = Decimal(0)
+    levels_consumed = 0
+    for level in snapshot.bids:
+        size = Decimal(str(level.size))
+        filled = min(remaining, size)
+        if filled:
+            gross += filled * Decimal(str(level.price))
+            remaining -= filled
+            levels_consumed += 1
+        if remaining == 0:
+            break
+    if remaining:
+        raise ValueError("insufficient executable YES bid depth")
+    fee = gross * Decimal(str(snapshot.fee_rate))
+    net = gross - fee
+    return ExitQuote(
+        float(gross / Decimal(str(shares))),
+        float(Decimal(str(shares))),
+        float(gross),
+        float(fee),
+        float(net),
+        levels_consumed,
     )
 
 
@@ -303,6 +396,8 @@ def check_risk(
         quoted = quote or _quote(snapshot, proposal)
     except ValueError as exc:
         return RiskDecision(False, str(exc))
+    if proposal.max_entry_price is not None and quoted.price > proposal.max_entry_price:
+        return RiskDecision(False, "maximum entry price exceeded")
     if snapshot.market_exposure + quoted.total_cost > snapshot.bankroll * maximum_market_exposure:
         return RiskDecision(False, "per-market exposure limit exceeded")
     if snapshot.total_exposure + quoted.total_cost > snapshot.bankroll * maximum_total_exposure:
@@ -324,9 +419,18 @@ def run_decision_cycle(
     """Run proposal, review, risk, paper execution, and reporting in order."""
     quote = None
     quote_error = None
+    if proposal.exit_plan is not None:
+        if proposal.max_entry_price is None:
+            quote_error = "maximum entry price is required with an exit plan"
+        elif proposal.exit_plan.exit_by is not None:
+            exit_by = _offset_timestamp(proposal.exit_plan.exit_by, "exit_by")
+            captured = _offset_timestamp(snapshot.captured_at, "captured_at") if snapshot.captured_at else None
+            end = _offset_timestamp(snapshot.end_time, "end_time") if snapshot.end_time else None
+            if captured is None or end is None or not captured < exit_by < end:
+                quote_error = "exit_by must be after capture and before market end"
     if review.approved and proposal.probability - snapshot.price >= MINIMUM_NET_EDGE - 1e-12:
         try:
-            quote = _quote(snapshot, proposal)
+            quote = _quote(snapshot, proposal, proposal.max_entry_price)
         except ValueError as exc:
             quote_error = str(exc)
     limits = operating or OperatingConfig(bankroll=snapshot.bankroll)

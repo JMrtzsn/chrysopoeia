@@ -307,12 +307,27 @@ def grade(
             raise ValueError("filled paper-cycle decision is inconsistent")
         if not isinstance(fill, Mapping):
             raise ValueError("filled paper cycle has no simulated fill")
-        simulated_fill = SimulatedFill(**dict(fill))
+        simulated_fill = SimulatedFill(
+            **{
+                key: fill[key]
+                for key in (
+                    "snapshot_id",
+                    "market_id",
+                    "price",
+                    "amount",
+                    "shares",
+                    "fee",
+                    "total_cost",
+                    "levels_consumed",
+                )
+            }
+        )
         if (
             (simulated_fill.snapshot_id, simulated_fill.market_id)
             != (SNAPSHOT_ID, MARKET_ID)
             or simulated_fill.price != expected["market_snapshot"]["price"]
             or simulated_fill.amount != proposal.amount
+            or fill.get("exit_plan") != proposal.exit_plan.model_dump()
         ):
             raise ValueError("simulated fill is inconsistent")
     elif report.status == "rejected":

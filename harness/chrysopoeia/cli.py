@@ -7,6 +7,7 @@ import stat
 import sys
 import tempfile
 from collections.abc import Sequence
+from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -425,6 +426,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     settle_command.add_argument("--market", required=True)
     mark = commands.add_parser("mark")
     mark.add_argument("--journal", type=Path, required=True)
+    mark.add_argument("--config", type=Path)
     args = parser.parse_args(argv)
     if args.command == "mark":
         from chrysopoeia.accounting import JournalError, replay
@@ -452,10 +454,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 0
             try:
+                mark_config = load_harness_config(
+                    args.config or default_config_path()
+                )
                 marked = mark_positions(
                     args.journal,
                     tuple(journal_state.positions),
                     fetch=polymarket_fetch,
+                    paper_fee_rate=mark_config.venue.paper_fee_rate,
+                    paper_fee_source=mark_config.venue.paper_fee_source,
                     load=load_market_snapshot,
                 )
             except Exception as exc:
@@ -464,7 +471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"mark capture for market {market_id} failed"
                 ) from exc
             final = replay(args.journal)
-        except (ValueError, JournalError) as exc:
+        except (ConfigurationError, OSError, ValueError, JournalError) as exc:
             parser.exit(2, f"mark failed: {exc}\n")
         summary = {
             "schema_version": 1,
@@ -532,6 +539,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "shares": position.shares,
                 "total_cost": position.total_cost,
                 "mark_price": state.marks.get(position.market_id, position.price),
+                "exit_plan": (
+                    asdict(position.exit_plan)
+                    if position.exit_plan is not None
+                    else None
+                ),
             }
             for position in state.positions.values()
         ]
@@ -543,6 +555,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "bankroll": state.bankroll,
             "maximum_loss": state.maximum_loss,
             "realized_pnl": state.realized_pnl,
+            "settled_trades": state.settled_trades,
+            "closed_trades": state.closed_trades,
             "unrealized_pnl": state.unrealized_pnl,
             "open_exposure": state.open_exposure,
             "bankroll_now": state.bankroll_now,

@@ -39,6 +39,7 @@ from chrysopoeia.paper_cycle import (
     REVIEW_KEY,
     EvidenceRecord,
     ProposalOutput,
+    ExitPlanOutput,
     ReviewOutput,
     PaperCycleRequest,
     finalize_paper_cycle,
@@ -50,6 +51,12 @@ from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 
 EVIDENCE_ID = "market_snapshot:snapshot-1"
+EXIT_PLAN = {
+    "take_profit_roi": 0.1,
+    "stop_loss_roi": -0.2,
+    "exit_by": "2026-09-01T12:00:00+00:00",
+    "hold_to_resolution": False,
+}
 
 
 def rich_snapshot(snapshot_id: str = "snapshot-1") -> MarketSnapshot:
@@ -84,6 +91,8 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
             "action": "trade",
             "probability": 0.46,
             "amount": 10,
+            "max_entry_price": 0.41,
+            "exit_plan": EXIT_PLAN,
             "citations": [EVIDENCE_ID],
         },
         REVIEW_KEY: {
@@ -169,12 +178,27 @@ class PaperCycleTests(unittest.TestCase):
                 finalize_paper_cycle(state, review)
 
     def test_model_output_schemas_are_vertex_compatible_and_validate_actions(self) -> None:
-        for output_schema in (ProposalOutput, ReviewOutput, EvidenceRecord, ReviewerInput):
+        for output_schema in (ProposalOutput, ExitPlanOutput, ReviewOutput, EvidenceRecord, ReviewerInput):
             schema = output_schema.model_json_schema()
             process_schema(schema, None)
             with self.subTest(schema=output_schema.__name__):
                 types.Schema.model_validate(schema)
-        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0, citations=[]).action, "abstain")
+        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0, citations=[], max_entry_price=None, exit_plan=None).action, "abstain")
+        valid_trade = {
+            "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade",
+            "probability": 0.55, "amount": 10, "citations": [EVIDENCE_ID],
+            "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
+        }
+        self.assertEqual(ProposalOutput.model_validate(valid_trade).exit_plan.take_profit_roi, 0.1)
+        for changes in (
+            {"max_entry_price": 1.0},
+            {"exit_plan": {**EXIT_PLAN, "take_profit_roi": 0}},
+            {"exit_plan": {**EXIT_PLAN, "stop_loss_roi": -1.1}},
+            {"exit_plan": {**EXIT_PLAN, "stop_loss_roi": None, "hold_to_resolution": False}},
+            {"exit_plan": {**EXIT_PLAN, "exit_by": "2026-09-01"}},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                ProposalOutput.model_validate({**valid_trade, **changes})
         for action, amount in (("trade", 0), ("abstain", 1), ("invalid", 0), ("trade", math.nan), ("trade", math.inf), ("trade", True), ("trade", "1")):
             with self.subTest(action=action, amount=amount), self.assertRaises(ValidationError):
                 ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount, citations=[EVIDENCE_ID] if action == "trade" else [])
@@ -209,6 +233,7 @@ class PaperCycleTests(unittest.TestCase):
         proposal = ProposalOutput(
             snapshot_id="snapshot-1", market_id="market-1", action="trade",
             probability=0.55, amount=10, citations=[EVIDENCE_ID],
+            max_entry_price=0.41, exit_plan=EXIT_PLAN,
         )
         reviewer_input = prepare_reviewer_input(ctx, proposal)
 
@@ -236,6 +261,7 @@ class PaperCycleTests(unittest.TestCase):
         base = {
             "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade",
             "probability": 0.55, "amount": 10,
+            "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
         }
         for citations in ([], ["unknown"], [EVIDENCE_ID, EVIDENCE_ID]):
             with self.subTest(citations=citations), self.assertRaises((ValidationError, ValueError)):
@@ -253,6 +279,7 @@ class PaperCycleTests(unittest.TestCase):
             }))
         abstain = ProposalOutput.model_validate({
             **base, "action": "abstain", "amount": 0, "citations": [],
+            "max_entry_price": None, "exit_plan": None,
         })
         report = complete_abstention(SimpleNamespace(state=cycle_state()), abstain)
         self.assertEqual(report.status, "abstained")
@@ -351,7 +378,7 @@ class PaperCycleTests(unittest.TestCase):
             order.extend(paper_cycle_workflow.graph.get_next_pending_nodes(order[-1], route))
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         self.assertEqual(trader_input["market_snapshot"], state["market_snapshot"])
-        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10, citations=[EVIDENCE_ID])
+        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10, citations=[EVIDENCE_ID], max_entry_price=0.41, exit_plan=EXIT_PLAN)
         state[PROPOSAL_KEY] = proposal.model_dump()
         reviewer_input = prepare_reviewer_input(ctx, proposal)
         self.assertEqual(reviewer_input.market_snapshot, state["market_snapshot"])
@@ -384,7 +411,7 @@ class PaperCycleTests(unittest.TestCase):
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         reviewer_input = prepare_reviewer_input(
             ctx,
-            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10, citations=[EVIDENCE_ID]),
+            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10, citations=[EVIDENCE_ID], max_entry_price=0.41, exit_plan=EXIT_PLAN),
         )
 
         self.assertEqual(trader_input["market_snapshot"]["question"], "Will it rain?")
@@ -399,7 +426,7 @@ class PaperCycleTests(unittest.TestCase):
             model="gemini-flash-latest",
             agent_name=trader_agent.name,
             calls=calls,
-            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID]},
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID], "max_entry_price": 0.41, "exit_plan": EXIT_PLAN},
         )
         fake_reviewer = StructuredFakeLlm(
             model="gemini-flash-latest",
@@ -542,7 +569,7 @@ class PaperCycleTests(unittest.TestCase):
             self.assertTrue(forbidden.isdisjoint(schema.model_fields))
             with self.assertRaises(ValidationError):
                 schema.model_validate({
-                    "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.5, "amount": 1,
+                    "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.5, "amount": 1, "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
                     "approved": True, "reason": "ok", "execute": True, "citations": [EVIDENCE_ID],
                 })
         for agent in (trader_agent, reviewer_agent, root_agent):

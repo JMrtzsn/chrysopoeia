@@ -13,7 +13,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from chrysopoeia import cli
 from chrysopoeia.polymarket import PolymarketError
-from chrysopoeia.trading import BookLevel, MarketSnapshot, market_snapshot_identity
+from chrysopoeia.trading import (
+    BookLevel,
+    ExitPlan,
+    MarketSnapshot,
+    market_snapshot_identity,
+)
 
 ROOT = Path(__file__).parents[1]
 EXPECTED = {
@@ -723,6 +728,12 @@ class OperatorCliTests(unittest.TestCase):
             "fee": 0.08,
             "total_cost": 4.08,
             "levels_consumed": 1,
+            "exit_plan": {
+                "take_profit_roi": 0.1,
+                "stop_loss_roi": -0.2,
+                "exit_by": "2026-10-01T00:00:00+00:00",
+                "hold_to_resolution": False,
+            },
         }
         result = {
             "schema_version": 1,
@@ -946,6 +957,7 @@ class OperatorCliTests(unittest.TestCase):
                     shares=24.39,
                     fee=0.2,
                     total_cost=10.2,
+                    exit_plan=ExitPlan(0.1, -0.2, "2026-10-01T00:00:00+00:00"),
                 ),
                 "existing",
             )
@@ -991,6 +1003,7 @@ class OperatorCliTests(unittest.TestCase):
                 shares=20.0,
                 fee=0.2,
                 total_cost=10.2,
+                exit_plan=ExitPlan(0.1, -0.2, "2026-10-01T00:00:00+00:00"),
             )
             record_fill(journal, other, "existing")
             source = Path(directory) / "snapshot.json"

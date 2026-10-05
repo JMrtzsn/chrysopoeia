@@ -13,9 +13,9 @@
 
 This monorepo has two work units:
 
-- `harness/`: agent loop, trading/paper accounting, CLI, tests, configuration,
-  and offline gates. It produces a wheel/image and never runs `gcloud` or
-  `pulumi`.
+- `harness/`: proposal/review loop, deterministic trading and execution-manager
+  logic, paper accounting, CLI, tests, configuration, and offline gates. It
+  produces a wheel/image and never runs `gcloud` or `pulumi`.
 - `platform/`: Pulumi deployment and wheel-based container build. It consumes a
   pinned harness image and never imports the harness package.
 
@@ -37,7 +37,9 @@ and checks.
 - Prefer existing runtime features and standard-library solutions. Add an
   abstraction only for a second concrete use case.
 - Session state is not the financial ledger. The local journal is authoritative
-  for positions, fills, marks, settlements, and recorded costs.
+  for paper positions, fills, marks, settlements, and recorded costs. Live
+  intent is distinct from venue fills; the deterministic execution manager must
+  reconcile actual venue state.
 
 ## Security
 

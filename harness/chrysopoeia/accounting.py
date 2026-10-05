@@ -9,11 +9,15 @@ position.
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+from math import isfinite
 from pathlib import Path
+from typing import NoReturn
+
+from chrysopoeia.trading import ExitPlan
 
 SCHEMA_VERSION = 1
 JOURNAL_NAME = "chrysopoeia.jsonl"
@@ -24,6 +28,7 @@ EVENT_TYPES = {
     "fill_recorded",
     "mark_recorded",
     "settled",
+    "position_closed",
     "session_halted",
     "session_closed",
 }
@@ -73,7 +78,7 @@ def append_record(directory: Path, record_type: str, payload: dict) -> dict:
     return record
 
 
-def _fail_corrupt(journal: Path, line: int) -> None:
+def _fail_corrupt(journal: Path, line: int) -> NoReturn:
     raise JournalError(
         f"corrupt journal {journal} near line {line}; operator must stop or skip"
     )
@@ -116,6 +121,7 @@ class Position:
     shares: float
     fee: float
     total_cost: float
+    exit_plan: ExitPlan | None = None
 
     @property
     def fee_rate(self) -> float:
@@ -133,10 +139,12 @@ class Book:
     window_minutes: float | None = None
     realized_pnl: float = 0.0
     settled_trades: int = 0
+    closed_trades: int = 0
     winning_trades: int = 0
     model_cost_usd: Decimal = Decimal(0)
     positions: dict[str, Position] = field(default_factory=dict)
     marks: dict[str, float] = field(default_factory=dict)
+    mark_values: dict[str, float] = field(default_factory=dict)
     admitted_turns: dict[str, dict] = field(default_factory=dict)
     finished_turns: dict[str, str] = field(default_factory=dict)
     filled_turns: set[str] = field(default_factory=set)
@@ -157,7 +165,7 @@ class Book:
     @property
     def unrealized_pnl(self) -> float:
         return sum(
-            position.shares * self.marks.get(position.market_id, position.price)
+            self.mark_values.get(position.market_id, position.total_cost)
             - position.total_cost
             for position in self.positions.values()
         )
@@ -239,6 +247,8 @@ def replay(directory: Path) -> Book:
             if book.status != "open" or position.market_id in book.positions:
                 _fail_corrupt(journal, number)
             book.positions[position.market_id] = position
+            book.marks.pop(position.market_id, None)
+            book.mark_values.pop(position.market_id, None)
             if turn_id is not None:
                 book.filled_turns.add(turn_id)
         elif kind == "turn_finished":
@@ -267,6 +277,18 @@ def replay(directory: Path) -> Book:
             if not _fraction(mark):
                 _fail_corrupt(journal, number)
             book.marks[market_id] = float(mark)
+            value = record.get("mark_value")
+            if value is None:
+                book.mark_values[market_id] = book.positions[market_id].shares * float(mark)
+            elif (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+                or value < 0
+            ):
+                _fail_corrupt(journal, number)
+            else:
+                book.mark_values[market_id] = float(value)
         elif kind == "settled":
             try:
                 market_id, _resolution, pnl = _settlement_from_record(record)
@@ -279,6 +301,75 @@ def replay(directory: Path) -> Book:
             book.settled_trades += 1
             book.winning_trades += pnl > 0
             del book.positions[market_id]
+            book.marks.pop(market_id, None)
+            book.mark_values.pop(market_id, None)
+        elif kind == "position_closed":
+            market_id = record.get("market_id")
+            position = book.positions.get(market_id) if isinstance(market_id, str) else None
+            reason = record.get("reason")
+            proceeds = record.get("gross_proceeds")
+            fee = record.get("exit_fee")
+            pnl = record.get("realized_pnl")
+            shares = record.get("shares")
+            price = record.get("price")
+            triggered_at = record.get("triggered_at")
+            if (
+                position is None
+                or book.status != "open"
+                or position.exit_plan is None
+                or not isinstance(reason, str)
+                or reason not in {"take_profit", "stop_loss", "time"}
+                or not isinstance(proceeds, (int, float))
+                or isinstance(proceeds, bool)
+                or not isfinite(proceeds)
+                or proceeds <= 0
+                or not isinstance(fee, (int, float))
+                or isinstance(fee, bool)
+                or not isfinite(fee)
+                or not 0 <= fee <= proceeds
+                or not isinstance(pnl, (int, float))
+                or isinstance(pnl, bool)
+                or not isfinite(pnl)
+                or not isinstance(shares, (int, float))
+                or isinstance(shares, bool)
+                or not isfinite(shares)
+                or abs(shares - position.shares) > 1e-9
+                or not isinstance(record.get("snapshot_id"), str)
+                or not record["snapshot_id"].strip()
+                or not isinstance(triggered_at, str)
+                or not isinstance(price, (int, float))
+                or isinstance(price, bool)
+                or not isfinite(price)
+                or not 0 < price < 1
+                or abs(price * shares - proceeds) > 1e-8
+                or abs(pnl - (proceeds - fee - position.total_cost)) > 1e-9
+            ):
+                _fail_corrupt(journal, number)
+            try:
+                triggered = datetime.fromisoformat(triggered_at.replace("Z", "+00:00"))
+            except ValueError:
+                _fail_corrupt(journal, number)
+            if triggered.tzinfo is None:
+                _fail_corrupt(journal, number)
+            roi = (proceeds - fee - position.total_cost) / position.total_cost
+            plan = position.exit_plan
+            valid_trigger = (
+                (reason == "take_profit" and roi >= plan.take_profit_roi)
+                or (reason == "stop_loss" and plan.stop_loss_roi is not None and roi <= plan.stop_loss_roi)
+                or (
+                    reason == "time"
+                    and plan.exit_by is not None
+                    and triggered >= datetime.fromisoformat(plan.exit_by.replace("Z", "+00:00"))
+                )
+            )
+            if not valid_trigger:
+                _fail_corrupt(journal, number)
+            book.realized_pnl += float(pnl)
+            book.closed_trades += 1
+            book.winning_trades += pnl > 0
+            del book.positions[market_id]
+            book.marks.pop(market_id, None)
+            book.mark_values.pop(market_id, None)
         elif kind == "session_halted":
             if book.status != "open":
                 _fail_corrupt(journal, number)
@@ -306,6 +397,16 @@ def _fraction(value: object) -> bool:
 
 
 def _position_from_record(record: dict) -> Position:
+    raw_plan = record.get("exit_plan")
+    if raw_plan is None:
+        exit_plan = None
+    elif isinstance(raw_plan, dict):
+        try:
+            exit_plan = ExitPlan(**raw_plan)
+        except (TypeError, ValueError):
+            raise JournalError("invalid position exit plan") from None
+    else:
+        raise JournalError("invalid position exit plan")
     position = Position(
         market_id=record["market_id"],
         snapshot_id=record["snapshot_id"],
@@ -315,6 +416,7 @@ def _position_from_record(record: dict) -> Position:
         shares=float(record["shares"]),
         fee=float(record["fee"]),
         total_cost=float(record["total_cost"]),
+        exit_plan=exit_plan,
     )
     for name in ("price", "amount", "shares", "fee", "total_cost"):
         value = getattr(position, name)
@@ -452,6 +554,8 @@ def admit_turn(directory: Path, turn_id: str, snapshot_id: str, market_id: str) 
 
 def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
     """Persist one accepted paper fill as an open position."""
+    if position.exit_plan is None:
+        raise JournalError("a new position requires an approved exit plan")
     book = replay(directory)
     if book.status != "open":
         raise JournalError(f"session status {book.status} admits no further fills")
@@ -474,6 +578,11 @@ def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
             "shares": position.shares,
             "fee": position.fee,
             "total_cost": position.total_cost,
+            **(
+                {"exit_plan": asdict(position.exit_plan)}
+                if position.exit_plan is not None
+                else {}
+            ),
         },
     )
 
@@ -514,16 +623,33 @@ def recover_open_turns(directory: Path) -> dict[str, str]:
     return recovered
 
 
-def record_mark(directory: Path, book: Book, market_id: str, mark_price: float) -> dict:
+def record_mark(
+    directory: Path,
+    book: Book,
+    market_id: str,
+    mark_price: float,
+    mark_value: float | None = None,
+) -> dict:
     """Record a venue-captured mark for one open position."""
     if market_id not in book.positions:
         raise JournalError(f"no open position for market {market_id}")
     if not _fraction(mark_price):
         raise ValueError("mark_price must be a fraction between 0 and 1")
+    if mark_value is not None and (
+        not isinstance(mark_value, (int, float))
+        or isinstance(mark_value, bool)
+        or not isfinite(mark_value)
+        or mark_value < 0
+    ):
+        raise ValueError("mark_value must be finite and non-negative")
     return append_record(
         directory,
         "mark_recorded",
-        {"market_id": market_id, "mark_price": mark_price},
+        {
+            "market_id": market_id,
+            "mark_price": mark_price,
+            **({"mark_value": mark_value} if mark_value is not None else {}),
+        },
     )
 
 
@@ -546,6 +672,68 @@ def settle(directory: Path, book: Book, market_id: str, resolution: str) -> dict
             "resolution": resolution,
             "realized_pnl": pnl,
             "snapshot_id": position.snapshot_id,
+        },
+    )
+
+
+def close_position(
+    directory: Path,
+    market_id: str,
+    reason: str,
+    snapshot_id: str,
+    price: float,
+    gross_proceeds: float,
+    exit_fee: float,
+    triggered_at: str,
+) -> dict:
+    """Journal a full paper close at a depth-aware quote."""
+    _clean(market_id, "market_id")
+    book = replay(directory)
+    position = book.positions.get(market_id)
+    if position is None or book.status != "open":
+        raise JournalError(f"no open position for market {market_id}")
+    if position.exit_plan is None:
+        raise JournalError(f"position for market {market_id} has no exit plan")
+    _clean(snapshot_id, "snapshot_id")
+    _clean(triggered_at, "triggered_at")
+    if reason not in {"take_profit", "stop_loss", "time"}:
+        raise ValueError("unknown position close reason")
+    for value, name in ((price, "price"), (gross_proceeds, "gross_proceeds"), (exit_fee, "exit_fee")):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
+            raise ValueError(f"{name} must be finite")
+    if not 0 < price < 1 or gross_proceeds <= 0 or not 0 <= exit_fee <= gross_proceeds:
+        raise ValueError("invalid close quote")
+    try:
+        triggered = datetime.fromisoformat(triggered_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("triggered_at must include a UTC offset") from None
+    if triggered.tzinfo is None:
+        raise ValueError("triggered_at must include a UTC offset")
+    roi = (gross_proceeds - exit_fee - position.total_cost) / position.total_cost
+    plan = position.exit_plan
+    if not (
+        (reason == "take_profit" and roi >= plan.take_profit_roi)
+        or (reason == "stop_loss" and plan.stop_loss_roi is not None and roi <= plan.stop_loss_roi)
+        or (
+            reason == "time"
+            and plan.exit_by is not None
+            and triggered >= datetime.fromisoformat(plan.exit_by.replace("Z", "+00:00"))
+        )
+    ):
+        raise JournalError("close does not match the approved exit plan")
+    return append_record(
+        directory,
+        "position_closed",
+        {
+            "market_id": market_id,
+            "snapshot_id": snapshot_id,
+            "reason": reason,
+            "triggered_at": triggered_at,
+            "price": price,
+            "shares": position.shares,
+            "gross_proceeds": gross_proceeds,
+            "exit_fee": exit_fee,
+            "realized_pnl": gross_proceeds - exit_fee - position.total_cost,
         },
     )
 

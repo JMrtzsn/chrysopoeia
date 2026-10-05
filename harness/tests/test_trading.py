@@ -3,7 +3,7 @@ import unittest
 
 from chrysopoeia.agent import context_agent, reviewer_agent, root_agent, trader_agent
 from chrysopoeia.context import discover_context
-from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig, Proposal, Review, run_decision_cycle
+from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig, Proposal, Review, quote_exit, run_decision_cycle
 
 
 class DecisionCycleTests(unittest.TestCase):
@@ -63,6 +63,43 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertFalse(report.decision.allowed)
         self.assertIsNone(report.fill)
         self.assertIn("insufficient executable YES depth", report.decision.reason)
+
+    def test_exit_quote_walks_bid_depth_and_subtracts_fees(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 10),),
+            bids=(BookLevel(0.3, 4), BookLevel(0.2, 10)),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+
+        quote = quote_exit(snapshot, 10)
+
+        self.assertAlmostEqual(quote.price, 0.24)
+        self.assertAlmostEqual(quote.gross_proceeds, 2.4)
+        self.assertAlmostEqual(quote.fee, 0.048)
+        self.assertAlmostEqual(quote.net_proceeds, 2.352)
+        self.assertEqual(quote.levels_consumed, 2)
+        with self.assertRaisesRegex(ValueError, "insufficient executable YES bid depth"):
+            quote_exit(snapshot, 15)
+
+    def test_maximum_entry_price_rejects_an_over_limit_vwap(self) -> None:
+        proposal = Proposal("snapshot-1", "market-1", 0.46, 10, max_entry_price=0.39)
+
+        report = run_decision_cycle(self.snapshot, proposal, self.review)
+
+        self.assertFalse(report.decision.allowed)
+        self.assertIn("maximum entry price", report.decision.reason)
+
+    def test_maximum_entry_price_rejects_any_consumed_ask_above_limit(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 10), BookLevel(0.5, 20)),
+        )
+        proposal = Proposal("snapshot-1", "market-1", 0.56, 9, max_entry_price=0.45)
+
+        report = run_decision_cycle(snapshot, proposal, self.review)
+
+        self.assertFalse(report.decision.allowed)
+        self.assertIn("maximum entry price", report.decision.reason)
 
     def test_risk_limits_include_fee_at_the_boundary(self) -> None:
         snapshot = self.rich_snapshot(

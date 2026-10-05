@@ -11,10 +11,12 @@ execution is not implemented.
 - A bounded local loop discovers public Polymarket markets, captures data,
   proposes or abstains, reviews proposals, applies deterministic risk/cost
   gates, and records paper fills and outcomes.
-- The journal records sessions, turns, positions, marks, settlements, and model
-  cost.
-- Current Google Search context is uncitable; citable research tools are the
-  next harness milestone.
+- The journal records paper sessions, turns, positions, marks, exits, settlements,
+  and model cost. Live order management is a separate deterministic manager and
+  is not included in the current on-demand Cloud Run Job.
+- Google Search context is currently uncitable. Paper exits are simulated by the
+  bounded local loop; citable research tools and live trade management remain
+  planned work.
 
 ## Start locally
 

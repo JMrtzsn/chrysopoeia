@@ -83,6 +83,13 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     "probability": 0.46,
                     "amount": 9,
                     "citations": [evaluation.EVIDENCE_ID],
+                    "max_entry_price": 0.41,
+                    "exit_plan": {
+                        "take_profit_roi": 0.1,
+                        "stop_loss_roi": -0.2,
+                        "exit_by": "2026-10-01T00:00:00+00:00",
+                        "hold_to_resolution": False,
+                    },
                 },
             ),
             FakeLlm(
@@ -140,6 +147,8 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "probability": 0.4,
             "amount": 0,
             "citations": [],
+            "max_entry_price": None,
+            "exit_plan": None,
         }
 
         state, function_calls, available_tools = asyncio.run(
@@ -182,6 +191,8 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "probability": 0.4,
             "amount": 0,
             "citations": [],
+            "max_entry_price": None,
+            "exit_plan": None,
         }
 
         asyncio.run(
@@ -209,6 +220,8 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 "probability": 0.4,
                 "amount": 0,
                 "citations": [],
+                "max_entry_price": None,
+                "exit_plan": None,
             },
             close_failure=cleanup,
         )

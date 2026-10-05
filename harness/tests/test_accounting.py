@@ -14,6 +14,7 @@ from chrysopoeia.accounting import (
     Position,
     admit_turn,
     check_halt,
+    close_position,
     close_session,
     finish_turn,
     journal_path,
@@ -24,9 +25,10 @@ from chrysopoeia.accounting import (
     replay,
     settle,
 )
+from chrysopoeia.trading import ExitPlan
 
 
-def _position(market_id: str = "m1", **overrides: float) -> Position:
+def _position(market_id: str = "m1", **overrides: object) -> Position:
     values: dict[str, object] = {
         "snapshot_id": "snap-1",
         "price": 0.4,
@@ -34,6 +36,11 @@ def _position(market_id: str = "m1", **overrides: float) -> Position:
         "shares": 25.0,
         "fee": 0.2,
         "total_cost": 10.2,
+        "exit_plan": ExitPlan(
+            take_profit_roi=0.1,
+            stop_loss_roi=-0.2,
+            exit_by="2026-09-16T00:00:00+00:00",
+        ),
     }
     values |= overrides
     return Position(
@@ -300,6 +307,43 @@ class AccountingTests(unittest.TestCase):
         _record_fill(self.directory, _position())
         settle(self.directory, replay(self.directory), "m1", "resolved_no")
         self.assertAlmostEqual(replay(self.directory).realized_pnl, -10.2)
+
+    def test_full_close_is_durable_and_cannot_repeat_or_follow_settlement(self) -> None:
+        self.book()
+        _record_fill(self.directory, _position())
+
+        close_position(self.directory, "m1", "take_profit", "exit-snapshot", 0.5, 12.5, 0.25, "2026-09-15T12:00:00+00:00")
+        closed = replay(self.directory)
+
+        self.assertNotIn("m1", closed.positions)
+        self.assertAlmostEqual(closed.realized_pnl, 2.05)
+        self.assertEqual(
+            (closed.settled_trades, closed.closed_trades, closed.winning_trades),
+            (0, 1, 1),
+        )
+        with self.assertRaises(JournalError):
+            close_position(self.directory, "m1", "take_profit", "exit-snapshot", 0.5, 12.5, 0.25, "2026-09-15T12:00:00+00:00")
+        with self.assertRaises(JournalError):
+            settle(self.directory, closed, "m1", "resolved_yes")
+
+    def test_close_cannot_claim_a_trigger_that_the_approved_plan_did_not_reach(self) -> None:
+        self.book()
+        _record_fill(self.directory, _position())
+        before = len(journal_path(self.directory).read_text().splitlines())
+
+        with self.assertRaisesRegex(JournalError, "does not match"):
+            close_position(
+                self.directory,
+                "m1",
+                "stop_loss",
+                "exit-snapshot",
+                0.5,
+                12.5,
+                0.25,
+                "2026-09-15T12:00:00+00:00",
+            )
+
+        self.assertEqual(len(journal_path(self.directory).read_text().splitlines()), before)
 
     def test_cumulative_loss_crossing_the_budget_halts_the_session(self) -> None:
         self.book()

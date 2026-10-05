@@ -10,6 +10,7 @@ from chrysopoeia.accounting import (
     Position,
     admit_turn,
     check_halt,
+    close_position,
     cycle_turn_id,
     finish_turn,
     record_mark,
@@ -25,7 +26,7 @@ from chrysopoeia.polymarket import (
     load_market_resolution,
     load_market_snapshot,
 )
-from chrysopoeia.trading import MarketSnapshot, OperatingConfig
+from chrysopoeia.trading import ExitPlan, MarketSnapshot, OperatingConfig, quote_exit
 
 
 class JournalWorkflowError(JournalError):
@@ -88,6 +89,11 @@ async def run_journal_turn(
                     shares=fill["shares"],
                     fee=fill["fee"],
                     total_cost=fill["total_cost"],
+                    exit_plan=(
+                        ExitPlan(**fill["exit_plan"])
+                        if isinstance(fill.get("exit_plan"), dict)
+                        else None
+                    ),
                 ),
                 turn_id,
             )
@@ -124,6 +130,8 @@ def mark_positions(
     market_ids: Iterable[str],
     *,
     fetch: Fetch,
+    paper_fee_rate: float,
+    paper_fee_source: str,
     load: Callable[..., MarketSnapshot] = load_market_snapshot,
 ) -> list[dict[str, object]]:
     """Capture and journal current prices for the selected open positions."""
@@ -139,19 +147,100 @@ def mark_positions(
             position.total_cost,
             book.open_exposure,
             fetch=fetch,
-            paper_fee_rate=0.0,
-            paper_fee_source="paper-assumption:no-fee-v1",
+            paper_fee_rate=paper_fee_rate,
+            paper_fee_source=paper_fee_source,
         )
-        record_mark(journal, replay(journal), market_id, fresh.price)
+        quote = quote_exit(fresh, position.shares)
+        record_mark(
+            journal,
+            replay(journal),
+            market_id,
+            quote.price,
+            quote.net_proceeds,
+        )
         marked.append(
             {
                 "market_id": market_id,
                 "entry_price": position.price,
-                "mark_price": fresh.price,
+                "mark_price": quote.price,
+                "mark_value": quote.net_proceeds,
                 "mark_captured_at": fresh.captured_at,
             }
         )
     return marked
+
+
+def evaluate_exits(
+    journal: Path,
+    market_ids: Iterable[str],
+    *,
+    now: datetime,
+    fetch: Fetch,
+    paper_fee_rate: float,
+    paper_fee_source: str,
+    load: Callable[..., MarketSnapshot] = load_market_snapshot,
+) -> list[dict[str, object]]:
+    """Mark positions and execute triggered full closes from one fresh quote each."""
+    if now.tzinfo is None:
+        raise ValueError("exit evaluation time must include a UTC offset")
+    evaluated = []
+    current = now.astimezone(timezone.utc)
+    for market_id in market_ids:
+        book = replay(journal)
+        position = book.positions.get(market_id)
+        if position is None:
+            continue
+        fresh = load(
+            market_id,
+            book.bankroll,
+            position.total_cost,
+            book.open_exposure,
+            now=current,
+            fetch=fetch,
+            paper_fee_rate=paper_fee_rate,
+            paper_fee_source=paper_fee_source,
+        )
+        quote = quote_exit(fresh, position.shares)
+        record_mark(
+            journal,
+            replay(journal),
+            market_id,
+            quote.price,
+            quote.net_proceeds,
+        )
+        plan = position.exit_plan
+        reason = None
+        if plan is not None:
+            roi = (quote.net_proceeds - position.total_cost) / position.total_cost
+            if plan.exit_by is not None and current >= datetime.fromisoformat(
+                plan.exit_by.replace("Z", "+00:00")
+            ):
+                reason = "time"
+            elif plan.stop_loss_roi is not None and roi <= plan.stop_loss_roi:
+                reason = "stop_loss"
+            elif roi >= plan.take_profit_roi:
+                reason = "take_profit"
+        if reason is not None:
+            close_position(
+                journal,
+                market_id,
+                reason,
+                fresh.snapshot_id,
+                quote.price,
+                quote.gross_proceeds,
+                quote.fee,
+                current.isoformat(),
+            )
+            check_halt(journal, replay(journal))
+        evaluated.append(
+            {
+                "market_id": market_id,
+                "mark_price": quote.price,
+                "net_proceeds": quote.net_proceeds,
+                "exit_reason": reason,
+            }
+        )
+    return evaluated
 
 
 def settle_positions(

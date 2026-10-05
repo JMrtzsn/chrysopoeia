@@ -473,8 +473,14 @@ def load_market_snapshot(
         _levels(book.get("asks"), "asks", required=True),
         key=lambda level: level.price,
     )[:MAX_BOOK_LEVELS])
-    bids = _levels(book.get("bids", []), "bids", required=False)
-    if bids and max(level.price for level in bids) >= asks[0].price:
+    bids = tuple(
+        sorted(
+            _levels(book.get("bids", []), "bids", required=False),
+            key=lambda level: level.price,
+            reverse=True,
+        )[:MAX_BOOK_LEVELS]
+    )
+    if bids and bids[0].price >= asks[0].price:
         raise PolymarketError("Polymarket adapter book is crossed")
     price = asks[0].price
 
@@ -484,13 +490,14 @@ def load_market_snapshot(
             market_id, price, bankroll, market_exposure, total_exposure,
             question, rules, end.isoformat(), current_utc.isoformat(), source_url,
             yes_token, asks, paper_fee_rate, paper_fee_source, book_time.isoformat(),
+            bids,
         )
         if snapshot_id is None:
             snapshot = MarketSnapshot(
                 market_snapshot_identity(snapshot), market_id, price, bankroll,
                 market_exposure, total_exposure, question, rules, end.isoformat(),
                 current_utc.isoformat(), source_url, yes_token, asks, paper_fee_rate,
-                paper_fee_source, book_time.isoformat(),
+                paper_fee_source, book_time.isoformat(), bids,
             )
         return snapshot
     except ValueError as exc:

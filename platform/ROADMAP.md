@@ -6,8 +6,9 @@ Development and live-verification gates are in
 `../harness/docs/verification.md`; deployment details are in
 `docs/deployment.md`. Paths below are relative to `platform/`.
 
-The only coupling between the harness and platform flows is a released harness
-artifact (wheel/image version). Neither roadmap depends on the other's tasks.
+The platform consumes a released harness artifact. Ordinary work is independent;
+live trade management is coordinated with the harness contract and appears in
+both roadmaps.
 
 ## Complete
 
@@ -24,8 +25,18 @@ artifact (wheel/image version). Neither roadmap depends on the other's tasks.
 
 ## Next
 
-1. Launch the harness loop entrypoint from the Cloud Run job once a released
-   harness artifact includes it. The platform adds no loop or scheduler.
+1. Launch bounded paper `run` sessions from the Cloud Run Job once a released
+   harness artifact includes it. This job remains on-demand; it is not an HTTP
+   server or an always-on live position manager.
+2. **Live trade-manager runtime:** after the harness trade-intent and lifecycle
+   contract is approved, select and deploy a separate deterministic manager
+   runtime. It must remain available while live positions need software
+   supervision, use its own least-privilege execution identity, and durably
+   reconcile venue state. Evaluate venue-native conditional orders and latency
+   requirements before choosing an always-on Cloud Run service or another
+   runtime. Do not run the ADK proposal/review loop inside this manager. This
+   cross-work-unit architecture was operator-approved 2026-10-05; detailed
+   contract and deployment choices remain gated.
 
 ## Deferred
 

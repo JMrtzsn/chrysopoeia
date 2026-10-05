@@ -1,8 +1,9 @@
 # Platform Work Unit
 
 GCP deployment: container image build/publish, Pulumi base (bucket, runner
-identity, Artifact Registry, Cloud Run job), and digest pinning. The sibling
-`harness/` folder is a separate work unit — application loop code lives there.
+identity, Artifact Registry, on-demand Cloud Run job), and digest pinning. The
+sibling `harness/` folder is a separate work unit — agent and deterministic
+manager code live there. Platform owns deployment/runtime lifecycle for each.
 Ordered platform work lives in `ROADMAP.md`.
 
 ## Owned
@@ -23,8 +24,12 @@ Ordered platform work lives in `ROADMAP.md`.
 - Pinned image digest: `pulumi config set image_digest <name@sha256:...>`
   (never `:latest` on a live stack; `:latest` is only a build-tag alias).
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
-  `job_args` Pulumi config. The platform launches the selected harness
-  entrypoint; loop ownership remains in the harness.
+  `job_args` Pulumi config for the current on-demand job. The harness owns
+  bounded proposal cycles; platform does not drive them.
+- A future live-manager entrypoint runs separately from the proposal/review
+  runtime. The platform owns its availability, identity, health, and restart
+  lifecycle; deterministic manager code and venue adapters ship in the harness
+  wheel. The manager process has no ADK/model dependency.
 - Journal durability: the volume-mounted bucket behaves as `/mnt/journal`;
   record semantics belong to the harness, not here.
 

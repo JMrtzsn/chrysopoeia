@@ -168,6 +168,7 @@ def summarize_cycle(
                 "fee",
                 "total_cost",
                 "levels_consumed",
+                "exit_plan",
             )
         }
     return {

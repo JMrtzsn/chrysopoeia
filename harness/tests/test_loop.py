@@ -19,7 +19,12 @@ from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.cycle_runner import reserved_ceiling
 from chrysopoeia.loop import LoopParams, StopFlag, run_loop
 from chrysopoeia.polymarket import MarketCandidate, PolymarketError
-from chrysopoeia.trading import BookLevel, MarketSnapshot, market_snapshot_identity
+from chrysopoeia.trading import (
+    BookLevel,
+    ExitPlan,
+    MarketSnapshot,
+    market_snapshot_identity,
+)
 
 ROOT = Path(__file__).parents[1]
 NOW = datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
@@ -234,7 +239,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         admit_turn(self.journal, "old", "snap", "9")
         record_fill(
             self.journal,
-            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2),
+            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
             "old",
         )
         finish_turn(self.journal, "old", "filled")
@@ -273,7 +278,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         admit_turn(self.journal, "old", "snap", "9")
         record_fill(
             self.journal,
-            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2),
+            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
             "old",
         )
         finish_turn(self.journal, "old", "filled")
@@ -371,6 +376,12 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             "shares": 10.0,
             "fee": 0.08,
             "total_cost": 4.08,
+            "exit_plan": {
+                "take_profit_roi": 0.1,
+                "stop_loss_roi": -0.2,
+                "exit_by": "2026-10-01T00:00:00+00:00",
+                "hold_to_resolution": False,
+            },
         }
         result = {**abstained(), "status": "filled", "fill": fill}
         with (
@@ -386,6 +397,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 "chrysopoeia.cycle_runner.run_paper_cycle",
                 AsyncMock(return_value=result),
             ),
+            patch("chrysopoeia.loop.evaluate_exits", return_value=[]),
         ):
             report, _ = await run_loop(
                 self.params(max_cycles=2),
@@ -395,6 +407,39 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(report["trades_filled"], 2)
         self.assertEqual(set(replay(self.journal).positions), {"1", "2"})
+
+    async def test_loop_evaluates_open_brackets_before_discovering_a_new_market(self) -> None:
+        open_session(
+            self.journal,
+            1_000,
+            100,
+            target_win_rate=0.6,
+            window_end=NOW + timedelta(minutes=10),
+            window_minutes=10,
+        )
+        admit_turn(self.journal, "old", "snap", "9")
+        record_fill(
+            self.journal,
+            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
+            "old",
+        )
+        finish_turn(self.journal, "old", "filled")
+        with (
+            patch("chrysopoeia.loop.settle_positions", return_value=[]),
+            patch("chrysopoeia.loop.evaluate_exits", return_value=[]) as exits,
+            patch("chrysopoeia.loop.discover_markets", return_value=(candidate("1"),)),
+            patch("chrysopoeia.loop.load_market_snapshot", return_value=snapshot("1")),
+            patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=abstained())),
+        ):
+            await run_loop(
+                self.params(max_cycles=2),
+                self.config,
+                now=lambda: NOW,
+                sleep=AsyncMock(),
+            )
+
+        exits.assert_called_once()
+        self.assertEqual(exits.call_args.args[1], ("9",))
 
     async def test_per_turn_failure_is_finalized_and_does_not_crash_loop(self) -> None:
         with (

@@ -3,8 +3,8 @@
 `.agents-cli-spec.md` defines product scope and acceptance. This roadmap orders
 approved harness work only. Paths are relative to `harness/` unless noted.
 Verification policy and harness evidence are in `docs/verification.md`.
-The platform consumes a released harness artifact; the roadmaps are otherwise
-independent.
+The platform consumes a released harness artifact. Live trade management is a
+coordinated harness/platform work item recorded in both roadmaps.
 
 ## Complete
 
@@ -31,18 +31,26 @@ The recorded commands and evidence for harness milestones are in
 
 1. **Paper trade plans and exits:** add an entry/exit-plan contract to opening
    proposals; persist it with the position; evaluate profit, risk, and
-   time/resolution exits from fresh public quotes; journal closes and recovery.
-   No authenticated orders.
-2. **Polymarket live execution foundation:** verify the official Python SDK and
-   supported EOA flow; implement the isolated execution boundary, structural
-   limits, preflight, durable intent/reconciliation, and kill switch. Keep live
-   mode disabled until all spec gates pass.
-3. **Bounded live activation:** only after gates pass, run separately approved
+   time/resolution exits from fresh public quotes; journal simulated closes and
+   recovery. This local simulator is not the live position manager. No
+   authenticated orders.
+2. **Trade-intent and manager contract:** define the durable approved-intent
+   handoff, event ledger, idempotency/recovery rules, venue reconciliation, and
+   required manager availability. The agent/harness creates approved plans; a
+   separate deterministic process manages actual orders and positions. Platform
+   deployment is ordered in `../platform/ROADMAP.md`. Operator-approved
+   architecture direction, 2026-10-05; implementation remains gated on this
+   agreed contract.
+3. **Polymarket live execution foundation:** verify the official Python SDK and
+   supported EOA/order flow; implement the isolated manager execution boundary,
+   structural limits, preflight, durable intent/reconciliation, and kill switch.
+   Keep live mode disabled until all spec gates pass.
+4. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
-   wallet, locally.
-4. **Citable research tools:** bounded providers normalized into provenance-
+   wallet through the separately deployed deterministic manager.
+5. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-5. **Additional venues and NO-side positions:** separate milestones after the
+6. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path is verified.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved

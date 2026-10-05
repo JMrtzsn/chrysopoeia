@@ -6,27 +6,35 @@ record validation and replay behavior.
 
 ## Authority
 
-`chrysopoeia.jsonl` is the authoritative financial record. Each append is a
-versioned event; the book is derived by replay. Invalid or corrupt records fail
-closed. Agents do not read or mutate the journal.
+For paper mode, `chrysopoeia.jsonl` is the authoritative financial record. Each
+append is a versioned event; the book is derived by replay. Invalid or corrupt
+records fail closed. Agents do not read or mutate the journal. A live trade
+intent is not a live position; live order and fill state requires a separate
+deterministic manager and venue reconciliation.
 
 The journal records session configuration, admitted/finished turns, paper
-fills, marks, settlements, loss halts, session closure, and model cost. It is
+fills, marks, closes, settlements, loss halts, session closure, and model cost. It is
 local to the operator-selected directory; there is no multi-user or distributed
 ledger.
 
 ## Positions and outcomes
 
-- A fill opens one YES position per market. It records entry snapshot, time,
-  price, amount, shares, fee, and total cost.
-- Public venue captures supply marks for unrealized P&L; a failed capture adds
-  no mark.
+- A fill opens one YES position per market. It records the entry snapshot, time,
+  actual fill terms, and the entry-approved exit plan. Proposed limits are kept
+  separate from achieved fill terms.
+- Public venue captures supply bid-depth, fee-adjusted liquidation marks for
+  unrealized P&L; a failed or insufficient-depth capture adds no mark.
 - Only an unambiguous venue resolution settles a position. YES resolution pays
   shares less the fee; NO resolution loses total cost. Unresolved or ambiguous
   markets are not settled.
-- Settlement that crosses the configured cumulative-loss limit halts further
-  turns. Closing or partially reducing positions before resolution is not
-  implemented.
+- The paper simulator can close the entire position against fresh executable
+  bids when an approved take-profit, stop-loss, or time trigger fires. If depth
+  cannot close all shares, it stays open for the next loop iteration. Close P&L
+  includes exit fees and counts toward the paper cumulative-loss halt. Partial
+  paper closes are not implemented.
+- Paper exits run only while `chrysopoeia run` is active. A stop is a trigger,
+  not a guaranteed execution price. This bounded loop must not be treated as a
+  live-position monitor.
 
 ## Turns and sessions
 
@@ -37,8 +45,8 @@ an open position cannot be admitted for another trade.
 
 The bounded `run` session persists bankroll, loss limit, target win rate, and
 window. It stops at the configured deadline, cycle/cost limit, stop request, or
-loss halt, and reports settled win rate and net P&L. The target does not weaken
-risk limits or force trades.
+loss halt, and reports completed-trade win rate and net P&L. The target does not
+weaken risk limits or force trades.
 
 ## Commands
 
@@ -49,5 +57,6 @@ risk limits or force trades.
 - `chrysopoeia cycle --journal DIR ...` admits one turn and records its outcome.
 - `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
 
-Authenticated execution, non-YES positions, and pre-resolution exits are not
-part of the current accounting contract.
+Authenticated execution, non-YES positions, plan changes after entry, and
+partial paper exits are not part of the current accounting contract. Live
+execution has a separate manager/ledger contract that is not implemented here.

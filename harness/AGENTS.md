@@ -1,8 +1,9 @@
 # Harness Work Unit
 
-Loop internals: paper-cycle core, agents, accounting, CLI, and the host
-runtime adapter. This is application code — infrastructure lives in the
-sibling `platform/` folder and is a different work unit.
+Paper-cycle core, agents, paper accounting, deterministic execution policy, and
+the host runtime adapter live here. A future live-manager entrypoint will be a
+separate process from the ADK proposal/review runtime; infrastructure and its
+availability live in sibling `platform/` as a different work unit.
 Ordered harness work lives in `ROADMAP.md`.
 The current and proposed harness architecture map lives in
 `docs/architecture.md`; update it when a major boundary or flow changes.
@@ -30,8 +31,9 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   change; the platform consumes the resulting image digest pin via Pulumi.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
-- Journal path/record format is here; the platform only selects *where* it
-  lives (`/mnt/journal`), not what it contains.
+- The paper journal path/record format is here; platform selects *where* it
+  lives (`/mnt/journal`), not what it contains. A live manager needs a separate
+  durable intent/event contract before deployment.
 
 ## Local verification gates (all from this folder, pre-commit enforced)
 

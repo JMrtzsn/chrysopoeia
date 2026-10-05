@@ -16,6 +16,7 @@ from chrysopoeia.accounting import (
     record_fill,
     replay,
 )
+from chrysopoeia.trading import BookLevel, ExitPlan
 
 
 def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
@@ -32,6 +33,7 @@ def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
             shares=24_000.0,
             fee=2.4,
             total_cost=122.4,
+            exit_plan=ExitPlan(0.1, -0.2, "2026-09-16T00:00:00+00:00"),
         ),
         "turn-1",
     )
@@ -39,9 +41,13 @@ def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
 
 
 def capture_stub(price: float, captured_at: str):
-    record = Mock()
-    record.price = price
-    record.captured_at = captured_at
+    record = Mock(
+        price=price,
+        captured_at=captured_at,
+        snapshot_id="fresh-snapshot",
+        bids=(BookLevel(price, 30_000),),
+        fee_rate=0.02,
+    )
     return Mock(return_value=record)
 
 
@@ -74,7 +80,7 @@ class MarkCliTests(unittest.TestCase):
         self.assertEqual(report["record_type"], "book_mark_report")
         self.assertEqual(report["marked"][0]["entry_price"], 0.005)
         self.assertEqual(report["marked"][0]["mark_price"], 0.02)
-        self.assertAlmostEqual(report["unrealized_pnl"], 24_000.0 * 0.02 - 122.4)
+        self.assertAlmostEqual(report["unrealized_pnl"], 24_000.0 * 0.02 * 0.98 - 122.4)
         self.assertEqual(
             len(journal_path(self.journal).read_text().splitlines()),
             5,  # session, admission, fill, turn finish, mark

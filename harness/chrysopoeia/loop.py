@@ -6,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from chrysopoeia.accounting import Book, open_session, replay
+from chrysopoeia.accounting import Book, check_halt, open_session, replay
 from chrysopoeia.configuration import HarnessConfig
 from chrysopoeia.cycle_runner import reserved_ceiling
-from chrysopoeia.operations import mark_positions, run_journal_turn, settle_positions
+from chrysopoeia.operations import evaluate_exits, run_journal_turn, settle_positions
 from chrysopoeia.polymarket import Fetch, _fetch, discover_markets, load_market_snapshot
 from chrysopoeia.trading import OperatingConfig
 
@@ -59,15 +59,15 @@ def _stop_reason(
 def _report(book: Book, reason: str, cycles: int) -> dict[str, object]:
     if book.target_win_rate is None:
         raise ValueError("loop session target win rate is missing")
-    win_rate = (
-        book.winning_trades / book.settled_trades if book.settled_trades else None
-    )
+    completed_trades = book.settled_trades + book.closed_trades
+    win_rate = book.winning_trades / completed_trades if completed_trades else None
     model_cost = float(book.model_cost_usd)
     return {
         "stop_reason": reason,
         "cycles_run": cycles,
         "trades_filled": len(book.filled_turns),
         "settled_trades": book.settled_trades,
+        "closed_trades": book.closed_trades,
         "winning_trades": book.winning_trades,
         "win_rate": win_rate,
         "target_win_rate": book.target_win_rate,
@@ -113,6 +113,8 @@ async def run_loop(
     cycles = len(book.admitted_turns)
     while True:
         book = replay(params.journal)
+        check_halt(params.journal, book)
+        book = replay(params.journal)
         reason = _stop_reason(params, book, now(), window_end, cycles)
         if (
             reason is None
@@ -137,9 +139,16 @@ async def run_loop(
             return _report(book, "halted", cycles), iterations
         for market_id in tuple(book.positions):
             try:
-                mark_positions(params.journal, (market_id,), fetch=fetch)
+                evaluate_exits(
+                    params.journal,
+                    (market_id,),
+                    now=now(),
+                    fetch=fetch,
+                    paper_fee_rate=config.venue.paper_fee_rate,
+                    paper_fee_source=config.venue.paper_fee_source,
+                )
             except Exception:
-                errors.append(f"mark unavailable: {market_id}")
+                errors.append(f"exit quote unavailable: {market_id}")
         book = replay(params.journal)
         try:
             candidates = discover_markets(limit=20, now=now(), fetch=fetch)

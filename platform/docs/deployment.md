@@ -14,6 +14,10 @@ Cloud.
   mounted at `/mnt/journal`; journal semantics belong to the harness.
 - The harness owns market selection, cadence, recovery, and stopping. The
   platform launches the process but does not drive cycles.
+- This job is not an HTTP server or an always-on live-position manager. Paper
+  exits are simulated only while the paper loop runs. A future live manager is a
+  separate deterministic process; platform must own its availability and
+  restart lifecycle after the harness publishes its durable-intent contract.
 - Google API authentication uses the runner's ambient identity. Harness code
   never provisions cloud resources or invokes `gcloud`/`pulumi`.
 
@@ -48,6 +52,7 @@ measured need and explicit approval.
 | Document retrieval | Vertex AI RAG Engine | Provenance-linked evidence only |
 | Long-term lessons | Vertex AI Memory Bank | Never authoritative for balances, risk, or lifecycle |
 | Managed agent runtime | Vertex AI Agent Engine | Alternative runtime/deployment boundary |
+| Live trade-manager runtime | Cloud Run service or another continuously available worker | Select only after venue-native order behavior and required exit latency are verified |
 | Secrets | Secret Manager | Credentials never enter prompts or session state |
 
 Any authenticated execution remains prohibited under

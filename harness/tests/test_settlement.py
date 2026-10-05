@@ -17,6 +17,7 @@ from chrysopoeia.accounting import (
     replay,
 )
 from chrysopoeia.polymarket import PolymarketError, load_market_resolution
+from chrysopoeia.trading import ExitPlan
 
 
 def gamma_response(**overrides: object) -> dict[str, object]:
@@ -112,6 +113,7 @@ def open_filled_journal(journal: Path, market_id: str = "559651") -> None:
             shares=24_000.0,
             fee=2.4,
             total_cost=122.4,
+            exit_plan=ExitPlan(0.1, -0.2, "2026-09-16T00:00:00+00:00"),
         ),
         "turn-1",
     )

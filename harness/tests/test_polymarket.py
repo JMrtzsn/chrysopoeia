@@ -84,6 +84,7 @@ class PolymarketAdapterTests(unittest.TestCase):
         self.assertEqual(snapshot.source_url, "https://polymarket.com/event/will-it-rain")
         self.assertEqual(snapshot.yes_token_id, "yes-token")
         self.assertEqual([(level.price, level.size) for level in snapshot.asks], [(0.42, 20), (0.44, 10)])
+        self.assertEqual([(level.price, level.size) for level in snapshot.bids], [(0.4, 5)])
         self.assertGreater(snapshot.fee_rate, 0)
         self.assertEqual(snapshot.fee_source, "paper-assumption:flat-2pct-v1")
 
@@ -131,6 +132,13 @@ class PolymarketAdapterTests(unittest.TestCase):
             "12345", 1_000, 0, 0, now=NOW, fetch=changed_metadata_fetch, **FEE
         )
         self.assertNotEqual(baseline.snapshot_id, changed_depth.snapshot_id)
+        changed_book["asks"][0]["size"] = "20"
+        changed_book["bids"][0]["size"] = "6"
+        changed_bid_fetch = lambda url, *_: json.dumps(changed_book).encode() if "clob" in url else market()
+        changed_bid = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW, fetch=changed_bid_fetch, **FEE
+        )
+        self.assertNotEqual(baseline.snapshot_id, changed_bid.snapshot_id)
         self.assertNotEqual(baseline.snapshot_id, changed_metadata.snapshot_id)
 
     def test_identifier_uses_market_slug_when_event_slug_is_absent(self) -> None:

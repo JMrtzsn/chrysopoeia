@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from chrysopoeia.trading import (
+    ExitPlan,
     MarketSnapshot,
     OperatingConfig,
     Proposal,
@@ -216,6 +217,8 @@ class ProposalOutput(StrictOutput):
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
     amount: float = Field(strict=True)
     citations: list[CitationId] = Field(max_length=10)
+    max_entry_price: float | None = Field(default=None, ge=0, le=1, strict=True)
+    exit_plan: "ExitPlanOutput | None" = None
 
     _unique_citations = field_validator("citations")(_validate_unique_citations)
 
@@ -227,9 +230,50 @@ class ProposalOutput(StrictOutput):
             raise ValueError("trade amount must be positive")
         if self.action == "trade" and not self.citations:
             raise ValueError("trade requires a citation")
+        if self.action == "trade":
+            if self.max_entry_price is None or self.exit_plan is None:
+                raise ValueError("trade requires a maximum entry price and exit plan")
+            if not 0 < self.max_entry_price < 1:
+                raise ValueError("max_entry_price must be between 0 and 1")
         if self.action == "abstain" and self.amount != 0:
             raise ValueError("abstain amount must be zero")
+        if self.action == "abstain" and (
+            self.max_entry_price is not None or self.exit_plan is not None
+        ):
+            raise ValueError("abstention cannot include trade terms")
         return self
+
+
+class ExitPlanOutput(StrictOutput):
+    take_profit_roi: float = Field(ge=0, strict=True)
+    stop_loss_roi: float | None = Field(default=None, ge=-1, le=0, strict=True)
+    exit_by: str | None = Field(
+        default=None, max_length=MAX_RETRIEVED_AT_LENGTH, strict=True
+    )
+    hold_to_resolution: bool = Field(default=False, strict=True)
+
+    @field_validator("exit_by")
+    @classmethod
+    def validate_exit_by(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except (AttributeError, ValueError):
+                raise ValueError("exit_by must be an RFC3339 timestamp") from None
+            if parsed.tzinfo is None or len(value) > MAX_RETRIEVED_AT_LENGTH:
+                raise ValueError("exit_by must be an RFC3339 timestamp")
+        return value
+
+    @model_validator(mode="after")
+    def validate_exit_choice(self) -> "ExitPlanOutput":
+        try:
+            ExitPlan(**self.model_dump())
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        return self
+
+
+ProposalOutput.model_rebuild()
 
 
 class ReviewOutput(StrictOutput):
@@ -394,7 +438,18 @@ def finalize_paper_cycle(
     ):
         raise ValueError("paper cycle snapshot identity is inconsistent")
     state[REVIEW_KEY] = review_output.model_dump()
-    proposal = Proposal(**proposal_output.model_dump(exclude={"action", "citations"}))
+    proposal = Proposal(
+        snapshot_id=proposal_output.snapshot_id,
+        market_id=proposal_output.market_id,
+        probability=proposal_output.probability,
+        amount=proposal_output.amount,
+        max_entry_price=proposal_output.max_entry_price,
+        exit_plan=(
+            ExitPlan(**proposal_output.exit_plan.model_dump())
+            if proposal_output.exit_plan is not None
+            else None
+        ),
+    )
     review = Review(**review_output.model_dump(exclude={"citations"}))
     try:
         cycle = run_decision_cycle(snapshot, proposal, review, operating)
@@ -403,6 +458,8 @@ def finalize_paper_cycle(
 
     decision = asdict(cycle.decision)
     fill = asdict(cycle.fill) if cycle.fill else None
+    if fill is not None and proposal_output.exit_plan is not None:
+        fill["exit_plan"] = proposal_output.exit_plan.model_dump()
     if cycle.fill:
         status, reason = "filled", "filled"
     elif not review.approved:
