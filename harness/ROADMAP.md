@@ -25,9 +25,15 @@ endpoint configured separately from the platform compute region.
 - Bounded `chrysopoeia run`: harness-selected markets, persisted session limits,
   max-cycle/cost/loss/deadline/stop controls, recovery, and target win-rate/net
   P&L report. Live verified 2026-09-30.
-- Reviewer-approved entry/exit plans and the in-process paper bracket simulator:
-  fresh executable bids, full closes, journal recovery, and resolution handling.
-  This remains current paper behavior, not an event consumer.
+- Reviewer-approved entry/exit plans and the in-process paper bracket simulator
+  (`d944289`): fresh executable bids, full closes, journal recovery, and
+  resolution handling. Live verified 2026-10-05.
+- The `trade_plan_ready` event producer and idempotent in-process paper consumer
+  (`690d8f9`): `cycle` returns the reviewed, policy-accepted event; `run`
+  consumes it locally while preserving bracket behavior.
+- The bounded trader-tool loop (`292b762`): deterministic market discovery,
+  snapshot retrieval, and trade-plan checks with fail-closed limits. Live
+  verified with the checked-in Vertex model 2026-10-06.
 - One bounded live paper cycle through a non-Gemini provider (OpenRouter via ADK
   registry). Live verified 2026-09-27.
 
@@ -36,30 +42,33 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-The bounded trader-tool loop is implemented but remains in this section until
-offline verification, bounded live verification, and commit evidence exist.
-
-1. **Trade-plan event producer and paper consumer:** make CLI invocation, and any
-   future request adapter through the same core, produce `trade_plan_ready` only
-   after review approval and hard-policy acceptance. Refactor paper simulation
-   to consume that contract with event-ID deduplication and its own ledger while
-   preserving current bracket behavior. Do not select transport yet.
-2. **GCP/other event consumer:** after transport and delivery guarantees are
-   selected, deploy an independent consumer adapter. Specify quote freshness,
+1. **Standalone local paper consumer:** add a local CLI that reads an existing
+   `trade_plan_ready` JSON event, obtains a fresh public quote, rechecks the plan,
+   and writes the local paper journal idempotently. It must require no platform,
+   GCP, Pub/Sub, or always-on service.
+2. **OpenRouter tool-loop verification:** the `adk-registry`/LiteLLM adapter is
+   supported and had a bounded one-call smoke on 2026-09-27, but the checked-in
+   default is Vertex and the bounded trader-tool loop has not been verified with
+   an OpenRouter model. Select the OpenRouter model ID and matching explicit
+   prices, then run a bounded verification with `OPENROUTER_API_KEY` supplied
+   only through the ambient environment; never request or record its value.
+3. **Optional external event transport and GCP/other consumers:** only after the
+   standalone local consumer, select transport and delivery guarantees and, if
+   needed, deploy an independent consumer adapter. Specify quote freshness,
    idempotency, ledger ownership, recovery, and exit monitoring/protection before
    any live activation. Platform work is ordered in `../platform/ROADMAP.md`.
-3. **Polymarket live execution foundation:** verify the official Python SDK and
+4. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch in the consumer. Keep live mode
    disabled until all spec gates pass.
-4. **Bounded live activation:** only after gates pass, run separately approved
+5. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
    wallet through the independently deployed event consumer.
-5. **Citable research tools:** bounded providers normalized into provenance-
+6. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-6. **Additional venues and NO-side positions:** separate milestones after the
+7. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path is verified.
-7. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+8. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

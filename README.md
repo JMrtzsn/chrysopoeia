@@ -12,15 +12,20 @@ execution is not implemented.
   proposes or abstains, reviews proposals, applies deterministic risk/cost
   gates, and currently records in-process paper fills and outcomes.
 - The journal records paper sessions, turns, positions, marks, exits, settlements,
-  and model cost. The target architecture instead emits a reviewed and
-  policy-accepted `trade_plan_ready` event for independent paper or execution
-  consumers; that event boundary is not implemented yet.
+  and model cost. `cycle` returns a reviewed and policy-accepted
+  `trade_plan_ready` JSON event; `run` currently simulates its paper consumption
+  locally and in-process. A standalone local paper-consumer CLI is the next step.
 - Google Search context is currently uncitable. Paper exits are simulated by the
   bounded local loop; citable research tools and event consumers remain planned
   work. No always-on harness or manager is required.
 - The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
   priced at $1.65 input and $9.90 text output per million tokens. The model
   endpoint is separate from the Cloud Run resource region.
+- OpenRouter is opt-in through an alternate `--config` with
+  `models.adapter = "adk-registry"`, OpenRouter model IDs, and matching explicit
+  prices. Supply its API key only through the shell `OPENROUTER_API_KEY`; never
+  put it in config. The checked-in default remains Vertex and does not
+  auto-select OpenRouter merely because that environment variable exists.
 
 ## Start locally
 
