@@ -123,6 +123,7 @@ class Position:
     total_cost: float
     exit_plan: ExitPlan | None = None
     trade_plan: TradePlanReady | None = None
+    quote_snapshot_id: str | None = None
 
     @property
     def fee_rate(self) -> float:
@@ -428,6 +429,7 @@ def _position_from_record(record: dict) -> Position:
         total_cost=float(record["total_cost"]),
         exit_plan=exit_plan,
         trade_plan=trade_plan,
+        quote_snapshot_id=record.get("quote_snapshot_id"),
     )
     for name in ("price", "amount", "shares", "fee", "total_cost"):
         value = getattr(position, name)
@@ -453,6 +455,11 @@ def _position_from_record(record: dict) -> Position:
         )
     ):
         raise JournalError("fill does not match its trade plan")
+    if position.quote_snapshot_id is not None and (
+        not isinstance(position.quote_snapshot_id, str)
+        or not position.quote_snapshot_id.strip()
+    ):
+        raise JournalError("invalid quote snapshot identity")
     return position
 
 
@@ -609,6 +616,11 @@ def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
             **(
                 {"trade_plan": asdict(position.trade_plan)}
                 if position.trade_plan is not None
+                else {}
+            ),
+            **(
+                {"quote_snapshot_id": position.quote_snapshot_id}
+                if position.quote_snapshot_id is not None
                 else {}
             ),
         },

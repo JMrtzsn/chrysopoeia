@@ -8,6 +8,7 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import asdict
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -433,7 +434,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     mark = commands.add_parser("mark")
     mark.add_argument("--journal", type=Path, required=True)
     mark.add_argument("--config", type=Path)
+    consume = commands.add_parser("consume")
+    consume.add_argument("--event", type=Path, required=True)
+    consume.add_argument("--journal", type=Path, required=True)
+    consume.add_argument("--config", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "consume":
+        from chrysopoeia.accounting import JournalError, replay
+        from chrysopoeia.operations import consume_paper_event
+        from chrysopoeia.trading import parse_trade_plan
+
+        try:
+            event = parse_trade_plan(_bounded_json(args.event, "invalid event"))
+        except (TypeError, ValueError):
+            parser.exit(2, "consume failed: invalid event\n")
+        try:
+            consume_config = load_harness_config(args.config or default_config_path())
+        except (ConfigurationError, OSError, TypeError, ValueError):
+            parser.exit(2, "consume failed: invalid configuration\n")
+        try:
+            state = replay(args.journal)
+            result = consume_paper_event(
+                args.journal,
+                event,
+                OperatingConfig(
+                    bankroll=state.bankroll or 1,
+                    maximum_loss=state.maximum_loss or 1,
+                ),
+                now=datetime.now(timezone.utc),
+                fetch=polymarket_fetch,
+                paper_fee_rate=consume_config.venue.paper_fee_rate,
+                paper_fee_source=consume_config.venue.paper_fee_source,
+                load=load_market_snapshot,
+            )
+        except JournalError as exc:
+            parser.exit(2, f"consume failed: {exc}\n")
+        except (TypeError, ValueError) as exc:
+            parser.exit(2, f"consume failed: {exc}\n")
+        except Exception:
+            parser.exit(2, "consume failed: market data unavailable\n")
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return 0
     if args.command == "mark":
         from chrysopoeia.accounting import JournalError, replay
         from chrysopoeia.operations import mark_positions
@@ -540,6 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "market_id": position.market_id,
                 "snapshot_id": position.snapshot_id,
+                "quote_snapshot_id": position.quote_snapshot_id,
                 "entered_at": position.entered_at,
                 "price": position.price,
                 "shares": position.shares,

@@ -21,9 +21,11 @@ ledger.
 
 ## Positions and outcomes
 
-- A fill opens one YES position per market. It records the entry snapshot, time,
-  actual fill terms, and the entry-approved exit plan. Proposed limits are kept
-  separate from achieved fill terms.
+- A fill opens one YES position per market. It records the original plan
+  `snapshot_id`, the separate fresh `quote_snapshot_id`, time, actual fill terms,
+  and the entry-approved exit plan. Proposed identity and limits remain intact
+  and separate from achieved fill provenance and terms. Older journal fills
+  without `quote_snapshot_id` remain valid.
 - Public venue captures supply bid-depth, fee-adjusted liquidation marks for
   unrealized P&L; a failed or insufficient-depth capture adds no mark.
 - Only an unambiguous venue resolution settles a position. YES resolution pays
@@ -58,6 +60,11 @@ weaken risk limits or force trades.
 - `chrysopoeia settle --journal DIR --market MARKET` settles from venue
   resolution.
 - `chrysopoeia cycle --journal DIR ...` admits one turn and records its outcome.
+- `chrysopoeia consume --event EVENT.json --journal DIR` consumes one strict,
+  bounded `trade_plan_ready` file into an existing open session. It deduplicates
+  completed event IDs before public I/O, obtains a fresh public Polymarket quote,
+  and records either one paper fill or a deterministic rejection. Quote failures
+  occur before admission, leave no fill, and are retryable.
 - `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
 
 Authenticated execution, non-YES positions, plan changes after entry, and

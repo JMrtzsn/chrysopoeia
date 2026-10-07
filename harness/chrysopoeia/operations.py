@@ -30,9 +30,12 @@ from chrysopoeia.trading import (
     ExitPlan,
     MarketSnapshot,
     OperatingConfig,
+    TradePlanReady,
     consume_trade_plan,
     parse_trade_plan,
     quote_exit,
+    recheck_trade_plan,
+    validate_trade_plan,
 )
 
 
@@ -42,6 +45,96 @@ class JournalWorkflowError(JournalError):
 
 class InvalidTurnInputError(ValueError):
     """An admitted turn received invalid local input."""
+
+
+def consume_paper_event(
+    journal: Path,
+    event: TradePlanReady,
+    operating: OperatingConfig,
+    *,
+    now: datetime,
+    fetch: Fetch,
+    paper_fee_rate: float,
+    paper_fee_source: str,
+    load: Callable[..., MarketSnapshot] = load_market_snapshot,
+) -> dict[str, object]:
+    """Consume one trade-plan event into an existing local paper session."""
+    book = replay(journal)
+    if check_halt(journal, book) is not None:
+        raise JournalError("paper consumer requires an existing open session")
+    if book.status != "open":
+        raise JournalError("paper consumer requires an existing open session")
+    prior = book.finished_turns.get(event.event_id)
+    if prior is not None:
+        return {"status": prior}
+    recover_open_turns(journal)
+    book = replay(journal)
+    prior = book.finished_turns.get(event.event_id)
+    if prior is not None:
+        return {"status": prior}
+    if event.market_id in book.positions:
+        raise JournalError("market has an open journal position")
+    try:
+        validate_trade_plan(event, now=now)
+    except (TypeError, ValueError) as exc:
+        admit_turn(journal, event.event_id, event.snapshot_id, event.market_id)
+        finish_turn(journal, event.event_id, "rejected")
+        return {"status": "rejected", "reason": str(exc)}
+    fresh = load(
+        event.market_id,
+        book.bankroll,
+        0,
+        book.open_exposure,
+        now=now,
+        fetch=fetch,
+        paper_fee_rate=paper_fee_rate,
+        paper_fee_source=paper_fee_source,
+    )
+    limits = OperatingConfig(
+        book.bankroll,
+        operating.trader_agents,
+        operating.maximum_market_exposure,
+        operating.maximum_total_exposure,
+        book.maximum_loss,
+        operating.daily_cloud_cost_budget,
+    )
+    admit_turn(journal, event.event_id, event.snapshot_id, event.market_id)
+    try:
+        fill = recheck_trade_plan(event, fresh, limits, now=now)
+    except (TypeError, ValueError) as exc:
+        finish_turn(journal, event.event_id, "rejected")
+        return {"status": "rejected", "reason": str(exc)}
+    accounting.record_fill(
+        journal,
+        Position(
+            event.market_id,
+            event.snapshot_id,
+            now.astimezone(timezone.utc).isoformat(),
+            fill.price,
+            fill.amount,
+            fill.shares,
+            fill.fee,
+            fill.total_cost,
+            event.exit_plan,
+            event,
+            fresh.snapshot_id,
+        ),
+        event.event_id,
+    )
+    finish_turn(journal, event.event_id, "filled")
+    return {
+        "status": "filled",
+        "event_id": event.event_id,
+        "fill": {
+            "price": fill.price,
+            "amount": fill.amount,
+            "shares": fill.shares,
+            "fee": fill.fee,
+            "total_cost": fill.total_cost,
+            "levels_consumed": fill.levels_consumed,
+            "quote_snapshot_id": fresh.snapshot_id,
+        },
+    }
 
 
 async def run_journal_turn(

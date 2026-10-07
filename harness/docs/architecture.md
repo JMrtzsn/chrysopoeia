@@ -21,7 +21,7 @@ flowchart TD
     State -->|same validated evidence| Reviewer
     Reviewer --> Policy["Deterministic policy<br/>review, edge, exposure, depth, fees"]
     Policy -->|allowed| Ready["trade_plan_ready<br/>verified plan, not a fill"]
-    Ready --> PaperConsumer["In-process paper consumer"]
+    Ready --> PaperConsumer["In-process or standalone local paper consumer"]
     PaperConsumer --> Quote["Independent depth/fee quote and paper simulation"]
     Policy -->|blocked| Outcome
     Quote --> Journal[("Local journal<br/>turns, positions, marks, closes, settlement, cost")]
@@ -80,11 +80,15 @@ flowchart TD
   creation time, market and snapshot identity, outcome, stake, maximum entry
   price, immutable ROI/time exit plan, review approval and policy/evidence
   references, and expiry/market end. Redelivery keeps the same `event_id`.
-- The local paper consumer and future execution consumers deduplicate by `event_id`,
+- The standalone `consume` command reads one bounded strict JSON event and
+  requires an existing open local journal session. The local paper consumer and
+  future execution consumers deduplicate by `event_id`,
   fetch fresh executable quotes, and own their effects, outcomes, and ledgers.
-  They keep plan and achieved fill terms separate. The local paper consumer uses
-  the supplied captured snapshot in-process; future external consumers must fetch
-  a fresh quote and own separate ledgers.
+  They keep plan and achieved fill terms separate. The in-process path uses its
+  supplied capture; the standalone local path fetches a fresh public quote and
+  records its `quote_snapshot_id` without changing the original plan
+  `snapshot_id`. Future external consumers must fetch fresh quotes and own
+  separate ledgers.
 - A producer-only `cycle` returns the serialized JSON event with no fill. The
   journal-backed local `run`/`cycle` path passes that event once to the in-process
   paper consumer, then returns and stores the event separately from its achieved

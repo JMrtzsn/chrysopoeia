@@ -436,6 +436,81 @@ def consume_trade_plan(
     return quote
 
 
+def recheck_trade_plan(
+    event: TradePlanReady,
+    snapshot: MarketSnapshot,
+    operating: OperatingConfig,
+    *,
+    now: datetime,
+) -> SimulatedFill:
+    """Recheck an original accepted plan against a distinct fresh quote snapshot."""
+    validate_trade_plan(event, now=now)
+    market_end = _offset_timestamp(event.market_end, "market_end")
+    fresh_end = _offset_timestamp(snapshot.end_time, "end_time")
+    if snapshot.market_id != event.market_id:
+        raise ValueError("fresh market identity does not match the trade plan")
+    if snapshot.yes_token_id != event.instrument_id or event.outcome != "YES":
+        raise ValueError("fresh YES instrument identity does not match the trade plan")
+    if fresh_end != market_end:
+        raise ValueError("fresh market terms do not match the trade plan")
+    proposal = Proposal(
+        snapshot.snapshot_id,
+        snapshot.market_id,
+        event.probability,
+        event.stake,
+        event.max_entry_price,
+        event.exit_plan,
+        event.evidence_references,
+    )
+    quote = _quote(snapshot, proposal, event.max_entry_price)
+    decision = check_risk(
+        snapshot,
+        proposal,
+        Review(snapshot.snapshot_id, snapshot.market_id, True, "event approval"),
+        quote,
+        maximum_market_exposure=operating.maximum_market_exposure,
+        maximum_total_exposure=operating.maximum_total_exposure,
+    )
+    if not decision.allowed:
+        raise ValueError(decision.reason)
+    return quote
+
+
+def validate_trade_plan(event: TradePlanReady, *, now: datetime) -> None:
+    """Validate plan identity and immutable terms without requiring market data."""
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise ValueError("consumer current time must include a UTC offset")
+    if not isinstance(event, TradePlanReady):
+        raise ValueError("unsupported trade plan event")
+    expected_event_id = "turn-" + sha256(
+        json.dumps([event.snapshot_id, event.market_id], separators=(",", ":")).encode()
+    ).hexdigest()[:24]
+    if event.event_id != expected_event_id:
+        raise ValueError("trade plan event identity is inconsistent")
+    if event.schema_version != 1 or event.record_type != "trade_plan_ready":
+        raise ValueError("unsupported trade plan event")
+    current = now.astimezone(timezone.utc)
+    created = _offset_timestamp(event.created_at, "created_at")
+    expires = _offset_timestamp(event.expires_at, "expires_at")
+    market_end = _offset_timestamp(event.market_end, "market_end")
+    if current >= expires or current >= market_end:
+        raise ValueError("trade plan is expired")
+    if not created < expires or expires != market_end:
+        raise ValueError("trade plan terms are unsupported")
+    if (
+        not event.reviewer_approved
+        or event.outcome != "YES"
+        or event.policy_references != ("hard-policy-v1",)
+        or not event.reviewer_citations
+        or not set(event.reviewer_citations) <= set(event.evidence_references)
+    ):
+        raise ValueError("trade plan terms are unsupported")
+    if event.exit_plan.exit_by is not None:
+        exit_by = _offset_timestamp(event.exit_plan.exit_by, "exit_by")
+        if not current < exit_by < market_end:
+            raise ValueError("trade plan exit timing is invalid")
+
+
 def parse_trade_plan(value: Mapping[str, object]) -> TradePlanReady:
     """Parse the strict serialized event envelope at a consumer boundary."""
     fields = set(TradePlanReady.__dataclass_fields__)
@@ -449,7 +524,39 @@ def parse_trade_plan(value: Mapping[str, object]) -> TradePlanReady:
             if not isinstance(raw, (list, tuple)):
                 raise TypeError
             data[key] = tuple(raw)
-        return TradePlanReady(**data)
+        event = TradePlanReady(**data)
+        for name in (
+            "event_id", "created_at", "market_id", "snapshot_id", "instrument_id",
+            "outcome", "expires_at", "market_end",
+        ):
+            _identifier(getattr(event, name), name)
+        for name in ("probability", "stake", "max_entry_price"):
+            _finite(getattr(event, name), name)
+        if (
+            not 0 <= event.probability <= 1
+            or event.stake <= 0
+            or not 0 < event.max_entry_price < 1
+        ):
+            raise ValueError
+        if (
+            not isinstance(event.schema_version, int)
+            or isinstance(event.schema_version, bool)
+            or not isinstance(event.reviewer_approved, bool)
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for items in (
+                    event.reviewer_citations,
+                    event.policy_references,
+                    event.evidence_references,
+                )
+                for item in items
+            )
+        ):
+            raise ValueError
+        _offset_timestamp(event.created_at, "created_at")
+        _offset_timestamp(event.expires_at, "expires_at")
+        _offset_timestamp(event.market_end, "market_end")
+        return event
     except (TypeError, ValueError):
         raise ValueError("invalid trade plan event") from None
 
