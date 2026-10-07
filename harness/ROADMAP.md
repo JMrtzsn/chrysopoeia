@@ -6,6 +6,10 @@ Verification policy and harness evidence are in `docs/verification.md`.
 The platform consumes a released harness artifact. Event adapters and consumers
 are coordinated harness/platform work recorded in both roadmaps.
 
+Operator-approved cross-work-unit direction (2026-10-06): use the supported
+Vertex `gemini-3.5-flash` model and its non-global pricing, with the `us` model
+endpoint configured separately from the platform compute region.
+
 ## Complete
 
 - Runtime-neutral paper-cycle contracts with ADK at the runtime edge; validated
@@ -32,6 +36,9 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+The bounded trader-tool loop is implemented but remains in this section until
+offline verification, bounded live verification, and commit evidence exist.
+
 1. **Trade-plan event producer and paper consumer:** make CLI invocation, and any
    future request adapter through the same core, produce `trade_plan_ready` only
    after review approval and hard-policy acceptance. Refactor paper simulation
@@ -52,6 +59,10 @@ The recorded commands and evidence for harness milestones are in
    carrying evidence shared by trader and reviewer; no execution authority.
 6. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path is verified.
+7. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+   live path is verified, plan this milestone and decide whether to select CCXT,
+   which exchange to support, and whether to cover spot or derivatives. CCXT is
+   not selected or installed by this roadmap item.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved
 feature proposals; proposals do not expand this roadmap.

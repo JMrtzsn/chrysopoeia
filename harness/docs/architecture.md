@@ -12,8 +12,8 @@ flowchart TD
     Snapshot --> State[("ADK cycle state")]
 
     State --> Trader["Trader ADK agent"]
-    Trader --> ContextTool["Current tools<br/>discover_context + Google Search"]
-    ContextTool -. "unverified; not citable" .-> Trader
+    Trader --> ContextTool["Read-only tools<br/>find_markets + get_market + check_trade_plan"]
+    ContextTool --> Trader
     Trader --> Proposal["Structured proposal or abstention"]
     Proposal --> Gate["Validate identity and citations"]
     Gate -->|abstain| Outcome["Terminal outcome"]
@@ -98,8 +98,15 @@ flowchart TD
 
 ## Context and evidence
 
-The trader receives a normalized snapshot and canonical evidence. Google Search
-is available as unverified context but cannot currently be cited. A local
+The harness configures every ADK Gemini client for Vertex at the `us` model
+endpoint. The platform independently owns deployment resource placement; its
+Cloud Run region does not select the model endpoint.
+
+The trader may discover a bounded candidate list, capture up to five canonical
+snapshots, and dry-run up to five candidate plans through the same deterministic
+checker used by the final gate. Discovery runs at most once per cycle. The
+reviewer remains tool-less. Google Search and context-agent tools are not exposed
+in this workflow. A local
 `--evidence` bundle is a snapshot-bound development/testing input, not a research
 provider.
 

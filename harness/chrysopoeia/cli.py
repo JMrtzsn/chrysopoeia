@@ -18,6 +18,7 @@ from chrysopoeia.configuration import (
 )
 from chrysopoeia.paper_cycle import (
     EvidenceRecord,
+    PaperCycleRequest,
     _canonical_evidence,
     validate_evidence_bundle,
 )
@@ -82,6 +83,7 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "paper_fee_source": config.venue.paper_fee_source,
         },
         "models": {
+            "location": config.models.location,
             "root": config.models.root,
             "context": config.models.context,
             "trader": config.models.trader,
@@ -393,7 +395,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     discover.add_argument("--limit", type=int, choices=range(1, 21), default=10)
     discover.add_argument("--config", type=Path)
     cycle = commands.add_parser("cycle")
-    cycle.add_argument("--snapshot", type=Path, required=True)
+    targets = cycle.add_mutually_exclusive_group()
+    targets.add_argument("--snapshot", type=Path)
+    targets.add_argument("--market")
+    cycle.add_argument("--context")
+    cycle.add_argument("--draft")
     cycle.add_argument("--config", type=Path)
     cycle.add_argument("--evidence", type=Path)
     cycle.add_argument("--bankroll", type=float, default=1_000)
@@ -675,6 +681,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "cycle":
+        if args.journal is not None and args.snapshot is None and args.market is None:
+            parser.exit(2, "cycle failed: --journal requires --snapshot or --market\n")
         try:
             operating = OperatingConfig(
                 args.bankroll,
@@ -707,15 +715,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 parser.exit(2, f"cycle failed: {exc}\n")
             total_exposure += book_state.open_exposure
         try:
-            snapshot = load_capture_snapshot(
-                args.snapshot,
-                config,
-                operating,
-                args.market_exposure,
-                total_exposure,
+            if args.context is not None and len(args.context) > 2_000:
+                raise ValueError
+            draft_value = json.loads(args.draft) if args.draft is not None else None
+            request = PaperCycleRequest(context=args.context, draft=draft_value)
+            draft = request.draft.model_dump(exclude_none=True) if request.draft else None
+        except (UnicodeError, json.JSONDecodeError, ValueError):
+            parser.exit(2, "cycle failed: invalid context or draft\n")
+        try:
+            snapshot = (
+                load_capture_snapshot(
+                    args.snapshot,
+                    config,
+                    operating,
+                    args.market_exposure,
+                    total_exposure,
+                )
+                if args.snapshot is not None
+                else load_market_snapshot(
+                    args.market,
+                    operating.bankroll,
+                    args.market_exposure,
+                    total_exposure,
+                    paper_fee_rate=config.venue.paper_fee_rate,
+                    paper_fee_source=config.venue.paper_fee_source,
+                )
+                if args.market is not None
+                else None
             )
         except (OSError, TypeError, ValueError):
-            parser.exit(2, "cycle failed: invalid snapshot\n")
+            parser.exit(
+                2,
+                "cycle failed: invalid snapshot\n"
+                if args.snapshot is not None
+                else "cycle failed: invalid market\n",
+            )
         evidence = None
         if args.journal is None:
             try:
@@ -731,7 +765,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             if args.journal is None:
                 result = asyncio.run(
-                    run_paper_cycle(config, snapshot, operating, evidence=evidence)
+                    run_paper_cycle(
+                        config, snapshot, operating, evidence=evidence,
+                        context=args.context, draft=draft,
+                    )
                 )
             else:
                 from chrysopoeia.operations import run_journal_turn

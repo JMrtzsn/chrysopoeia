@@ -26,19 +26,20 @@ EXPECTED = {
     "command": "inspect",
     "config_path": "chrysopoeia.toml",
     "cost_policy": {
-        "input_usd_per_million_tokens": "1",
+        "input_usd_per_million_tokens": "1.65",
         "maximum_input_tokens_per_call": 8192,
         "maximum_model_calls_per_cycle": 12,
         "maximum_output_tokens_per_call": 1024,
-        "model": "gemini-flash-latest",
-        "output_usd_per_million_tokens": "3",
-        "version": "project-estimate-2026-08-v1",
+        "model": "gemini-3.5-flash",
+        "output_usd_per_million_tokens": "9.90",
+        "version": "project-estimate-2026-10-v1",
     },
     "models": {
-        "context": "gemini-flash-latest",
-        "reviewer": "gemini-flash-latest",
-        "root": "gemini-flash-latest",
-        "trader": "gemini-flash-latest",
+        "context": "gemini-3.5-flash",
+        "location": "us",
+        "reviewer": "gemini-3.5-flash",
+        "root": "gemini-3.5-flash",
+        "trader": "gemini-3.5-flash",
     },
     "runtime": {"adapter": "adk", "mode": "paper"},
     "schema_version": 1,
@@ -63,6 +64,61 @@ class OperatorCliTests(unittest.TestCase):
             except SystemExit as exc:
                 code = int(exc.code)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_cycle_accepts_market_context_draft_or_no_target(self) -> None:
+        result = {
+            "schema_version": 1, "record_type": "paper_cycle_result",
+            "snapshot_id": "", "market_id": "", "status": "abstained",
+            "reason": "no_target", "trader_called": True, "reviewer_called": False,
+            "fill": None, "event": None, "ledger_statuses": ["completed"],
+            "actual_estimated_cost_usd": "0", "maximum_reserved_cost_usd": "0.2838528",
+        }
+        snapshot = MarketSnapshot("snapshot", "12345", 0.4, 1_000, 0, 0)
+        with (
+            patch("chrysopoeia.cli.load_market_snapshot", return_value=snapshot),
+            patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=result)) as run,
+        ):
+            for arguments in (
+                ("--market", "12345"),
+                ("--context", "weather only"),
+                ("--draft", '{"action":"abstain"}'),
+                (),
+            ):
+                with self.subTest(arguments=arguments):
+                    code, _stdout, stderr = self.invoke("cycle", *arguments)
+                    self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(run.await_count, 4)
+
+    def test_cycle_rejects_conflicting_targets_and_bad_bounded_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "snapshot.json"
+            source.write_text("{}")
+            for arguments in (
+                ("--snapshot", str(source), "--market", "123"),
+                ("--context", "x" * 2001),
+                ("--draft", "[]"),
+            ):
+                with self.subTest(arguments=arguments):
+                    code, _stdout, _stderr = self.invoke("cycle", *arguments)
+                    self.assertEqual(code, 2)
+
+    def test_cycle_with_journal_requires_a_target_before_admission(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "chrysopoeia.operations.run_journal_turn", AsyncMock()
+        ) as run:
+            code, stdout, stderr = self.invoke("cycle", "--journal", directory)
+
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr, "cycle failed: --journal requires --snapshot or --market\n")
+        run.assert_not_called()
+
+    def test_cycle_rejects_unknown_nested_draft_fields(self) -> None:
+        code, stdout, stderr = self.invoke(
+            "cycle", "--draft", '{"exit_plan":{"api_key":"secret"}}'
+        )
+
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr, "cycle failed: invalid context or draft\n")
 
     def fixture_fetch(self, calls: list[str] | None = None):
         now = datetime.now(timezone.utc)
@@ -206,8 +262,8 @@ class OperatorCliTests(unittest.TestCase):
 
     def test_alternate_configuration_uses_supplied_relative_label(self) -> None:
         text = (ROOT / "chrysopoeia.toml").read_text(encoding="utf-8")
-        text = text.replace("gemini-flash-latest", "alternate-model").replace(
-            'input_usd_per_million_tokens = "1"',
+        text = text.replace("gemini-3.5-flash", "alternate-model").replace(
+            'input_usd_per_million_tokens = "1.65"',
             'input_usd_per_million_tokens = "1.50"',
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -663,7 +719,7 @@ class OperatorCliTests(unittest.TestCase):
             "fill": None,
             "ledger_statuses": ["completed"],
             "actual_estimated_cost_usd": "0.000032",
-            "maximum_reserved_cost_usd": "0.022528",
+            "maximum_reserved_cost_usd": "0.0473088",
         }
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "snapshot.json"
@@ -768,7 +824,7 @@ class OperatorCliTests(unittest.TestCase):
             },
             "ledger_statuses": ["completed", "completed"],
             "actual_estimated_cost_usd": "0.000064",
-            "maximum_reserved_cost_usd": "0.022528",
+            "maximum_reserved_cost_usd": "0.0473088",
         }
         return snapshot, result
 

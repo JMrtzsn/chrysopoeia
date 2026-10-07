@@ -19,6 +19,7 @@ from chrysopoeia.cycle_runner import (
     build_cycle_workflow,
     run_paper_cycle_state,
 )
+from chrysopoeia.models import resolve_model
 from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
     PAPER_CYCLE_DECISION_KEY,
@@ -58,7 +59,7 @@ def reserved_ceiling(config=DEFAULT_HARNESS_CONFIG, *, model_calls: int = 1) -> 
 
 
 PER_CALL_RESERVED_ESTIMATE_USD = reserved_ceiling()
-MAX_RESERVED_ESTIMATE_USD = reserved_ceiling(model_calls=2)
+MAX_RESERVED_ESTIMATE_USD = reserved_ceiling(model_calls=3)
 SUMMARY_FIELDS = {
     "status",
     "reason",
@@ -223,7 +224,11 @@ def grade(
         raise ValueError("abstained paper cycle must not contain a review")
 
     ledger = state.get(LEDGER_KEY)
-    expected_agents = AGENT_NAMES if proposal.action == "trade" else AGENT_NAMES[:1]
+    expected_agents = (
+        (AGENT_NAMES[0], AGENT_NAMES[0], AGENT_NAMES[1])
+        if proposal.action == "trade"
+        else AGENT_NAMES[:1]
+    )
     if not isinstance(ledger, list) or len(ledger) != len(expected_agents):
         raise ValueError("paper-cycle cost ledger has an invalid call count")
     if [
@@ -279,9 +284,9 @@ def grade(
     if actual_cost > MAX_RESERVED_ESTIMATE_USD:
         raise ValueError("paper-cycle actual cost exceeded its reservation")
 
-    if any(call != "set_model_response" for call in function_calls):
+    if any(call not in {"set_model_response", "find_markets", "get_market", "check_trade_plan"} for call in function_calls):
         raise ValueError("paper-cycle made an unavailable tool call")
-    if available_tools:
+    if set(available_tools) - {"find_markets", "get_market", "check_trade_plan"}:
         raise ValueError("paper-cycle model agents expose tools")
 
     decision = _mapping(state, PAPER_CYCLE_DECISION_KEY)
@@ -336,8 +341,8 @@ def grade(
 
 async def _run_live() -> dict[str, object]:
     models = (
-        Gemini(model=str(trader_agent.model)),
-        Gemini(model=str(reviewer_agent.model)),
+        resolve_model(DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.trader),
+        resolve_model(DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.reviewer),
     )
     return grade(*await run_cycle(*models, owned_models=models))
 
@@ -353,12 +358,10 @@ def main() -> int:
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
         raise SystemExit("paper-cycle evaluation requires Vertex ADC, not an API key")
     if (
-        os.environ.get("GOOGLE_GENAI_USE_VERTEXAI") != "true"
-        or not os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or not os.environ.get("GOOGLE_CLOUD_LOCATION")
+        not os.environ.get("GOOGLE_CLOUD_PROJECT")
     ):
         raise SystemExit(
-            "paper-cycle evaluation requires Vertex ADC project, location, and GOOGLE_GENAI_USE_VERTEXAI=true"
+            "paper-cycle evaluation requires a Vertex ADC project"
         )
     summary = run_live()
     print(json.dumps(summary, sort_keys=True, separators=(",", ":")))

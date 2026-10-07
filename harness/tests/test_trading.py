@@ -251,13 +251,15 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIn("harness selects", root_agent.instruction)
         self.assertIn("not market picks", root_agent.instruction)
 
-    def test_trader_discovers_and_calls_context_on_demand(self) -> None:
+    def test_trader_exposes_only_bounded_market_tools(self) -> None:
         interfaces = discover_context("Check current evidence for this market")
 
         self.assertEqual(interfaces[0]["interface_id"], "public_web")
         self.assertEqual(context_agent.name, "call_context")
-        self.assertTrue(any("discover_context" in str(tool) for tool in trader_agent.tools))
-        self.assertTrue(any(getattr(tool, "name", None) == "call_context" for tool in trader_agent.tools))
+        self.assertEqual(
+            [tool.__name__ for tool in trader_agent.tools],
+            ["find_markets", "get_market", "check_trade_plan"],
+        )
         with self.assertRaises(ValueError):
             discover_context("")
 

@@ -22,6 +22,7 @@ class FakeLlm(BaseLlm):
     calls: SkipValidation[list[str]]
     agent_name: str
     response: dict[str, object]
+    checked: bool = False
 
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False
@@ -29,6 +30,26 @@ class FakeLlm(BaseLlm):
         if stream:
             raise AssertionError("streaming is not allowed")
         self.calls.append(self.agent_name)
+        if self.response.get("action") == "trade" and not self.checked:
+            self.checked = True
+            yield LlmResponse(
+                content=types.Content(
+                    role="model",
+                    parts=[
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                id="plan-check",
+                                name="check_trade_plan",
+                                args={"plan": self.response},
+                            )
+                        )
+                    ],
+                ),
+                usage_metadata=types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=11, candidates_token_count=7
+                ),
+            )
+            return
         if llm_request.tools_dict:
             parts = [
                 types.Part(
@@ -120,14 +141,20 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             summary = evaluation.grade(state, function_calls, available_tools)
 
             with self.subTest(status=expected_status):
-                self.assertEqual(calls, [trader_agent.name, reviewer_agent.name])
+                self.assertEqual(
+                    calls,
+                    [trader_agent.name, trader_agent.name, reviewer_agent.name],
+                )
                 self.assertEqual(summary["status"], expected_status)
                 self.assertTrue(summary["pass"])
                 self.assertEqual(
                     summary["reserved_ceiling_usd"],
-                    str(evaluation.reserved_ceiling(model_calls=2)),
+                    str(evaluation.reserved_ceiling(model_calls=3)),
                 )
-                self.assertEqual(summary["ledger_statuses"], ["completed", "completed"])
+                self.assertEqual(
+                    summary["ledger_statuses"],
+                    ["completed", "completed", "completed"],
+                )
                 self.assertLessEqual(
                     evaluation.Decimal(summary["actual_estimated_cost_usd"]),
                     evaluation.MAX_RESERVED_ESTIMATE_USD,
@@ -135,8 +162,13 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 for key, value in initial.items():
                     self.assertEqual(state[key], value)
                 self.assertEqual(set(summary), evaluation.SUMMARY_FIELDS)
-                self.assertEqual(function_calls, [])
-                self.assertEqual(available_tools, [])
+                self.assertEqual(
+                    function_calls, ["check_trade_plan", "set_model_response"]
+                )
+                self.assertEqual(
+                    available_tools,
+                    ["find_markets", "get_market", "check_trade_plan"],
+                )
 
     def test_real_runner_terminates_trader_abstention_before_reviewer(self) -> None:
         trader, reviewer, calls = self.models(True)
@@ -157,11 +189,12 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         summary = evaluation.grade(state, function_calls, available_tools)
 
         self.assertEqual(calls, [trader_agent.name])
+        self.assertEqual(function_calls, ["set_model_response"])
         self.assertEqual(summary["status"], "abstained")
         self.assertEqual(summary["reason"], "trader_abstained")
         self.assertFalse(summary["reviewer_called"])
         self.assertEqual(summary["ledger_statuses"], ["completed"])
-        self.assertEqual(summary["reserved_ceiling_usd"], "0.011264")
+        self.assertEqual(summary["reserved_ceiling_usd"], "0.0236544")
         self.assertIsNone(state["paper_cycle_fill"])
         self.assertEqual(
             state["paper_cycle_decision"],
@@ -302,7 +335,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluation.grade(state, function_calls, ["place_order"])
 
-    def test_workflow_has_only_two_tool_less_single_attempt_model_agents(self) -> None:
+    def test_workflow_has_bounded_trader_tools_and_tool_less_reviewer(self) -> None:
         trader, reviewer, _ = self.models(True)
         workflow = evaluation.build_workflow(trader, reviewer)
         agents = [
@@ -315,7 +348,11 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             self.assertEqual(
                 agent.generate_content_config.http_options.retry_options.attempts, 1
             )
-            self.assertEqual(agent.tools, [])
+        self.assertEqual(
+            [tool.__name__ for tool in agents[0].tools],
+            ["find_markets", "get_market", "check_trade_plan"],
+        )
+        self.assertEqual(agents[1].tools, [])
 
     def test_main_gates_before_live_setup_and_emits_only_sanitized_json(self) -> None:
         with (

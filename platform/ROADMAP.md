@@ -9,6 +9,12 @@ Development and live-verification gates are in
 The platform consumes a released harness artifact. Future event adapters and
 consumers are coordinated with the harness contract and appear in both roadmaps.
 
+Operator-approved coordination boundary (2026-10-06): the harness owns Vertex
+model endpoint selection (`gemini-3.5-flash` at `us`). Platform continues to
+supply ambient project/auth and place resources in its configured compute
+region; no platform model-location override is planned. This records a
+coordination decision, not a new platform work item.
+
 ## Complete
 
 - [x] Managed deployment, Level 2 (single operator): container-first Pulumi base

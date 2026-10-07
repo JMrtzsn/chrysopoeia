@@ -34,6 +34,8 @@ from chrysopoeia.agent import (
 from chrysopoeia.cost import after_model_cost, before_model_cost, on_model_cost_error
 from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
+    LAST_SUCCESSFUL_PLAN_KEY,
+    LAST_SUCCESSFUL_SNAPSHOT_KEY,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
@@ -74,7 +76,7 @@ def rich_snapshot(snapshot_id: str = "snapshot-1") -> MarketSnapshot:
 
 
 def cycle_state(*, approved: bool = True) -> dict[str, object]:
-    return {
+    state = {
         "operating_config": asdict(OperatingConfig()),
         "market_snapshot": asdict(rich_snapshot()),
         EVIDENCE_KEY: [{
@@ -103,12 +105,16 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
             "citations": [EVIDENCE_ID] if approved else [],
         },
     }
+    state[LAST_SUCCESSFUL_PLAN_KEY] = copy.deepcopy(state[PROPOSAL_KEY])
+    state[LAST_SUCCESSFUL_SNAPSHOT_KEY] = copy.deepcopy(state["market_snapshot"])
+    return state
 
 
 class StructuredFakeLlm(BaseLlm):
     calls: SkipValidation[list[str]]
     response: dict[str, object]
     agent_name: str
+    checked: bool = False
 
     @property
     def capabilities(self) -> LlmCapabilities:
@@ -120,10 +126,24 @@ class StructuredFakeLlm(BaseLlm):
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False,
     ) -> AsyncGenerator[LlmResponse, None]:
-        if stream or self.agent_name in self.calls:
+        if stream or (self.agent_name in self.calls and self.agent_name != trader_agent.name):
             raise AssertionError(f"unexpected {self.agent_name} model request")
         self.calls.append(self.agent_name)
         if self.agent_name == trader_agent.name:
+            if self.response.get("action") == "trade" and not self.checked:
+                self.checked = True
+                parts = [types.Part(function_call=types.FunctionCall(
+                    id="plan-check",
+                    name="check_trade_plan",
+                    args={"plan": self.response},
+                ))]
+                yield LlmResponse(
+                    content=types.Content(role="model", parts=parts),
+                    usage_metadata=types.GenerateContentResponseUsageMetadata(
+                        prompt_token_count=11, candidates_token_count=7,
+                    ),
+                )
+                return
             if llm_request.config.response_schema is not None or "set_model_response" not in llm_request.tools_dict:
                 raise AssertionError("trader request did not use set_model_response")
             parts = [types.Part(function_call=types.FunctionCall(
@@ -202,6 +222,25 @@ class PaperCycleTests(unittest.TestCase):
         for action, amount in (("trade", 0), ("abstain", 1), ("invalid", 0), ("trade", math.nan), ("trade", math.inf), ("trade", True), ("trade", "1")):
             with self.subTest(action=action, amount=amount), self.assertRaises(ValidationError):
                 ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount, citations=[EVIDENCE_ID] if action == "trade" else [])
+
+    def test_cycle_request_bounds_untrusted_context_and_draft(self) -> None:
+        request = PaperCycleRequest(context="weather only", draft={"action": "abstain"})
+        self.assertEqual(request.context, "weather only")
+        with self.assertRaises(ValidationError):
+            PaperCycleRequest(context="x" * 2001)
+        for draft in ({"credentials": "secret"}, {"exit_plan": {"token": "secret"}}):
+            with self.subTest(draft=draft), self.assertRaises(ValidationError):
+                PaperCycleRequest(draft=draft)
+        with self.assertRaises(ValidationError):
+            PaperCycleRequest(draft={"citations": ["x" * 200] * 101})
+
+    def test_trader_input_allows_discovery_without_initial_snapshot(self) -> None:
+        state = {"operating_config": asdict(OperatingConfig())}
+        request = PaperCycleRequest(context="weather", draft={"action": "abstain"})
+        self.assertEqual(
+            prepare_trader_input(SimpleNamespace(state=state), request),
+            {"context": "weather", "draft": {"action": "abstain"}},
+        )
 
         evidence = EvidenceRecord(
             evidence_id=EVIDENCE_ID,
@@ -293,6 +332,22 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(legacy[EVIDENCE_KEY], [])
         self.assertEqual(complete_abstention(legacy_ctx, abstain).status, "abstained")
 
+    def test_trade_without_exact_successful_tool_check_is_rejected(self) -> None:
+        state = cycle_state()
+        state.pop(LAST_SUCCESSFUL_PLAN_KEY)
+        state.pop(LAST_SUCCESSFUL_SNAPSHOT_KEY)
+        proposal = ProposalOutput.model_validate(state[PROPOSAL_KEY])
+
+        event = route_proposal(SimpleNamespace(state=state), proposal)
+        self.assertEqual(event.actions.route, "unchecked")
+        self.assertNotIn(LAST_SUCCESSFUL_PLAN_KEY, state)
+
+        state[LAST_SUCCESSFUL_PLAN_KEY] = {**proposal.model_dump(), "amount": 9.0}
+        self.assertEqual(
+            route_proposal(SimpleNamespace(state=state), proposal).actions.route,
+            "unchecked",
+        )
+
     def test_reviewer_citations_reject_invalid_approval_and_allow_empty_rejection(self) -> None:
         with self.assertRaises(ValidationError):
             ReviewOutput(
@@ -366,6 +421,23 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(state[PAPER_CYCLE_REPORT_KEY], report)
         self.assertEqual({key: state[key] for key in preserved}, preserved)
 
+    def test_finalizer_rejects_unchecked_or_changed_plan_and_snapshot(self) -> None:
+        for change in ("missing", "plan", "snapshot"):
+            state = cycle_state()
+            if change == "missing":
+                del state[LAST_SUCCESSFUL_PLAN_KEY]
+            elif change == "plan":
+                state[PROPOSAL_KEY] = {**state[PROPOSAL_KEY], "amount": 9.0}
+            else:
+                state["market_snapshot"] = {
+                    **state["market_snapshot"], "price": 0.41,
+                    "asks": ({"price": 0.41, "size": 100},),
+                }
+            report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
+            with self.subTest(change=change):
+                self.assertEqual(report["reason"], "trade requires a successful matching plan check")
+                self.assertIsNone(state[TRADE_PLAN_READY_KEY])
+
     def test_offline_compiled_workflow_path_reaches_finalizer_in_order(self) -> None:
         state = cycle_state()
         del state[PROPOSAL_KEY]
@@ -427,13 +499,13 @@ class PaperCycleTests(unittest.TestCase):
     def test_runner_executes_paper_cycle_offline_with_structured_models(self) -> None:
         calls = []
         fake_trader = StructuredFakeLlm(
-            model="gemini-flash-latest",
+            model=DEFAULT_HARNESS_CONFIG.models.trader,
             agent_name=trader_agent.name,
             calls=calls,
             response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID], "max_entry_price": 0.41, "exit_plan": EXIT_PLAN},
         )
         fake_reviewer = StructuredFakeLlm(
-            model="gemini-flash-latest",
+            model=DEFAULT_HARNESS_CONFIG.models.reviewer,
             agent_name=reviewer_agent.name,
             calls=calls,
             response={"snapshot_id": "snapshot-1", "market_id": "market-1", "approved": True, "reason": "supported", "citations": [EVIDENCE_ID]},
@@ -479,7 +551,7 @@ class PaperCycleTests(unittest.TestCase):
 
         result, events = asyncio.run(run_cycle())
 
-        self.assertEqual(calls, [trader_agent.name, reviewer_agent.name])
+        self.assertEqual(calls, [trader_agent.name, trader_agent.name, reviewer_agent.name])
         self.assertTrue(any(event.author == trader_agent.name and event.actions.state_delta.get(PROPOSAL_KEY) == fake_trader.response for event in events))
         self.assertTrue(any(event.author == reviewer_agent.name and event.actions.state_delta.get(REVIEW_KEY) == fake_reviewer.response for event in events))
         self.assertEqual(result[PROPOSAL_KEY], fake_trader.response)
@@ -487,7 +559,11 @@ class PaperCycleTests(unittest.TestCase):
         self.assertEqual(
             [(record["agent"], record["status"], record["actual_input_tokens"], record["actual_output_tokens"])
              for record in result["model_cost_ledger"]],
-            [(trader_agent.name, "completed", 11, 7), (reviewer_agent.name, "completed", 11, 7)],
+            [
+                (trader_agent.name, "completed", 11, 7),
+                (trader_agent.name, "completed", 11, 7),
+                (reviewer_agent.name, "completed", 11, 7),
+            ],
         )
         self.assertTrue(result[PAPER_CYCLE_DECISION_KEY]["allowed"])
         self.assertIsNone(result[PAPER_CYCLE_FILL_KEY])

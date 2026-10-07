@@ -18,6 +18,9 @@ execution is not implemented.
 - Google Search context is currently uncitable. Paper exits are simulated by the
   bounded local loop; citable research tools and event consumers remain planned
   work. No always-on harness or manager is required.
+- The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
+  priced at $1.65 input and $9.90 text output per million tokens. The model
+  endpoint is separate from the Cloud Run resource region.
 
 ## Start locally
 

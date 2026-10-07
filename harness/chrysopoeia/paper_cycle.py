@@ -30,6 +30,8 @@ PAPER_CYCLE_DECISION_KEY = "paper_cycle_decision"
 PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
 TRADE_PLAN_READY_KEY = "trade_plan_ready"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
+LAST_SUCCESSFUL_PLAN_KEY = "last_successful_trade_plan"
+LAST_SUCCESSFUL_SNAPSHOT_KEY = "last_successful_trade_plan_snapshot"
 MAX_EVIDENCE_ID_LENGTH = 200
 MAX_SNAPSHOT_ID_LENGTH = 128
 MAX_RETRIEVED_AT_LENGTH = 64
@@ -294,8 +296,34 @@ class ReviewOutput(StrictOutput):
         return self
 
 
+class DraftExitPlan(StrictOutput):
+    take_profit_roi: float | None = Field(default=None, ge=0, strict=True)
+    stop_loss_roi: float | None = Field(default=None, ge=-1, le=0, strict=True)
+    exit_by: str | None = Field(default=None, max_length=MAX_RETRIEVED_AT_LENGTH)
+    hold_to_resolution: bool | None = Field(default=None, strict=True)
+
+
+class ProposalDraft(StrictOutput):
+    snapshot_id: str | None = Field(default=None, min_length=1, max_length=200)
+    market_id: str | None = Field(default=None, min_length=1, max_length=200)
+    action: Literal["trade", "abstain"] | None = None
+    probability: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, strict=True)
+    amount: float | None = Field(default=None, allow_inf_nan=False, strict=True)
+    citations: list[CitationId] | None = Field(default=None, max_length=10)
+    max_entry_price: float | None = Field(default=None, ge=0, le=1, strict=True)
+    exit_plan: DraftExitPlan | None = None
+
+
 class PaperCycleRequest(StrictOutput):
-    pass
+    context: str | None = Field(default=None, max_length=2_000)
+    draft: ProposalDraft | None = None
+
+    @field_validator("draft", mode="before")
+    @classmethod
+    def validate_draft(cls, value: object) -> object:
+        if value is not None and len(json.dumps(value, separators=(",", ":"))) > 20_000:
+            raise ValueError("draft is too large")
+        return value
 
 
 class ReviewerInput(StrictOutput):
@@ -464,15 +492,21 @@ def finalize_paper_cycle(
 
     decision = asdict(cycle.decision)
     fill = asdict(cycle.fill) if cycle.fill else None
+    checked = (
+        state.get(LAST_SUCCESSFUL_PLAN_KEY) == proposal_output.model_dump()
+        and state.get(LAST_SUCCESSFUL_SNAPSHOT_KEY) == asdict(snapshot)
+    )
     event = (
         json.loads(json.dumps(asdict(cycle.event), sort_keys=True))
-        if cycle.event
+        if cycle.event and checked
         else None
     )
     if fill is not None and proposal_output.exit_plan is not None:
         fill["exit_plan"] = proposal_output.exit_plan.model_dump()
-    if cycle.event:
+    if cycle.event and checked:
         status, reason = "approved", cycle.decision.reason
+    elif cycle.event:
+        status, reason = "rejected", "trade requires a successful matching plan check"
     elif not review.approved:
         status, reason = "rejected", "review_rejected"
     else:

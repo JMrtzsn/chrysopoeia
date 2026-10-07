@@ -12,7 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 
 MAX_TEXT_LENGTH = 200
 MAX_COST_LIMIT = 100_000_000
-COST_POLICY_VERSION = "project-estimate-2026-08-v1"
+COST_POLICY_VERSION = "project-estimate-2026-10-v1"
 
 
 class ConfigurationError(ValueError):
@@ -85,6 +85,7 @@ class VenueConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     adapter: str
+    location: str
     root: str
     context: str
     trader: str
@@ -141,6 +142,8 @@ class HarnessConfig:
         model_keys = {"root", "context", "trader", "reviewer"}
         if isinstance(models_raw, Mapping) and "adapter" in models_raw:
             model_keys.add("adapter")
+        if isinstance(models_raw, Mapping) and "location" in models_raw:
+            model_keys.add("location")
         models = _table(models_raw, model_keys, "models")
 
         runtime_config = RuntimeConfig(
@@ -176,21 +179,17 @@ class HarnessConfig:
         )
         if model_adapter not in {"adk-gemini", "adk-registry"}:
             raise ConfigurationError("models adapter is unsupported")
+        model_location = _text(models.get("location", "us"), "models location")
+        if model_location != "us":
+            raise ConfigurationError("models location is unsupported")
         model_config = ModelConfig(
             model_adapter,
-            *(
-                _text(models[name], f"{name} model")
-                for name in (
-                    role
-                    for role in tuple(ModelConfig.__annotations__)
-                    if role != "adapter"
-                )
-            ),
+            model_location,
+            *(_text(models[name], f"{name} model") for name in ("root", "context", "trader", "reviewer")),
         )
         configured_models = [
             getattr(model_config, role)
-            for role in tuple(ModelConfig.__annotations__)
-            if role != "adapter"
+            for role in ("root", "context", "trader", "reviewer")
         ]
         cost_model = _text(cost["model"], "cost model")
         flat_input = _price(cost["input_usd_per_million_tokens"], "input price")

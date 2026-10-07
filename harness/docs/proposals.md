@@ -38,7 +38,8 @@ remain deferred.
 
 ## Research tools
 
-Give the trader bounded, read-only research tools for markets available through
+The trader now has bounded read-only venue discovery, snapshot capture, and
+deterministic plan-check tools. Give it additional research tools for markets available through
 configured venues. Candidate capabilities: web search, financial/economic data,
 company records, and category-specific sources when needed. Search, FRED,
 CoinGecko, and SEC EDGAR are candidate providers, not locked dependencies.

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
+from google.adk.models import Gemini
 from google.adk.models.llm_request import LlmRequest
 
 from chrysopoeia.agent import app, build_agents, root_agent
@@ -32,15 +33,16 @@ VALID = {
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
     },
     "models": {
-        "root": "gemini-flash-latest",
-        "context": "gemini-flash-latest",
-        "trader": "gemini-flash-latest",
-        "reviewer": "gemini-flash-latest",
+        "location": "us",
+        "root": "gemini-3.5-flash",
+        "context": "gemini-3.5-flash",
+        "trader": "gemini-3.5-flash",
+        "reviewer": "gemini-3.5-flash",
     },
     "cost": {
-        "model": "gemini-flash-latest",
-        "input_usd_per_million_tokens": "1",
-        "output_usd_per_million_tokens": "3",
+        "model": "gemini-3.5-flash",
+        "input_usd_per_million_tokens": "1.65",
+        "output_usd_per_million_tokens": "9.90",
         "maximum_input_tokens_per_call": 8192,
         "maximum_output_tokens_per_call": 1024,
         "maximum_model_calls_per_cycle": 12,
@@ -54,26 +56,38 @@ class HarnessConfigurationTests(unittest.TestCase):
 
         self.assertEqual(config.runtime.adapter, "adk")
         self.assertEqual(config.venue.paper_fee_rate, 0.02)
-        self.assertEqual(config.models.trader, "gemini-flash-latest")
+        self.assertEqual(config.models.trader, "gemini-3.5-flash")
+        self.assertEqual(config.models.location, "us")
         self.assertEqual(
             config.cost_policy,
             {
-                "version": "project-estimate-2026-08-v1",
-                "model": "gemini-flash-latest",
-                "input_usd_per_million_tokens": "1",
-                "output_usd_per_million_tokens": "3",
+                "version": "project-estimate-2026-10-v1",
+                "model": "gemini-3.5-flash",
+                "input_usd_per_million_tokens": "1.65",
+                "output_usd_per_million_tokens": "9.90",
                 "maximum_input_tokens_per_call": 8192,
                 "maximum_output_tokens_per_call": 1024,
                 "maximum_model_calls_per_cycle": 12,
             },
         )
-        self.assertEqual(config.cost.input_usd_per_million_tokens, Decimal("1"))
+        self.assertEqual(config.cost.input_usd_per_million_tokens, Decimal("1.65"))
         with self.assertRaises(FrozenInstanceError):
             config.runtime.adapter = "other"
 
     def test_checked_in_toml_loads(self) -> None:
         config = load_harness_config(Path(__file__).parents[1] / "chrysopoeia.toml")
         self.assertEqual(config, HarnessConfig.from_mapping(VALID))
+
+    def test_all_gemini_agents_use_vertex_us_without_initializing_a_client(self) -> None:
+        agents = build_agents(HarnessConfig.from_mapping(VALID))
+
+        for agent in agents.model_agents:
+            self.assertIsInstance(agent.model, Gemini)
+            self.assertEqual(
+                agent.model.client_kwargs,
+                {"vertexai": True, "location": "us"},
+            )
+            self.assertIsNone(agent.model.__dict__.get("api_client"))
 
     def test_malformed_toml_is_safe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -98,7 +112,7 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("top", "api_key", "secret"),
             ("runtime", "project", "secret-project"),
             ("venue", "wallet", "secret-wallet"),
-            ("models", "location", "region"),
+            ("models", "project", "secret-project"),
             ("cost", "daily_budget", "1"),
         ):
             candidate = {name: fields.copy() for name, fields in VALID.items()}
@@ -114,6 +128,7 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("venue", "paper_fee_rate", 1.0),
             ("venue", "paper_fee_source", " "),
             ("models", "trader", ""),
+            ("models", "location", " us"),
             ("cost", "input_usd_per_million_tokens", "NaN"),
             ("cost", "input_usd_per_million_tokens", " 1"),
             ("cost", "output_usd_per_million_tokens", "-1"),
@@ -147,16 +162,16 @@ class HarnessConfigurationTests(unittest.TestCase):
             (second_mapping, "second-model"),
         ):
             mapping["cost"]["model"] = model
-            for role in mapping["models"]:
+            for role in ("root", "context", "trader", "reviewer"):
                 mapping["models"][role] = model
         first = build_agents(HarnessConfig.from_mapping(first_mapping))
         second = build_agents(HarnessConfig.from_mapping(second_mapping))
 
         self.assertEqual(
-            [str(agent.model) for agent in first.model_agents], ["first-model"] * 4
+            [agent.model.model for agent in first.model_agents], ["first-model"] * 4
         )
         self.assertEqual(
-            [str(agent.model) for agent in second.model_agents], ["second-model"] * 4
+            [agent.model.model for agent in second.model_agents], ["second-model"] * 4
         )
         for agents, model in ((first, "first-model"), (second, "second-model")):
             callbacks = [agent.before_model_callback for agent in agents.model_agents]
@@ -189,18 +204,18 @@ class HarnessConfigurationTests(unittest.TestCase):
     def test_alternate_toml_controls_every_bound_runtime_value(self) -> None:
         from tests.eval import paper_cycle_evaluation as evaluation
 
-        default_model = str(root_agent.model)
+        default_model = root_agent.model.model
         text = (Path(__file__).parents[1] / "chrysopoeia.toml").read_text()
         text = (
-            text.replace("gemini-flash-latest", "alternate-model")
+            text.replace("gemini-3.5-flash", "alternate-model")
             .replace("paper_fee_rate = 0.02", "paper_fee_rate = 0.03")
             .replace("paper-assumption:flat-2pct-v1", "paper-assumption:alternate-v1")
             .replace(
-                'input_usd_per_million_tokens = "1"',
+                'input_usd_per_million_tokens = "1.65"',
                 'input_usd_per_million_tokens = "7"',
             )
             .replace(
-                'output_usd_per_million_tokens = "3"',
+                'output_usd_per_million_tokens = "9.90"',
                 'output_usd_per_million_tokens = "11"',
             )
             .replace(
@@ -248,7 +263,7 @@ class HarnessConfigurationTests(unittest.TestCase):
         agents.configure_operation(SimpleNamespace(state=operation_state))
         self.assertEqual(operation_state["model_cost_policy"], config.cost_policy)
         self.assertEqual(
-            [str(agent.model) for agent in agents.model_agents], ["alternate-model"] * 4
+            [agent.model.model for agent in agents.model_agents], ["alternate-model"] * 4
         )
         self.assertEqual(
             evaluation.reserved_ceiling(config, model_calls=2),
@@ -268,24 +283,24 @@ class HarnessConfigurationTests(unittest.TestCase):
                 "paper_fee_source": "paper-assumption:alternate-v1",
             },
         )
-        self.assertEqual(str(root_agent.model), default_model)
+        self.assertEqual(root_agent.model.model, default_model)
 
     def test_default_exports_use_checked_in_configuration_outside_cwd(self) -> None:
         self.assertIs(app.root_agent, root_agent)
-        self.assertEqual(str(root_agent.model), "gemini-flash-latest")
+        self.assertEqual(root_agent.model.model, "gemini-3.5-flash")
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
                 [
                     sys.executable,
                     "-c",
-                    "import chrysopoeia.agent as a; print(a.root_agent.model)",
+                    "import chrysopoeia.agent as a; print(a.root_agent.model.model)",
                 ],
                 cwd=directory,
                 check=True,
                 capture_output=True,
                 text=True,
             )
-        self.assertEqual(result.stdout.strip(), "gemini-flash-latest")
+        self.assertEqual(result.stdout.strip(), "gemini-3.5-flash")
 
     def test_configuration_boundary_does_not_import_adk(self) -> None:
         result = subprocess.run(
@@ -312,9 +327,9 @@ class ModelAdapterTests(unittest.TestCase):
         models["adapter"] = "adk-registry"
         models["trader"] = "ollama/llama3.1:8b"
         cost["models"] = {
-            "gemini-flash-latest": {
-                "input_usd_per_million_tokens": "1",
-                "output_usd_per_million_tokens": "3",
+            "gemini-3.5-flash": {
+                "input_usd_per_million_tokens": "1.65",
+                "output_usd_per_million_tokens": "9.90",
             },
             "ollama/llama3.1:8b": {
                 "input_usd_per_million_tokens": "0",
@@ -334,16 +349,16 @@ class ModelAdapterTests(unittest.TestCase):
                 for price in config.cost.prices
             },
             {
-                ("gemini-flash-latest", Decimal("1")),
+                ("gemini-3.5-flash", Decimal("1.65")),
                 ("ollama/llama3.1:8b", Decimal("0")),
             },
         )
         self.assertEqual(
             config.cost_policy["models"],
             {  # type: ignore[typeddict-item]
-                "gemini-flash-latest": {
-                    "input_usd_per_million_tokens": "1",
-                    "output_usd_per_million_tokens": "3",
+                "gemini-3.5-flash": {
+                    "input_usd_per_million_tokens": "1.65",
+                    "output_usd_per_million_tokens": "9.90",
                 },
                 "ollama/llama3.1:8b": {
                     "input_usd_per_million_tokens": "0",
@@ -380,8 +395,11 @@ class ModelAdapterTests(unittest.TestCase):
             HarnessConfig.from_mapping(value)
 
     def test_gemini_adapter_defaults_from_flat_configuration(self) -> None:
-        config = HarnessConfig.from_mapping(VALID)
+        value = {name: fields.copy() for name, fields in VALID.items()}
+        del value["models"]["location"]
+        config = HarnessConfig.from_mapping(value)
         self.assertEqual(config.models.adapter, "adk-gemini")
+        self.assertEqual(config.models.location, "us")
         self.assertEqual(len(config.cost.prices), 1)
 
     def test_config_path_env_override_wins_over_repo_default(self) -> None:

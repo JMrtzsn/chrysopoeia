@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 
-from google.adk.models import BaseLlm, Gemini, LLMRegistry
+from google.adk.models import BaseLlm, Gemini
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService, InMemorySessionService
 from google.adk.workflow import RetryConfig, Workflow
@@ -13,16 +13,19 @@ from chrysopoeia.agent import (
     build_agents,
     complete_abstention,
     complete_paper_cycle,
+    complete_unchecked_trade,
     prepare_reviewer_input,
     prepare_trader_input,
     route_proposal,
 )
 from chrysopoeia.configuration import HarnessConfig, ModelPrice
 from chrysopoeia.cost import LEDGER_KEY
+from chrysopoeia.models import resolve_model
 from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
+    REVIEW_KEY,
     TRADE_PLAN_READY_KEY,
     VALIDATED_EXTERNAL_EVIDENCE_KEY,
     EvidenceRecord,
@@ -36,7 +39,7 @@ from chrysopoeia.trading import MarketSnapshot, OperatingConfig
 logger = logging.getLogger(__name__)
 
 
-def reserved_ceiling(config: HarnessConfig, model_calls: int = 2) -> Decimal:
+def reserved_ceiling(config: HarnessConfig, model_calls: int | None = None) -> Decimal:
     prices = config.cost.prices or (
         ModelPrice(
             config.cost.model,
@@ -45,7 +48,7 @@ def reserved_ceiling(config: HarnessConfig, model_calls: int = 2) -> Decimal:
         ),
     )
     return (
-        model_calls
+        (config.cost.maximum_model_calls_per_cycle if model_calls is None else model_calls)
         * (
             max(price.input_usd_per_million_tokens for price in prices)
             * config.cost.maximum_input_tokens_per_call
@@ -54,13 +57,6 @@ def reserved_ceiling(config: HarnessConfig, model_calls: int = 2) -> Decimal:
         )
         / Decimal(1_000_000)
     )
-
-
-def resolve_model(adapter: str, model_name: str) -> BaseLlm:
-    """Resolve one configured model through the selected ADK model boundary."""
-    if adapter == "adk-gemini":
-        return Gemini(model=model_name)
-    return LLMRegistry.new_llm(model=model_name)
 
 
 def build_cycle_workflow(
@@ -79,7 +75,6 @@ def build_cycle_workflow(
     trader = agents.trader_agent.clone(
         update={
             "model": trader_model,
-            "tools": [],
             "retry_config": no_retry,
             "generate_content_config": model_config,
         }
@@ -103,7 +98,11 @@ def build_cycle_workflow(
             (trader, route_proposal),
             (
                 route_proposal,
-                {"trade": prepare_reviewer_input, "abstain": complete_abstention},
+                {
+                    "trade": prepare_reviewer_input,
+                    "abstain": complete_abstention,
+                    "unchecked": complete_unchecked_trade,
+                },
             ),
             (prepare_reviewer_input, reviewer),
             (reviewer, complete_paper_cycle),
@@ -134,13 +133,24 @@ def _cost(value: object) -> Decimal:
 
 def summarize_cycle(
     config: HarnessConfig,
-    snapshot: MarketSnapshot,
+    snapshot: MarketSnapshot | None,
     state: Mapping[str, object],
 ) -> dict[str, object]:
+    value = state.get("market_snapshot")
+    selected = MarketSnapshot(**dict(value)) if isinstance(value, Mapping) else None
+    if snapshot is not None and selected is not None and (
+        snapshot.snapshot_id,
+        snapshot.market_id,
+    ) != (selected.snapshot_id, selected.market_id):
+        raise ValueError("paper cycle snapshot identity is inconsistent")
+    snapshot = selected
     report = PaperCycleReportOutput.model_validate(state.get(PAPER_CYCLE_REPORT_KEY))
-    proposal = ProposalOutput.model_validate(state.get(PROPOSAL_KEY))
+    ProposalOutput.model_validate(state.get(PROPOSAL_KEY))
     ledger = state.get(LEDGER_KEY)
-    if not isinstance(ledger, list) or len(ledger) not in {1, 2}:
+    if (
+        not isinstance(ledger, list)
+        or not 1 <= len(ledger) <= config.cost.maximum_model_calls_per_cycle
+    ):
         raise ValueError("invalid model cost ledger")
     statuses: list[str] = []
     actual = Decimal(0)
@@ -176,12 +186,12 @@ def summarize_cycle(
     return {
         "schema_version": 1,
         "record_type": "paper_cycle_result",
-        "snapshot_id": snapshot.snapshot_id,
-        "market_id": snapshot.market_id,
+        "snapshot_id": snapshot.snapshot_id if snapshot else "",
+        "market_id": snapshot.market_id if snapshot else "",
         "status": report.status,
         "reason": report.reason,
         "trader_called": True,
-        "reviewer_called": proposal.action == "trade",
+        "reviewer_called": REVIEW_KEY in state,
         "fill": public_fill,
         "event": event,
         "ledger_statuses": statuses,
@@ -192,7 +202,7 @@ def summarize_cycle(
 
 async def run_paper_cycle_state(
     config: HarnessConfig,
-    snapshot: MarketSnapshot,
+    snapshot: MarketSnapshot | None,
     operating: OperatingConfig,
     trader_model: BaseLlm | str | None = None,
     reviewer_model: BaseLlm | str | None = None,
@@ -200,10 +210,14 @@ async def run_paper_cycle_state(
     session_service: BaseSessionService | None = None,
     owned_models: Sequence[BaseLlm] = (),
     evidence: Sequence[EvidenceRecord] | None = None,
+    context: str | None = None,
+    draft: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], list[str], list[str]]:
     """Run one bounded ADK paper cycle and return runtime evaluation evidence."""
     external: list[EvidenceRecord] = []
     if evidence is not None:
+        if snapshot is None:
+            raise ValueError("evidence requires a snapshot")
         validated = validate_evidence_bundle(snapshot, list(evidence))
         if len(validated) < 2:
             raise ValueError("external evidence bundle is missing")
@@ -211,8 +225,8 @@ async def run_paper_cycle_state(
     created: tuple[BaseLlm, ...] = ()
     if trader_model is None and reviewer_model is None:
         created = (
-            resolve_model(config.models.adapter, config.models.trader),
-            resolve_model(config.models.adapter, config.models.reviewer),
+            resolve_model(config.models, config.models.trader),
+            resolve_model(config.models, config.models.reviewer),
         )
         trader_model, reviewer_model = created
     elif trader_model is None or reviewer_model is None:
@@ -231,8 +245,8 @@ async def run_paper_cycle_state(
             state={
                 "operating_config": asdict(operating),
                 "model_cost_policy": config.cost_policy,
-                "cycle_id": f"paper-cycle:{snapshot.snapshot_id}",
-                "market_snapshot": asdict(snapshot),
+                "cycle_id": f"paper-cycle:{snapshot.snapshot_id if snapshot else 'discovery'}",
+                **({"market_snapshot": asdict(snapshot)} if snapshot else {}),
                 **(
                     {
                         VALIDATED_EXTERNAL_EVIDENCE_KEY: [
@@ -251,7 +265,7 @@ async def run_paper_cycle_state(
             session_id=session_id,
             new_message=types.Content(
                 role="user",
-                parts=[types.Part(text=PaperCycleRequest().model_dump_json())],
+                parts=[types.Part(text=PaperCycleRequest(context=context, draft=draft).model_dump_json())],
             ),
         ):
             for part in (
@@ -269,7 +283,7 @@ async def run_paper_cycle_state(
             for node in workflow.graph.nodes
             if node.name in {"paper_market_trader", "independent_trade_reviewer"}
             for tool in node.tools
-            if (name := getattr(tool, "name", None)) is not None
+            if (name := getattr(tool, "name", getattr(tool, "__name__", None))) is not None
         ]
         return dict(session.state), function_calls, available_tools
     except BaseException as exc:
@@ -290,7 +304,7 @@ async def run_paper_cycle_state(
 
 async def run_paper_cycle(
     config: HarnessConfig,
-    snapshot: MarketSnapshot,
+    snapshot: MarketSnapshot | None,
     operating: OperatingConfig,
     trader_model: BaseLlm | str | None = None,
     reviewer_model: BaseLlm | str | None = None,
@@ -298,6 +312,8 @@ async def run_paper_cycle(
     session_service: BaseSessionService | None = None,
     owned_models: Sequence[BaseLlm] = (),
     evidence: Sequence[EvidenceRecord] | None = None,
+    context: str | None = None,
+    draft: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run one bounded ADK paper cycle over an already captured snapshot."""
     state, _, _ = await run_paper_cycle_state(
@@ -309,5 +325,7 @@ async def run_paper_cycle(
         session_service=session_service,
         owned_models=owned_models,
         evidence=evidence,
+        context=context,
+        draft=draft,
     )
     return summarize_cycle(config, snapshot, state)

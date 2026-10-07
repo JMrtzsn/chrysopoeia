@@ -78,6 +78,26 @@ class ModelCostLedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cycle model-call"):
             reserve_model_call(state, "chrysopoeia", "gemini-flash-latest", 1, 1, "call-3", NOW)
 
+    def test_configured_twelve_call_cycle_accounts_each_and_blocks_thirteenth(self) -> None:
+        state = configured_state()
+        state["model_cost_policy"] = {
+            **state["model_cost_policy"],
+            "maximum_model_calls_per_cycle": 12,
+        }
+        for number in range(12):
+            call_id = f"call-{number}"
+            reserve_model_call(
+                state, "paper_market_trader", "gemini-flash-latest", 1, 1,
+                call_id, NOW,
+            )
+            settle_model_call(state, call_id, 1, 1)
+        with self.assertRaisesRegex(ValueError, "cycle model-call"):
+            reserve_model_call(
+                state, "paper_market_trader", "gemini-flash-latest", 1, 1,
+                "call-12", NOW,
+            )
+        self.assertEqual(len(state["model_cost_ledger"]), 12)
+
     def test_daily_budget_aggregates_cycles_and_rolls_over_at_utc_date(self) -> None:
         state = configured_state(0.0003)
         reserve_model_call(state, "chrysopoeia", "gemini-flash-latest", 100, 50, "call-1", NOW)
@@ -121,7 +141,7 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         record = state["model_cost_ledger"][0]
-        self.assertEqual(record["estimated_reserved_usd"], "0.011264")
+        self.assertEqual(record["estimated_reserved_usd"], "0.0236544")
         self.assertEqual(record["date"], "2026-08-20")
         self.assertNotIn("operating_config", state)
         denied = await callback(
@@ -200,7 +220,7 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
         state: dict[str, object] = {}
         configure_operation(SimpleNamespace(state=state))
         self.assertIn("operating_config", state)
-        self.assertEqual(state["model_cost_policy"]["version"], "project-estimate-2026-08-v1")
+        self.assertEqual(state["model_cost_policy"]["version"], "project-estimate-2026-10-v1")
 
     def multi_model_state(self) -> dict[str, object]:
         return {

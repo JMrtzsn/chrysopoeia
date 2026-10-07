@@ -32,6 +32,8 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   change; the platform consumes the resulting image digest pin via Pulumi.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
+- The checked-in model is `gemini-3.5-flash`. Vertex calls use the `us` model
+  endpoint; this is independent of the platform's Cloud Run resource region.
 - The current paper journal path/record format is here; platform selects *where*
   it lives (`/mnt/journal`), not what it contains. It is not shared with future
   event consumers. The event transport and delivery guarantees are deferred.

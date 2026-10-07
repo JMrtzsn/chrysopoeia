@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from google.adk.models import BaseLlm
+from google.adk.models import BaseLlm, Gemini
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.sessions import InMemorySessionService
@@ -16,7 +16,13 @@ from pydantic import Field, SkipValidation
 
 from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.cost import LEDGER_KEY, settle_model_call
-from chrysopoeia.cycle_runner import run_paper_cycle, run_paper_cycle_state
+from chrysopoeia.cycle_runner import (
+    reserved_ceiling,
+    run_paper_cycle,
+    run_paper_cycle_state,
+    summarize_cycle,
+)
+from chrysopoeia.models import resolve_model
 from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
     ProposalOutput,
@@ -34,12 +40,29 @@ class FakeLlm(BaseLlm):
     calls: SkipValidation[list[str]]
     requests: SkipValidation[list[LlmRequest]] = Field(default_factory=list)
     raw_response: str | None = None
+    checked: bool = False
 
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False
     ) -> AsyncGenerator[LlmResponse, None]:
         self.calls.append(self.model)
         self.requests.append(llm_request)
+        if self.response.get("action") == "trade" and not self.checked:
+            self.checked = True
+            yield LlmResponse(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(function_call=types.FunctionCall(
+                        id="plan-check",
+                        name="check_trade_plan",
+                        args={"plan": self.response},
+                    ))],
+                ),
+                usage_metadata=types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=11, candidates_token_count=7
+                ),
+            )
+            return
         yield LlmResponse(
             content=types.Content(
                 role="model",
@@ -125,13 +148,19 @@ class CycleRunnerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(trader.requests), 2)
-        for request, schema in zip(
-            trader.requests, (ProposalOutput, ReviewOutput), strict=True
-        ):
+        self.assertEqual(len(trader.requests), 3)
+        for index, (request, schema) in enumerate(zip(
+            trader.requests, (ProposalOutput, ProposalOutput, ReviewOutput), strict=True
+        )):
             self.assertEqual(request.config.thinking_config.thinking_budget, 0)
             self.assertEqual(request.config.max_output_tokens, 1024)
-            self.assertIs(request.config.response_schema, schema)
+            self.assertIs(request.config.response_schema, None if index < 2 else schema)
+
+    def test_reserved_ceiling_uses_configured_model_call_cap(self) -> None:
+        self.assertEqual(reserved_ceiling(self.config), Decimal("0.2838528"))
+
+    def test_temporary_five_call_verification_cap(self) -> None:
+        self.assertEqual(reserved_ceiling(self.config, 5), Decimal("0.118272"))
 
     def test_largest_bounded_proposal_is_compact_relative_to_output_ceiling(
         self,
@@ -203,7 +232,7 @@ class CycleRunnerTests(unittest.TestCase):
     ) -> None:
         for action, count, status in (
             ("abstain", 1, "abstained"),
-            ("trade", 2, "approved"),
+            ("trade", 3, "approved"),
         ):
             trader, reviewer, calls = self.models(action)
             summary = asyncio.run(
@@ -215,10 +244,10 @@ class CycleRunnerTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertEqual(len(calls), count)
                 self.assertEqual(summary["status"], status)
-                self.assertEqual(summary["reviewer_called"], count == 2)
-                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.022528")
+                self.assertEqual(summary["reviewer_called"], action == "trade")
+                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.2838528")
                 self.assertLessEqual(
-                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.022528")
+                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.2838528")
                 )
                 self.assertEqual(
                     set(summary),
@@ -248,7 +277,7 @@ class CycleRunnerTests(unittest.TestCase):
                     self.assertIsNone(summary["event"])
 
     def test_one_call_budget_allows_abstention_but_not_a_second_call(self) -> None:
-        budget = Decimal("0.011264")
+        budget = Decimal("0.0236544")
         for action, succeeds in (("abstain", True), ("trade", False)):
             trader, reviewer, _ = self.models(action)
             operating = replace(
@@ -277,7 +306,43 @@ class CycleRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["status"], "rejected")
-        self.assertEqual(summary["reason"], "per-market exposure limit exceeded")
+        self.assertEqual(summary["reason"], "trade requires a successful matching plan check")
+        self.assertFalse(summary["reviewer_called"])
+
+    def test_trade_requires_explicit_check_tool_call_before_reviewer(self) -> None:
+        trader, reviewer, calls = self.models()
+        trader.checked = True
+
+        summary = asyncio.run(
+            run_paper_cycle(
+                self.config, self.snapshot, OperatingConfig(), trader, reviewer
+            )
+        )
+
+        self.assertEqual(calls, [self.config.models.trader])
+        self.assertEqual(summary["status"], "rejected")
+        self.assertEqual(
+            summary["reason"],
+            "trade requires a successful matching plan check",
+        )
+        self.assertFalse(summary["reviewer_called"])
+        self.assertIsNone(summary["event"])
+
+    def test_summary_uses_tool_selected_snapshot_and_rejects_target_switch(self) -> None:
+        trader, reviewer, _ = self.models("abstain")
+        state, _, _ = asyncio.run(
+            run_paper_cycle_state(
+                self.config, self.snapshot, OperatingConfig(), trader, reviewer
+            )
+        )
+        state["market_snapshot"] = {
+            **state["market_snapshot"],
+            "snapshot_id": "switched",
+            "market_id": "other",
+        }
+
+        with self.assertRaisesRegex(ValueError, "snapshot identity"):
+            summarize_cycle(self.config, self.snapshot, state)
 
     def test_external_evidence_is_identical_for_trader_and_reviewer(self) -> None:
         external = [
@@ -305,18 +370,26 @@ class CycleRunnerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(
-            calls, [self.config.models.trader, self.config.models.reviewer]
-        )
-        prompts = [request.contents[-1].parts[0].text for request in trader.requests]
+        self.assertEqual(calls, [self.config.models.trader] * 3)
+        prompts = [
+            request.contents[-1].parts[0].text
+            for request in trader.requests
+            if request.contents[-1].parts[0].text is not None
+        ]
         self.assertTrue(all(citation in prompt for prompt in prompts))
         self.assertEqual(
             state["paper_cycle_evidence"],
             [record.model_dump() for record in evidence],
         )
         self.assertEqual(state["paper_cycle_report"]["status"], "approved")
-        self.assertEqual((function_calls, available_tools), ([], []))
-        self.assertTrue(all(not request.config.tools for request in trader.requests))
+        self.assertEqual(function_calls, ["check_trade_plan"])
+        self.assertEqual(
+            available_tools,
+            ["find_markets", "get_market", "check_trade_plan"],
+        )
+        self.assertTrue(trader.requests[0].config.tools)
+        self.assertTrue(trader.requests[1].config.tools)
+        self.assertFalse(trader.requests[2].config.tools)
 
     def test_cycle_rejects_unvalidated_external_evidence_before_model_calls(
         self,
@@ -336,12 +409,23 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_model_resolution_routes_gemini_and_litellm_prefixes(self) -> None:
-        from chrysopoeia.cycle_runner import resolve_model
+        resolved = resolve_model(self.config.models, "gemini-3.5-flash")
+        self.assertIsInstance(resolved, Gemini)
+        self.assertEqual(
+            resolved.client_kwargs,
+            {"vertexai": True, "location": "us"},
+        )
 
-        resolved = resolve_model("adk-registry", "gemini-flash-latest")
+        resolved = resolve_model(
+            replace(self.config.models, adapter="adk-registry"),
+            "gemini-flash-latest",
+        )
         self.assertEqual(type(resolved).__name__, "Gemini")
         try:
-            luz = resolve_model("adk-registry", "ollama/llama3.1:8b")
+            luz = resolve_model(
+                replace(self.config.models, adapter="adk-registry"),
+                "ollama/llama3.1:8b",
+            )
         except ValueError as raised:
             # litellm is an optional google-adk[extensions] provider extra
             self.assertIn("litellm", str(raised))
