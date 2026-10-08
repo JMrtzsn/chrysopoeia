@@ -31,44 +31,40 @@ endpoint configured separately from the platform compute region.
 - The `trade_plan_ready` event producer and idempotent in-process paper consumer
   (`690d8f9`): `cycle` returns the reviewed, policy-accepted event; `run`
   consumes it locally while preserving bracket behavior.
+- Standalone local paper consumer (`31d2642`): `consume` reads an existing event,
+  obtains a fresh public quote, rechecks the plan, and writes the local journal
+  idempotently. Live verified 2026-10-07.
 - The bounded trader-tool loop (`292b762`): deterministic market discovery,
   snapshot retrieval, and trade-plan checks with fail-closed limits. Live
   verified with the checked-in Vertex model 2026-10-06.
 - One bounded live paper cycle through a non-Gemini provider (OpenRouter via ADK
   registry). Live verified 2026-09-27.
+- Bounded trader-tool loop through OpenRouter/LiteLLM using
+  `openai/gpt-4.1-mini` at the explicitly recorded rates. Live verified
+  2026-10-08; evidence is in `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
 
 ## Next
 
-1. **Standalone local paper consumer:** add a local CLI that reads an existing
-   `trade_plan_ready` JSON event, obtains a fresh public quote, rechecks the plan,
-   and writes the local paper journal idempotently. It must require no platform,
-   GCP, Pub/Sub, or always-on service.
-2. **OpenRouter tool-loop verification:** the `adk-registry`/LiteLLM adapter is
-   supported and had a bounded one-call smoke on 2026-09-27, but the checked-in
-   default is Vertex and the bounded trader-tool loop has not been verified with
-   an OpenRouter model. Select the OpenRouter model ID and matching explicit
-   prices, then run a bounded verification with `OPENROUTER_API_KEY` supplied
-   only through the ambient environment; never request or record its value.
-3. **Optional external event transport and GCP/other consumers:** only after the
+1. **Optional external event transport and GCP/other consumers:** only after the
    standalone local consumer, select transport and delivery guarantees and, if
    needed, deploy an independent consumer adapter. Specify quote freshness,
    idempotency, ledger ownership, recovery, and exit monitoring/protection before
    any live activation. Platform work is ordered in `../platform/ROADMAP.md`.
-4. **Polymarket live execution foundation:** verify the official Python SDK and
+2. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch in the consumer. Keep live mode
    disabled until all spec gates pass.
-5. **Bounded live activation:** only after gates pass, run separately approved
+3. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
    wallet through the independently deployed event consumer.
-6. **Citable research tools:** bounded providers normalized into provenance-
+4. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-7. **Additional venues and NO-side positions:** separate milestones after the
+5. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path is verified.
-8. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+6. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.
