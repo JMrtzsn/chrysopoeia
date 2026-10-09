@@ -26,19 +26,25 @@ Ordered platform work lives in `ROADMAP.md`.
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
   `job_args` Pulumi config for the current on-demand job. The harness owns
   bounded proposal cycles; platform does not drive them.
-- A future request adapter invokes the same harness core as the CLI. Future event
-  consumers deploy independently, do not import harness code, and own their
-  identities, effects, and ledgers. Transport and runtime choices remain
-  deferred until their delivery and exit-protection guarantees are specified.
+- The optional Pub/Sub adapter invokes `outbox-pending`/`outbox-ack` around
+  journal-backed `cycle`/`run` CLI commands and never imports Harness code or
+  parses its journal. Future event consumers deploy independently and own their
+  identities, effects, and ledgers.
 - Journal durability: the volume-mounted bucket behaves as `/mnt/journal`;
   record semantics belong to the harness, not here.
 
 ## Verification gates
 
+The file-backed `local-dev` stack contains no secure configuration. Keep
+credentials and other secrets out of it; its empty passphrase is only for this
+local verification stack, not production stacks.
+
 ```sh
-uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
-source .venv/bin/activate
-pulumi preview    # offline evidence gate: 0 pending changes is the pass mark
+uv venv platform/infra/.venv
+uv pip install --python platform/infra/.venv/bin/python -r platform/infra/requirements.txt
+source platform/infra/.venv/bin/activate
+PULUMI_CONFIG_PASSPHRASE='' \
+  pulumi -C platform/infra preview --stack local-dev    # 0 pending changes passes
 ```
 
 Live apply or job executions need explicit operator approval (per

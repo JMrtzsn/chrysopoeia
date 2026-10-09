@@ -29,6 +29,7 @@ job_args = config.get_object("job_args") or [
     "--journal",
     "/mnt/journal",
 ]
+pubsub_topic = config.get("pubsub_topic")
 
 bucket = gcp.storage.Bucket(
     "journals",
@@ -56,6 +57,31 @@ runner = gcp.serviceaccount.Account(
 )
 
 serviceaccount_member = pulumi.Output.concat("serviceAccount:", runner.email)
+
+if pubsub_topic:
+    pubsub_service = gcp.projects.Service(
+        "pubsub-service",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="pubsub.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=True,
+        ),
+    )
+    topic = gcp.pubsub.Topic(
+        "trade-plans",
+        gcp.pubsub.TopicArgs(project=project_id, name=pubsub_topic),
+        opts=pulumi.ResourceOptions(depends_on=[pubsub_service]),
+    )
+    gcp.pubsub.TopicIAMMember(
+        "runner-publisher",
+        gcp.pubsub.TopicIAMMemberArgs(
+            project=project_id,
+            topic=topic.name,
+            role="roles/pubsub.publisher",
+            member=serviceaccount_member,
+        ),
+    )
 
 gcp.projects.IAMMember(
     "runner-vertex-user",
@@ -136,7 +162,7 @@ paper_cycle_job = gcp.cloudrunv2.Job(
         project=project_id,
         location=region,
         name=f"chrysopoeia-cycle-{operator}",
-        launch_stage="BETA",
+        launch_stage="GA",
         deletion_protection=False,
         template=gcp.cloudrunv2.JobTemplateArgs(
             task_count=1,
@@ -161,6 +187,21 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                             gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
                                 name="GOOGLE_CLOUD_LOCATION",
                                 value=region,
+                            ),
+                            *(
+                                [
+                                    gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                        name="CHRYSOPOEIA_PUBSUB_OUTBOX", value="1"
+                                    ),
+                                    gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                        name="CHRYSOPOEIA_PUBSUB_TOPIC",
+                                        value=pulumi.Output.concat(
+                                            "projects/", project_id, "/topics/", topic.name
+                                        ),
+                                    ),
+                                ]
+                                if pubsub_topic
+                                else []
                             ),
                         ],
                         resources=(

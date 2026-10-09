@@ -69,6 +69,7 @@ weaken risk limits or force trades.
 
 Authenticated execution, non-YES positions, plan changes after entry, and
 partial paper exits are not part of the current accounting contract. Event
-publishing/subscription and external consumer ledgers are not implemented. The
-local paper consumer preserves this bracket behavior in the current journal;
-future external consumers do not share it.
+publishing is optional through the Platform Pub/Sub adapter; subscriptions and
+external consumer ledgers are not implemented here. The local paper consumer
+preserves this bracket behavior in the current journal; future external
+consumers do not share it.

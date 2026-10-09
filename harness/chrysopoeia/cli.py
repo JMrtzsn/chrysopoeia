@@ -438,7 +438,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     consume.add_argument("--event", type=Path, required=True)
     consume.add_argument("--journal", type=Path, required=True)
     consume.add_argument("--config", type=Path)
+    pending = commands.add_parser("outbox-pending")
+    pending.add_argument("--journal", type=Path, required=True)
+    ack = commands.add_parser("outbox-ack")
+    ack.add_argument("--journal", type=Path, required=True)
+    ack.add_argument("event_id")
     args = parser.parse_args(argv)
+    if args.command in {"cycle", "run"}:
+        from chrysopoeia.accounting import outbox_enabled
+
+        try:
+            enabled = outbox_enabled()
+        except ValueError as exc:
+            parser.exit(2, f"{args.command} failed: {exc}\n")
+        if enabled and args.command == "cycle" and args.journal is None:
+            parser.exit(2, "cycle failed: enabled outbox requires --journal\n")
+    if args.command in {"outbox-pending", "outbox-ack"}:
+        from chrysopoeia.accounting import (
+            JournalError,
+            acknowledge_event,
+            pending_events,
+        )
+
+        try:
+            if args.command == "outbox-pending":
+                for event in pending_events(args.journal):
+                    print(json.dumps(event, sort_keys=True, separators=(",", ":")))
+            else:
+                acknowledge_event(args.journal, args.event_id)
+        except (JournalError, OSError, ValueError) as exc:
+            parser.exit(2, f"{args.command} failed: {exc}\n")
+        return 0
     if args.command == "consume":
         from chrysopoeia.accounting import JournalError, replay
         from chrysopoeia.operations import consume_paper_event

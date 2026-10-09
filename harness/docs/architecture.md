@@ -21,6 +21,8 @@ flowchart TD
     State -->|same validated evidence| Reviewer
     Reviewer --> Policy["Deterministic policy<br/>review, edge, exposure, depth, fees"]
     Policy -->|allowed| Ready["trade_plan_ready<br/>verified plan, not a fill"]
+    Ready --> Outbox[("Optional journal outbox")]
+    Outbox -->|"pending/ack CLI"| Publisher["Platform Pub/Sub publisher"]
     Ready --> PaperConsumer["In-process or standalone local paper consumer"]
     PaperConsumer --> Quote["Independent depth/fee quote and paper simulation"]
     Policy -->|blocked| Outcome
@@ -54,7 +56,7 @@ flowchart TD
     Tool -. "tool response" .-> Trader
 
     classDef planned fill:#fff,stroke:#777,stroke-dasharray:5 5;
-    class Tool,Core,Integration,Source,ExecutionConsumer,LiveVenue,LiveLedger,Platform planned;
+    class Tool,Core,Integration,Source,ExecutionConsumer,LiveVenue,LiveLedger planned;
     style Planned fill:#fff,stroke:#777,stroke-dasharray:5 5;
 ```
 
@@ -92,11 +94,16 @@ flowchart TD
 - A producer-only `cycle` returns the serialized JSON event with no fill. The
   journal-backed local `run`/`cycle` path passes that event once to the in-process
   paper consumer, then returns and stores the event separately from its achieved
-  fill. It does not publish or subscribe; external delivery remains deferred.
+  fill. With `CHRYSOPOEIA_PUBSUB_OUTBOX=1`, accepted journal-backed events are
+  appended before that fill. `outbox-pending` returns canonical payloads and
+  `outbox-ack` records delivery; both are idempotent by `event_id`. The outbox is
+  delivery state, not a financial ledger. The selected optional producer
+  transport is Pub/Sub with this journal-backed at-least-once outbox; Harness
+  does not import or call Pub/Sub.
 - No always-on harness or manager process is required. CLI or future request
-  adapters invoke the same core. Transport, persistence/delivery guarantees, and
-  live order mechanisms are deferred. Any consumer/venue exit monitoring and
-  protection guarantees must be specified before live activation.
+  adapters invoke the same core. Independent consumers and live order mechanisms
+  are deferred. Any consumer/venue exit monitoring and protection guarantees
+  must be specified before live activation.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.
 

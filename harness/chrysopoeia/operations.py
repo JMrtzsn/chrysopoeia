@@ -196,6 +196,8 @@ async def run_journal_turn(
             }
             result["fill"] = fill
             result["status"] = "filled"
+            if accounting.outbox_enabled():
+                accounting.enqueue_event(journal, event)
             accounting.record_fill(
                 journal,
                 Position(

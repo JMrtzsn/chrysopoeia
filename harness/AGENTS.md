@@ -34,9 +34,10 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
 - The checked-in model is `gemini-3.5-flash`. Vertex calls use the `us` model
   endpoint; this is independent of the platform's Cloud Run resource region.
-- The current paper journal path/record format is here; platform selects *where*
-  it lives (`/mnt/journal`), not what it contains. It is not shared with future
-  event consumers. The event transport and delivery guarantees are deferred.
+- The paper journal path/record format and optional outbox are here; platform
+  selects *where* it lives (`/mnt/journal`), not what it contains. Platform may
+  use only the `outbox-pending`/`outbox-ack` CLI contract to publish through
+  Pub/Sub. It never parses the journal or imports Harness modules.
 
 ## Local verification gates (all from this folder, pre-commit enforced)
 

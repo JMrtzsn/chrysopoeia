@@ -1,3 +1,5 @@
+import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -424,6 +426,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(side_effect=filled_cycle),
             ),
             patch("chrysopoeia.loop.evaluate_exits", return_value=[]),
+            patch.dict(os.environ, {"CHRYSOPOEIA_PUBSUB_OUTBOX": "1"}),
         ):
             report, _ = await run_loop(
                 self.params(max_cycles=2),
@@ -438,6 +441,14 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             positions["1"].trade_plan.event_id,
             cycle_turn_id(snapshot("1").snapshot_id, "1"),
         )
+        records = [
+            json.loads(line)
+            for line in self.journal.joinpath("chrysopoeia.jsonl").read_text().splitlines()
+        ]
+        for event_id in (cycle_turn_id(snapshot("1").snapshot_id, "1"), cycle_turn_id(snapshot("2").snapshot_id, "2")):
+            enqueue = next(i for i, record in enumerate(records) if record.get("event", {}).get("event_id") == event_id)
+            fill_record = next(i for i, record in enumerate(records) if record.get("turn_id") == event_id and record["record_type"] == "fill_recorded")
+            self.assertLess(enqueue, fill_record)
 
     async def test_loop_evaluates_open_brackets_before_discovering_a_new_market(self) -> None:
         open_session(

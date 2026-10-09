@@ -48,23 +48,27 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Optional external event transport and GCP/other consumers:** only after the
-   standalone local consumer, select transport and delivery guarantees and, if
-   needed, deploy an independent consumer adapter. Specify quote freshness,
-   idempotency, ledger ownership, recovery, and exit monitoring/protection before
-   any live activation. Platform work is ordered in `../platform/ROADMAP.md`.
-2. **Polymarket live execution foundation:** verify the official Python SDK and
+1. The optional journal-backed producer outbox and pending/ack CLI contract for
+   the Platform Pub/Sub adapter passed operator-approved bounded live verification
+   locally on 2026-10-08. Commit remains pending, so this item is not yet
+   **Complete**; evidence is in `docs/verification.md`.
+2. **Independent event consumer (next development milestone):** Pub/Sub producer
+   transport is selected, but no subscriber is implemented. Specify quote
+   freshness, idempotency, ledger ownership, recovery, and exit
+   monitoring/protection before live activation. Platform work is ordered in
+   `../platform/ROADMAP.md`.
+3. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch in the consumer. Keep live mode
    disabled until all spec gates pass.
-3. **Bounded live activation:** only after gates pass, run separately approved
+4. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
    wallet through the independently deployed event consumer.
-4. **Citable research tools:** bounded providers normalized into provenance-
+5. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-5. **Additional venues and NO-side positions:** separate milestones after the
+6. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path is verified.
-6. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+7. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

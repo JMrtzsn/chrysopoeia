@@ -13,11 +13,13 @@ execution is not implemented.
   gates, and currently records in-process paper fills and outcomes.
 - The journal records paper sessions, turns, positions, marks, exits, settlements,
   and model cost. `cycle` returns a reviewed and policy-accepted
-  `trade_plan_ready` JSON event; `run` currently simulates its paper consumption
-  locally and in-process. A standalone local paper-consumer CLI is the next step.
+  `trade_plan_ready` JSON event; `run` consumes it in-process, while `consume`
+  consumes an existing event into the local paper journal using a fresh quote.
+  The journal outbox and Platform Pub/Sub publisher are optional and disabled by
+  default.
 - Google Search context is currently uncitable. Paper exits are simulated by the
-  bounded local loop; citable research tools and event consumers remain planned
-  work. No always-on harness or manager is required.
+  bounded local loop; citable research tools and independent Pub/Sub consumers
+  (subscribers) remain planned work. No always-on harness or manager is required.
 - The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
   priced at $1.65 input and $9.90 text output per million tokens. The model
   endpoint is separate from the Cloud Run resource region.

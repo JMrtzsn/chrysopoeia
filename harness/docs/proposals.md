@@ -89,12 +89,13 @@ has authority to alter the approved plan. Platform deployment and request
 adapters never import the harness package.
 
 The harness invocation may come from the existing CLI or a future HTTP/request
-adapter calling the same core. Event transport (Pub/Sub, HTTP, local stream, or
-other), persistence and delivery guarantees, and live order mechanisms are
-intentionally deferred. Exit monitoring/protection is consumer/venue behavior;
-its guarantees must be specified before live activation. The current cycle and
-`run` do not publish or subscribe: the local paper consumer receives the event
-in-process.
+adapter calling the same core. Pub/Sub is the selected optional producer
+transport with a journal-backed at-least-once outbox. Independent consumers and
+live order mechanisms remain deferred. Exit monitoring/protection is
+consumer/venue behavior; its guarantees must be specified before live
+activation. Harness `cycle` and `run` do not call Pub/Sub or subscribe: the local
+paper consumer receives the event in-process, while the Platform adapter may
+publish pending outbox events.
 
 ## Later position-management details
 

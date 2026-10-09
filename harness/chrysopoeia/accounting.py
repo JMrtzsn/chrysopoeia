@@ -17,10 +17,16 @@ from math import isfinite
 from pathlib import Path
 from typing import NoReturn
 
-from chrysopoeia.trading import ExitPlan, TradePlanReady, parse_trade_plan
+from chrysopoeia.trading import (
+    ExitPlan,
+    TradePlanReady,
+    parse_trade_plan,
+    validate_trade_plan,
+)
 
 SCHEMA_VERSION = 1
 JOURNAL_NAME = "chrysopoeia.jsonl"
+OUTBOX_ENV = "CHRYSOPOEIA_PUBSUB_OUTBOX"
 EVENT_TYPES = {
     "session_opened",
     "turn_admitted",
@@ -31,6 +37,8 @@ EVENT_TYPES = {
     "position_closed",
     "session_halted",
     "session_closed",
+    "outbox_enqueued",
+    "outbox_acknowledged",
 }
 TURN_OUTCOMES = {"filled", "abstained", "rejected", "failed", "abandoned"}
 RESOLUTIONS = {"resolved_yes", "resolved_no"}
@@ -53,6 +61,14 @@ def _clean(value: str, name: str) -> None:
 
 def journal_path(directory: Path) -> Path:
     return Path(directory) / JOURNAL_NAME
+
+
+def outbox_enabled() -> bool:
+    """Return the validated opt-in state for external event delivery."""
+    value = os.environ.get(OUTBOX_ENV)
+    if value not in (None, "0", "1"):
+        raise ValueError(f"{OUTBOX_ENV} must be 0 or 1")
+    return value == "1"
 
 
 def append_record(directory: Path, record_type: str, payload: dict) -> dict:
@@ -151,6 +167,8 @@ class Book:
     finished_turns: dict[str, str] = field(default_factory=dict)
     filled_turns: set[str] = field(default_factory=set)
     status: str = "empty"
+    outbox: dict[str, dict] = field(default_factory=dict)
+    acknowledged_events: set[str] = field(default_factory=set)
 
     @property
     def open_exposure(self) -> float:
@@ -380,6 +398,27 @@ def replay(directory: Path) -> Book:
             if book.status != "open" and book.status != HALTED_STATE:
                 _fail_corrupt(journal, number)
             book.status = "closed"
+        elif kind == "outbox_enqueued":
+            raw_event = record.get("event")
+            try:
+                event = parse_trade_plan(raw_event) if isinstance(raw_event, dict) else None
+            except ValueError:
+                event = None
+            if event is None:
+                _fail_corrupt(journal, number)
+            existing = book.outbox.get(event.event_id)
+            if existing is not None and existing != raw_event:
+                _fail_corrupt(journal, number)
+            book.outbox[event.event_id] = raw_event
+        elif kind == "outbox_acknowledged":
+            event_id = record.get("event_id")
+            if (
+                not isinstance(event_id, str)
+                or event_id not in book.outbox
+                or event_id in book.acknowledged_events
+            ):
+                _fail_corrupt(journal, number)
+            book.acknowledged_events.add(event_id)
     if sessions == 0:
         book.status = "empty"
     return book
@@ -560,6 +599,45 @@ def cycle_turn_id(snapshot_id: str, market_id: str) -> str:
     _clean(market_id, "market_id")
     identity = json.dumps([snapshot_id, market_id], separators=(",", ":"))
     return "turn-" + sha256(identity.encode()).hexdigest()[:24]
+
+
+def enqueue_event(directory: Path, raw_event: dict) -> dict:
+    """Durably enqueue one accepted trade plan, idempotently by event ID."""
+    try:
+        event = parse_trade_plan(raw_event)
+        validate_trade_plan(event, now=datetime.fromisoformat(event.created_at))
+    except (TypeError, ValueError):
+        raise ValueError("invalid trade plan event") from None
+    book = replay(directory)
+    existing = book.outbox.get(event.event_id)
+    if existing is not None:
+        if existing != raw_event:
+            raise JournalError(
+                f"event_id {event.event_id} already exists with different content"
+            )
+        return existing
+    return append_record(directory, "outbox_enqueued", {"event": raw_event})
+
+
+def pending_events(directory: Path) -> list[dict]:
+    """Return unacknowledged canonical event payloads in journal order."""
+    book = replay(directory)
+    return [
+        event
+        for event_id, event in book.outbox.items()
+        if event_id not in book.acknowledged_events
+    ]
+
+
+def acknowledge_event(directory: Path, event_id: str) -> dict:
+    """Durably acknowledge an enqueued event; repeated acknowledgement is a no-op."""
+    _clean(event_id, "event_id")
+    book = replay(directory)
+    if event_id not in book.outbox:
+        raise JournalError(f"event_id {event_id} is not enqueued")
+    if event_id in book.acknowledged_events:
+        return {"event_id": event_id}
+    return append_record(directory, "outbox_acknowledged", {"event_id": event_id})
 
 
 def admit_turn(directory: Path, turn_id: str, snapshot_id: str, market_id: str) -> dict:
