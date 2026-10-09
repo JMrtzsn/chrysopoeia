@@ -27,23 +27,22 @@ coordination decision, not a new platform work item.
   `docs/deployment.md`. The journal bucket and job remain the
   operator's durable session; multi-tenant hard isolation via one GCP project
   per tenant is deferred as described in `docs/deployment.md`.
+- [x] Optional Pub/Sub publisher (`3d942a5`): disabled by default; Harness
+  journal outbox plus Platform CLI adapter, topic-scoped publisher IAM, and
+  conditional API/topic setup. One synthetic event was published, confirmed,
+  received, and acknowledged through temporary resources, then cleaned up on
+  2026-10-08. No subscriber or Cloud Run rollout is included; see
+  `docs/deployment.md`.
 
 ## Next
 
-1. The optional Pub/Sub publisher passed operator-approved bounded live
-   verification locally on 2026-10-08. Commit remains pending, so this item is
-   not yet **Complete**; evidence is in `docs/deployment.md`. Pulumi creates only
-   the topic and topic-scoped publisher grant when `pubsub_topic` is configured;
-   absent configuration preserves the existing job. Before enabling publishing,
-   provision an active subscription and choose its retention policy separately.
-   This milestone includes no subscriber or consumer.
-2. **GCP/other event consumer (next development milestone):** with Pub/Sub
+1. **GCP/other event consumer (next development milestone):** with Pub/Sub
    selected as producer transport, separately approve and deploy an
    independent least-privilege consumer. Its runtime follows specified delivery,
    quote-freshness, reconciliation, and exit-protection requirements; it is not
    assumed to be an always-on manager. Keep each consumer's ledger separate,
    never import harness code, and keep authenticated execution disabled.
-3. Launch bounded paper `run` sessions from the Cloud Run Job once a released
+2. Launch bounded paper `run` sessions from the Cloud Run Job once a released
    harness artifact includes it. The job remains request-triggered; no always-on
    harness process is required.
 
