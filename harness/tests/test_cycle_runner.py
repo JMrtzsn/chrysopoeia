@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from google.adk.models import BaseLlm, Gemini
+from google.adk.models import BaseLlm, Gemini, LlmCapabilities
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.sessions import InMemorySessionService
@@ -41,6 +41,10 @@ class FakeLlm(BaseLlm):
     requests: SkipValidation[list[LlmRequest]] = Field(default_factory=list)
     raw_response: str | None = None
     checked: bool = False
+
+    @property
+    def capabilities(self) -> LlmCapabilities:
+        return LlmCapabilities(output_schema_and_tools=True)
 
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False
@@ -149,12 +153,12 @@ class CycleRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(len(trader.requests), 3)
-        for index, (request, schema) in enumerate(zip(
+        for request, schema in zip(
             trader.requests, (ProposalOutput, ProposalOutput, ReviewOutput), strict=True
-        )):
+        ):
             self.assertEqual(request.config.thinking_config.thinking_budget, 0)
             self.assertEqual(request.config.max_output_tokens, 1024)
-            self.assertIs(request.config.response_schema, None if index < 2 else schema)
+            self.assertIs(request.config.response_schema, schema)
 
     def test_reserved_ceiling_uses_configured_model_call_cap(self) -> None:
         self.assertEqual(reserved_ceiling(self.config), Decimal("0.2838528"))

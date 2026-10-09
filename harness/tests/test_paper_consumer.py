@@ -6,7 +6,7 @@ import unittest
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from chrysopoeia import cli
 from chrysopoeia.accounting import (
@@ -245,7 +245,8 @@ class PaperConsumerTests(unittest.TestCase):
         source = self.journal / "event.json"
         source.write_text(json.dumps(asdict(self.event)))
         fresh = self.snapshot("quote-snapshot")
-        with MockCli(), MockQuote(fresh) as load:
+        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli(), MockQuote(fresh) as load:
+            clock.now.return_value = self.now
             first = cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
             second = cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
 
@@ -255,13 +256,15 @@ class PaperConsumerTests(unittest.TestCase):
     def test_cli_rejects_unsafe_event_input_and_sanitizes_quote_failure(self) -> None:
         source = self.journal / "event.json"
         source.write_text('{"schema_version":1,"schema_version":1}')
-        with MockCli() as output:
+        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli() as output:
+            clock.now.return_value = self.now
             with self.assertRaisesRegex(SystemExit, "2"):
                 cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
         self.assertEqual(output.stderr.getvalue(), "consume failed: invalid event\n")
 
         source.write_text(json.dumps(asdict(self.event)))
-        with MockCli() as output, MockQuote(side_effect=RuntimeError("private token")):
+        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli() as output, MockQuote(side_effect=RuntimeError("private token")):
+            clock.now.return_value = self.now
             with self.assertRaisesRegex(SystemExit, "2"):
                 cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
         self.assertEqual(output.stderr.getvalue(), "consume failed: market data unavailable\n")

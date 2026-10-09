@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from google.adk.models import BaseLlm
+from google.adk.models import BaseLlm, LlmCapabilities
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
@@ -23,6 +23,10 @@ class FakeLlm(BaseLlm):
     agent_name: str
     response: dict[str, object]
     checked: bool = False
+
+    @property
+    def capabilities(self) -> LlmCapabilities:
+        return LlmCapabilities(output_schema_and_tools=True)
 
     async def generate_content_async(
         self, llm_request: LlmRequest, stream: bool = False
@@ -50,18 +54,10 @@ class FakeLlm(BaseLlm):
                 ),
             )
             return
-        if llm_request.tools_dict:
-            parts = [
-                types.Part(
-                    function_call=types.FunctionCall(
-                        id="structured-response",
-                        name="set_model_response",
-                        args=self.response,
-                    )
-                )
-            ]
-        else:
+        if llm_request.config.response_schema is not None:
             parts = [types.Part(text=json.dumps(self.response))]
+        else:
+            raise AssertionError("structured output schema is required")
         yield LlmResponse(
             content=types.Content(role="model", parts=parts),
             usage_metadata=types.GenerateContentResponseUsageMetadata(
@@ -162,9 +158,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 for key, value in initial.items():
                     self.assertEqual(state[key], value)
                 self.assertEqual(set(summary), evaluation.SUMMARY_FIELDS)
-                self.assertEqual(
-                    function_calls, ["check_trade_plan", "set_model_response"]
-                )
+                self.assertEqual(function_calls, ["check_trade_plan"])
                 self.assertEqual(
                     available_tools,
                     ["find_markets", "get_market", "check_trade_plan"],
@@ -189,7 +183,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         summary = evaluation.grade(state, function_calls, available_tools)
 
         self.assertEqual(calls, [trader_agent.name])
-        self.assertEqual(function_calls, ["set_model_response"])
+        self.assertEqual(function_calls, [])
         self.assertEqual(summary["status"], "abstained")
         self.assertEqual(summary["reason"], "trader_abstained")
         self.assertFalse(summary["reviewer_called"])
