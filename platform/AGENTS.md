@@ -1,9 +1,9 @@
 # Platform Work Unit
 
 GCP deployment: container image build/publish, Pulumi base (bucket, runner
-identity, Artifact Registry, on-demand Cloud Run job), digest pinning, and future
-deployment/trigger adapters. The sibling `harness/` folder is a separate work
-unit and owns application code and event contracts.
+identity, Artifact Registry, on-demand Cloud Run job), digest pinning, and the
+optional independent consumer service/subscription/scheduler. Sibling work units
+own application behavior; Harness owns event contracts.
 Ordered platform work lives in `ROADMAP.md`.
 
 ## Owned
@@ -15,7 +15,7 @@ Ordered platform work lives in `ROADMAP.md`.
 
 ## Off-limits
 
-- `harness/**` (application code; only a released wheel/image is consumed)
+- `harness/**`, `consumer/**` (application code; only pinned images are consumed)
 - Any import of the harness package: the platform installs `dist/*.whl` and
   calls the image's ENTRYPOINT CLI only.
 
@@ -32,6 +32,9 @@ Ordered platform work lives in `ROADMAP.md`.
   identities, effects, and ledgers.
 - Journal durability: the volume-mounted bucket behaves as `/mnt/journal`;
   record semantics belong to the harness, not here.
+- Consumer resources exist only when both `consumer_image_digest` and
+  `pubsub_topic` are configured. Its dedicated identity can access only its
+  separate ledger bucket; a separate OIDC identity invokes the private service.
 
 ## Verification gates
 

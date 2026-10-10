@@ -33,16 +33,16 @@ coordination decision, not a new platform work item.
   received, and acknowledged through temporary resources, then cleaned up on
   2026-10-08. No subscriber or Cloud Run rollout is included; see
   `docs/deployment.md`.
+- [x] Optional paper-consumer deployment shape: conditional on both a pinned
+  `consumer_image_digest` and producer topic, with separate ledger/runtime
+  identity, scale-to-zero service (one instance/concurrency one), OIDC push and
+  minute sweep, retry, retention, and dead letter resources. Bounded live
+  verification passed 2026-10-10 (push, fill, sweep close; temporary resources
+  removed); see `docs/deployment.md`. Not left deployed.
 
 ## Next
 
-1. **GCP/other event consumer (next development milestone):** with Pub/Sub
-   selected as producer transport, separately approve and deploy an
-   independent least-privilege consumer. Its runtime follows specified delivery,
-   quote-freshness, reconciliation, and exit-protection requirements; it is not
-   assumed to be an always-on manager. Keep each consumer's ledger separate,
-   never import harness code, and keep authenticated execution disabled.
-2. Launch bounded paper `run` sessions from the Cloud Run Job once a released
+1. Launch bounded paper `run` sessions from the Cloud Run Job once a released
    harness artifact includes it. The job remains request-triggered; no always-on
    harness process is required.
 

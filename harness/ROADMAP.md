@@ -52,7 +52,7 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Independent event consumer (next development milestone):** Pub/Sub producer
+1. **Independent event consumer (implemented in sibling work unit):** Pub/Sub producer
    transport is selected, but no subscriber is implemented. Specify quote
    freshness, idempotency, ledger ownership, recovery, and exit
    monitoring/protection before live activation. Platform work is ordered in
@@ -63,7 +63,8 @@ The recorded commands and evidence for harness milestones are in
    disabled until all spec gates pass.
 3. **Bounded live activation:** only after gates pass, run separately approved
    smallest-possible live order and exit verification with the dedicated $10
-   wallet through the independently deployed event consumer.
+   wallet through a future independently deployed execution consumer. Harness
+   work ends at schema/event/outbox; local `consume` remains development-only.
 4. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
 5. **Additional venues and NO-side positions:** separate milestones after the

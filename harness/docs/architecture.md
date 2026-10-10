@@ -23,7 +23,8 @@ flowchart TD
     Policy -->|allowed| Ready["trade_plan_ready<br/>verified plan, not a fill"]
     Ready --> Outbox[("Optional journal outbox")]
     Outbox -->|"pending/ack CLI"| Publisher["Platform Pub/Sub publisher"]
-    Ready --> PaperConsumer["In-process or standalone local paper consumer"]
+    Ready --> PaperConsumer["In-process or standalone local development consumer"]
+    Publisher --> IndependentConsumer["Independent paper-only consumer<br/>separate ledger"]
     PaperConsumer --> Quote["Independent depth/fee quote and paper simulation"]
     Policy -->|blocked| Outcome
     Quote --> Journal[("Local journal<br/>turns, positions, marks, closes, settlement, cost")]
@@ -101,8 +102,9 @@ flowchart TD
   transport is Pub/Sub with this journal-backed at-least-once outbox; Harness
   does not import or call Pub/Sub.
 - No always-on harness or manager process is required. CLI or future request
-  adapters invoke the same core. Independent consumers and live order mechanisms
-  are deferred. Any consumer/venue exit monitoring and protection guarantees
+  adapters invoke the same core. The deployed paper consumer is independently
+  implemented in `consumer/`; live order mechanisms remain deferred. Any live
+  consumer/venue exit monitoring and protection guarantees
   must be specified before live activation.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.

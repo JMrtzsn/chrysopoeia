@@ -18,8 +18,8 @@ execution is not implemented.
   The journal outbox and Platform Pub/Sub publisher are optional and disabled by
   default.
 - Google Search context is currently uncitable. Paper exits are simulated by the
-  bounded local loop; citable research tools and independent Pub/Sub consumers
-  (subscribers) remain planned work. No always-on harness or manager is required.
+  bounded local loop. The independent paper-only Pub/Sub consumer owns separate
+  entry/exit simulation and accounting. No always-on harness is required.
 - The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
   priced at $1.65 input and $9.90 text output per million tokens. The model
   endpoint is separate from the Cloud Run resource region.
@@ -58,13 +58,14 @@ the paper journal. No cycle guarantees a trade.
   recorded model/venue runs.
 - [Platform deployment](platform/docs/deployment.md): Cloud Run shape, policy,
   and platform verification record.
+- [Paper consumer](consumer/README.md): independent push/sweep and ledger contract.
 - [Harness roadmap](harness/ROADMAP.md) and [platform roadmap](platform/ROADMAP.md):
   independent work queues.
 - [Harness proposals](harness/docs/proposals.md): unapproved feature proposals.
 
 ## Repository boundaries
 
-`harness/` owns the agent loop, trading policy, paper accounting, CLI, and tests.
-It publishes a wheel/image and never provisions cloud resources. `platform/`
-owns Pulumi and the Cloud Run job, consumes a pinned harness image, and never
-imports the harness package. See each folder's `AGENTS.md` for work-unit rules.
+`harness/` owns the producer and versioned event schema. `consumer/` validates
+that schema as data and owns paper effects in a separate ledger. `platform/`
+owns conditional GCP resources and consumes pinned image digests; it imports
+neither package. See each folder's `AGENTS.md` for work-unit rules.

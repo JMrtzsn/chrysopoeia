@@ -11,13 +11,19 @@
 
 ## Ownership
 
-This monorepo has two work units:
+This monorepo has three work units:
 
 - `harness/`: proposal/review loop, deterministic trading and event-contract
   logic, paper accounting, CLI, tests, configuration, and offline gates. It
   produces a wheel/image and never runs `gcloud` or `pulumi`.
 - `platform/`: Pulumi deployment and wheel-based container build. It consumes a
   pinned harness image and never imports the harness package.
+- `consumer/`: independent paper-only HTTP consumer, public quote checks, and a
+  separate journal. It consumes the Harness-owned schema as data and never
+  imports Harness or shares its ledger.
+
+Root `contracts/` contains versioned data contracts. Harness owns
+`trade_plan_ready`; consumers validate the schema without package imports.
 
 Keep changes within the owning folder. Cross-work-unit changes require explicit
 operator approval in both plans. See each folder's `AGENTS.md` for its contract

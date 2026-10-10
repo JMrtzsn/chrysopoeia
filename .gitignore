@@ -4,8 +4,12 @@ platform/infra/.venv/
 platform/.build/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+dist/
+*.py[cod]
 artifacts/
 .env
 infra/state/
 platform/infra/state/
 .idea/
+.build/

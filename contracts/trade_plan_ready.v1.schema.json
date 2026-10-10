@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chrysopoeia.local/contracts/trade_plan_ready.v1.schema.json",
+  "title": "Harness-owned trade_plan_ready event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "event_id", "created_at", "market_id", "snapshot_id", "instrument_id", "outcome", "probability", "stake", "max_entry_price", "exit_plan", "reviewer_approved", "reviewer_citations", "policy_references", "evidence_references", "expires_at", "market_end"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "record_type": {"const": "trade_plan_ready"},
+    "event_id": {"type": "string", "pattern": "^turn-[0-9a-f]{24}$"},
+    "created_at": {"type": "string", "format": "date-time", "maxLength": 64},
+    "market_id": {"type": "string", "pattern": "^[1-9][0-9]{0,99}$"},
+    "snapshot_id": {"$ref": "#/$defs/id"},
+    "instrument_id": {"$ref": "#/$defs/id"},
+    "outcome": {"const": "YES"},
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "stake": {"type": "number", "exclusiveMinimum": 0},
+    "max_entry_price": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+    "exit_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["take_profit_roi", "stop_loss_roi", "exit_by", "hold_to_resolution"],
+      "properties": {
+        "take_profit_roi": {"type": "number", "exclusiveMinimum": 0},
+        "stop_loss_roi": {"type": ["number", "null"], "minimum": -1, "exclusiveMaximum": 0},
+        "exit_by": {"type": ["string", "null"], "format": "date-time", "maxLength": 64},
+        "hold_to_resolution": {"type": "boolean"}
+      }
+    },
+    "reviewer_approved": {"const": true},
+    "reviewer_citations": {"$ref": "#/$defs/references"},
+    "policy_references": {"type": "array", "prefixItems": [{"const": "hard-policy-v1"}], "items": false, "minItems": 1, "maxItems": 1},
+    "evidence_references": {"$ref": "#/$defs/references"},
+    "expires_at": {"type": "string", "format": "date-time", "maxLength": 64},
+    "market_end": {"type": "string", "format": "date-time", "maxLength": 64}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"},
+    "references": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 500}, "minItems": 1, "maxItems": 100, "uniqueItems": true}
+  }
+}

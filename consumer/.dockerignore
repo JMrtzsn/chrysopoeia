@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!dist/*.whl
+!.build/trade_plan_ready.v1.schema.json
