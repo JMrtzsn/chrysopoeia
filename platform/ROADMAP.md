@@ -45,6 +45,9 @@ coordination decision, not a new platform work item.
 1. Launch bounded paper `run` sessions from the Cloud Run Job once a released
    harness artifact includes it. The job remains request-triggered; no always-on
    harness process is required.
+2. Deploy the live-execution consumer (separate identity and secret handling)
+   only after `../consumer/ROADMAP.md` live-execution gates pass and are
+   approved.
 
 ## Deferred
 

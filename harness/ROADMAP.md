@@ -38,6 +38,9 @@ endpoint configured separately from the platform compute region.
   (`3d942a5`): accepted plans are durably pending until publish confirmation and
   CLI acknowledgement. Bounded live verification passed 2026-10-08; no subscriber
   or consumer is included. Evidence is in `docs/verification.md`.
+- Shared `trade_plan_ready` v1 schema in `../contracts/` (`3b495d1`), consumed
+  as data by the independent paper consumer in `../consumer/`. Harness work for
+  event consumption ends at the schema, event, and outbox.
 - The bounded trader-tool loop (`292b762`): deterministic market discovery,
   snapshot retrieval, and trade-plan checks with fail-closed limits. Live
   verified with the checked-in Vertex model 2026-10-06.
@@ -52,24 +55,12 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Independent event consumer (implemented in sibling work unit):** Pub/Sub producer
-   transport is selected, but no subscriber is implemented. Specify quote
-   freshness, idempotency, ledger ownership, recovery, and exit
-   monitoring/protection before live activation. Platform work is ordered in
-   `../platform/ROADMAP.md`.
-2. **Polymarket live execution foundation:** verify the official Python SDK and
-   supported EOA/order flow; implement isolated execution, structural limits,
-   preflight, reconciliation, and kill switch in the consumer. Keep live mode
-   disabled until all spec gates pass.
-3. **Bounded live activation:** only after gates pass, run separately approved
-   smallest-possible live order and exit verification with the dedicated $10
-   wallet through a future independently deployed execution consumer. Harness
-   work ends at schema/event/outbox; local `consume` remains development-only.
-4. **Citable research tools:** bounded providers normalized into provenance-
+1. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-5. **Additional venues and NO-side positions:** separate milestones after the
-   Polymarket YES-only live path is verified.
-6. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+2. **Additional venues and NO-side positions:** separate milestones after the
+   Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
+   event-contract change is a new schema version.
+3. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

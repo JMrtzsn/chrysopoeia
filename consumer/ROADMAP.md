@@ -11,8 +11,15 @@
   one Scheduler sweep time-exit close, mounted ledger across revision deploys.
   Evidence: `../platform/docs/deployment.md`.
 
-## Not yet exercised live
+## Next
 
-- YES/NO settlement, dead-letter delivery, and concurrent-revision writers.
+1. **Remaining paper live checks:** YES/NO settlement, dead-letter delivery and
+   replay, and the revision-rollover single-writer ceiling.
+2. **Polymarket live execution foundation:** verify the official Python SDK and
+   supported EOA/order flow; implement isolated execution, structural limits,
+   preflight, reconciliation, and kill switch here. Live mode stays disabled
+   until all spec gates pass.
+3. **Bounded live activation:** only after gates pass, run a separately approved
+   smallest-possible live order and exit with the dedicated $10 wallet.
 
-Authenticated execution remains prohibited.
+Authenticated execution remains prohibited until step 3 is approved.
