@@ -14,3 +14,39 @@ Configuration is through `CONSUMER_JOURNAL`, `CONSUMER_BANKROLL`,
 fees.
 
 No model, credentials, signing, order, or live-execution code exists here.
+
+## Run locally
+
+For manual debugging and trying market adapters against real public data:
+
+```sh
+uv sync
+CONSUMER_JOURNAL=/tmp/consumer/ledger.jsonl \
+  uv run uvicorn paper_consumer.app:app --host 127.0.0.1 --port 8080 --workers 1
+```
+
+In another shell:
+
+```sh
+uv run python scripts/send_event.py event.json   # POST /push, prints HTTP status
+uv run python scripts/send_event.py --sweep      # POST /sweep (exits/settlement)
+cat /tmp/consumer/ledger.jsonl
+```
+
+`event.json` is a `trade_plan_ready` v1 event
+(`../contracts/trade_plan_ready.v1.schema.json`). Its `event_id` must be
+`turn-` + the first 24 hex chars of SHA-256 over compact JSON
+`[snapshot_id, market_id]`; the script checks this and wraps the event in the
+real Pub/Sub push envelope.
+
+- Local runs have no authentication; bind to `127.0.0.1` only.
+- The service makes real public Polymarket Gamma/CLOB reads. Fills are paper only.
+- `204` means a durable fill or terminal rejection; `503` means retryable failure.
+
+## Adding a market provider
+
+A provider implements the `Market` protocol in `paper_consumer/core.py`:
+`load(market_id, token_id, now) -> Quote`. Normalize the venue's response into
+`Quote` (executable book, freshness timestamp, resolution) before any risk check
+sees it, and follow the `PublicMarketTests` pattern for bounded, strict parsing.
+Only Polymarket exists today; `app.py` selects it directly.

@@ -7,7 +7,7 @@ exits, settlements, HTTP service, tests, project, and container. It never import
 
 ## Owned
 
-- `paper_consumer/`, `tests/`, `pyproject.toml`, `uv.lock`
+- `paper_consumer/`, `tests/`, `scripts/`, `pyproject.toml`, `uv.lock`
 - `Dockerfile`, `build.sh`, `README.md`, `ROADMAP.md`
 
 The shared schema at `../contracts/trade_plan_ready.v1.schema.json` is owned by

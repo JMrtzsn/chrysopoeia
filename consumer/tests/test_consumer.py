@@ -104,6 +104,27 @@ def quote(**changes: object) -> Quote:
     return Quote(**values)
 
 
+class LocalSendScriptTests(unittest.TestCase):
+    def test_script_envelope_is_accepted_by_push_and_fills(self) -> None:
+        import importlib.util
+
+        path = Path(__file__).parents[1] / "scripts" / "send_event.py"
+        spec = importlib.util.spec_from_file_location("send_event", path)
+        assert spec is not None and spec.loader is not None
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        with tempfile.TemporaryDirectory() as temp:
+            journal = Path(temp) / "ledger.jsonl"
+            client = TestClient(
+                create_app(Config(journal=journal, fee_rate=0.01), FakeMarket(), lambda: NOW)
+            )
+            value = event()
+
+            self.assertEqual(value["event_id"], script.event_id("plan-snapshot", "12345"))
+            self.assertEqual(client.post("/push", json=script.envelope(value)).status_code, 204)
+            self.assertEqual(json.loads(journal.read_text())["status"], "filled")
+
+
 class ConsumerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
