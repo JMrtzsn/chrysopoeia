@@ -6,6 +6,11 @@ is enforced by Cloud Run IAM. The service validates the Harness-owned v1 schema,
 fetches bounded public metadata/books, independently checks risk and depth, and
 records paper-only outcomes in its own append-only journal.
 
+It is an idempotent consumer under at-least-once delivery: redeliveries with
+the same `event_id` never repeat a fill, and failures after ten attempts land in
+the dead-letter queue. See the event-driven architecture table in
+`../README.md`.
+
 Configuration is through `CONSUMER_JOURNAL`, `CONSUMER_BANKROLL`,
 `CONSUMER_MAXIMUM_STAKE`, `CONSUMER_MAXIMUM_MARKET_EXPOSURE`,
 `CONSUMER_MAXIMUM_TOTAL_EXPOSURE`, `CONSUMER_MAXIMUM_LOSS`,

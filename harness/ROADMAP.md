@@ -55,12 +55,18 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Citable research tools:** bounded providers normalized into provenance-
+1. **Direct event publishing:** Harness publishes to an optional sink right
+   after the outbox write; no sink keeps local runs Pub/Sub-free.
+2. **Outcome events:** versioned schemas for abstained, reviewer-rejected,
+   policy-rejected, and plan-ready turns, published through the same outbox.
+3. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-2. **Additional venues and NO-side positions:** separate milestones after the
+4. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+   after outcome data exists; see the spec's approved future item.
+5. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-3. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+6. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

@@ -63,6 +63,24 @@ the paper journal. No cycle guarantees a trade.
   independent work queues.
 - [Harness proposals](harness/docs/proposals.md): unapproved feature proposals.
 
+## Event-driven architecture
+
+The system is event-driven: each unit owns its state and publishes what happened.
+Current and planned (see roadmaps) patterns:
+
+| Pattern | Here |
+| --- | --- |
+| Domain events / event notification | `trade_plan_ready` today; outcome events (abstained, rejected, opened, closed, settled) planned |
+| Transactional outbox | Harness journal outbox; publish after the durable write |
+| At-least-once delivery + idempotent consumer | Pub/Sub retries; consumers deduplicate by stable `event_id` |
+| Dead-letter queue | Consumer subscription dead-letters after ten attempts |
+| CQRS read model / projections | Planned: Pub/Sub BigQuery subscriptions for analytics views |
+| Decision (outcome) logging | Planned: successes and failures, including reviewer and policy rejections |
+| Retrieval-augmented context / closed learning loop | Approved future item: past outcomes as untrusted, provenance-carrying evidence |
+
+This is not event sourcing: each unit's own ledger stays authoritative; analytics
+copies are never used for balances, risk, or lifecycle decisions.
+
 ## Repository boundaries
 
 `harness/` owns the producer and versioned event schema. `consumer/` validates

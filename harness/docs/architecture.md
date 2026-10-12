@@ -106,6 +106,9 @@ flowchart TD
   implemented in `consumer/`; live order mechanisms remain deferred. Any live
   consumer/venue exit monitoring and protection guarantees
   must be specified before live activation.
+- In event-driven terms: the journal outbox is a transactional outbox, delivery
+  is at-least-once, and consumers are idempotent by `event_id`. Planned outcome
+  events and BigQuery read models are listed in `../../README.md`.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.
 
