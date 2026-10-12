@@ -17,8 +17,8 @@ Cloud.
 - This job is not an HTTP server. Paper fills and exits are simulated in-process
   only while the paper loop runs. Optional `pubsub_topic` Pulumi configuration
   creates a topic and only a topic-scoped `roles/pubsub.publisher` grant for the
-  runner. It also enables the Harness journal outbox and Platform publisher
-  adapter. Absent configuration leaves the existing CLI execution unchanged.
+  runner. It sets `CHRYSOPOEIA_EVENT_SINK=pubsub:projects/<project>/topics/<topic>`
+  on the plain Harness CLI image. Absent configuration leaves execution unchanged.
 - When both `consumer_image_digest` and `pubsub_topic` are set, Pulumi adds the
   independent paper consumer: separate versioned ledger bucket and bucket-only
   runtime identity, private service pinned by digest with revision minimum zero,
@@ -32,13 +32,12 @@ Cloud.
 - Google API authentication uses the runner's ambient identity. Harness code
   never provisions cloud resources or invokes `gcloud`/`pulumi`.
 
-The adapter drains old pending events before `cycle`/`run`, invokes the Harness
-CLI, then drains new events. It publishes the exact pending JSON line as Pub/Sub
-data and acknowledges through the Harness CLI only after publish confirmation.
-Failures exit nonzero without acknowledging, so retries may duplicate delivery;
-future consumers must deduplicate by `event_id`. The adapter never parses the
-journal or imports Harness modules. No subscriber or authenticated trading is
-part of this milestone.
+Harness drains old pending events before `cycle`/`run` and between run cycles,
+publishes canonical event JSON with the `event_id` attribute, and acknowledges
+only after confirmation. Failures leave events pending and may duplicate
+delivery, so consumers deduplicate by `event_id`. Platform retains topic and IAM
+only; it has no publisher wrapper. No authenticated trading is part of this
+milestone.
 
 With neither consumer setting, no consumer resources exist. Setting
 `consumer_image_digest` without `pubsub_topic` is a configuration error. With both

@@ -22,7 +22,7 @@ flowchart TD
     Reviewer --> Policy["Deterministic policy<br/>review, edge, exposure, depth, fees"]
     Policy -->|allowed| Ready["trade_plan_ready<br/>verified plan, not a fill"]
     Ready --> Outbox[("Optional journal outbox")]
-    Outbox -->|"pending/ack CLI"| Publisher["Platform Pub/Sub publisher"]
+    Outbox -->|"confirmed direct delivery"| Publisher["Harness event sink"]
     Ready --> PaperConsumer["In-process or standalone local development consumer"]
     Publisher --> IndependentConsumer["Independent paper-only consumer<br/>separate ledger"]
     PaperConsumer --> Quote["Independent depth/fee quote and paper simulation"]
@@ -95,12 +95,14 @@ flowchart TD
 - A producer-only `cycle` returns the serialized JSON event with no fill. The
   journal-backed local `run`/`cycle` path passes that event once to the in-process
   paper consumer, then returns and stores the event separately from its achieved
-  fill. With `CHRYSOPOEIA_PUBSUB_OUTBOX=1`, accepted journal-backed events are
-  appended before that fill. `outbox-pending` returns canonical payloads and
+  fill. With `CHRYSOPOEIA_EVENT_SINK` set, accepted journal-backed events are
+  appended before that fill, published directly to loopback HTTP or Pub/Sub, and
+  acknowledged only after confirmation. Pending events drain oldest-first before
+  work and between run cycles. `outbox-pending` returns canonical payloads and
   `outbox-ack` records delivery; both are idempotent by `event_id`. The outbox is
   delivery state, not a financial ledger. The selected optional producer
-  transport is Pub/Sub with this journal-backed at-least-once outbox; Harness
-  does not import or call Pub/Sub.
+  transport is selected by the sink with this journal-backed at-least-once
+  outbox. Unset performs no publishing, Pub/Sub import, or network call.
 - No always-on harness or manager process is required. CLI or future request
   adapters invoke the same core. The deployed paper consumer is independently
   implemented in `consumer/`; live order mechanisms remain deferred. Any live

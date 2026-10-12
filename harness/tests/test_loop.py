@@ -426,7 +426,11 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(side_effect=filled_cycle),
             ),
             patch("chrysopoeia.loop.evaluate_exits", return_value=[]),
-            patch.dict(os.environ, {"CHRYSOPOEIA_PUBSUB_OUTBOX": "1"}),
+            patch.dict(
+                os.environ,
+                {"CHRYSOPOEIA_EVENT_SINK": "http://127.0.0.1:8080/push"},
+            ),
+            patch("chrysopoeia.events.publish"),
         ):
             report, _ = await run_loop(
                 self.params(max_cycles=2),

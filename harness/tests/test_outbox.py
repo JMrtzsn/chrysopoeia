@@ -17,6 +17,7 @@ from chrysopoeia.accounting import (
     pending_events,
     replay,
 )
+from chrysopoeia.events import configured_sink
 
 
 def event(stake: float = 4.0) -> dict[str, object]:
@@ -104,11 +105,36 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(pending_events(self.directory), [])
 
     def test_enabled_cycle_without_journal_fails_before_configuration_or_model_work(self) -> None:
-        with patch.dict(os.environ, {"CHRYSOPOEIA_PUBSUB_OUTBOX": "1"}):
+        with patch.dict(
+            os.environ,
+            {"CHRYSOPOEIA_EVENT_SINK": "pubsub:projects/p/topics/t"},
+            clear=False,
+        ):
             code, output, error = self.invoke("cycle")
 
         self.assertEqual((code, output), (2, ""))
-        self.assertTrue(error.endswith("cycle failed: enabled outbox requires --journal\n"))
+        self.assertTrue(error.endswith("cycle failed: event sink requires --journal\n"))
+
+    def test_invalid_sink_fails_before_configuration_or_model_work(self) -> None:
+        with (
+            patch.dict(os.environ, {"CHRYSOPOEIA_EVENT_SINK": "ftp://private"}),
+            patch("chrysopoeia.configuration.load_harness_config") as load,
+        ):
+            code, output, error = self.invoke("cycle")
+
+        self.assertEqual((code, output), (2, ""))
+        self.assertIn("invalid CHRYSOPOEIA_EVENT_SINK", error)
+        load.assert_not_called()
+
+    def test_unset_sink_does_not_create_outbox_or_publish(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("chrysopoeia.events.publish") as publish,
+        ):
+            self.assertIsNone(configured_sink())
+
+        publish.assert_not_called()
+        self.assertFalse(journal_path(self.directory).exists())
 
 
 if __name__ == "__main__":

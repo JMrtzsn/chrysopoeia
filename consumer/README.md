@@ -33,6 +33,12 @@ CONSUMER_JOURNAL=/tmp/consumer/ledger.jsonl \
 In another shell:
 
 ```sh
+cd ../harness
+CHRYSOPOEIA_EVENT_SINK=http://127.0.0.1:8080/push \
+  uv run chrysopoeia cycle --journal /tmp/harness-journal --snapshot snapshot.json
+
+# Or manually post an existing event from consumer/:
+cd ../consumer
 uv run python scripts/send_event.py event.json   # POST /push, prints HTTP status
 uv run python scripts/send_event.py --sweep      # POST /sweep (exits/settlement)
 cat /tmp/consumer/ledger.jsonl

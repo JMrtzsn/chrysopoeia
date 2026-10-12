@@ -195,12 +195,9 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                             *(
                                 [
                                     gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
-                                        name="CHRYSOPOEIA_PUBSUB_OUTBOX", value="1"
-                                    ),
-                                    gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
-                                        name="CHRYSOPOEIA_PUBSUB_TOPIC",
+                                        name="CHRYSOPOEIA_EVENT_SINK",
                                         value=pulumi.Output.concat(
-                                            "projects/", project_id, "/topics/", topic.name
+                                            "pubsub:projects/", project_id, "/topics/", topic.name
                                         ),
                                     ),
                                 ]

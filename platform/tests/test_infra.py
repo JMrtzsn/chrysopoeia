@@ -35,6 +35,18 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn("gcp.pubsub.TopicIAMMember(", optional_resources)
         self.assertIn('role="roles/pubsub.publisher"', optional_resources)
         self.assertNotIn('role="roles/pubsub.publisher"', source.split("if pubsub_topic:", 1)[0])
+        self.assertIn('name="CHRYSOPOEIA_EVENT_SINK"', source)
+        self.assertIn('"pubsub:projects/", project_id, "/topics/", topic.name', source)
+        self.assertNotIn("CHRYSOPOEIA_PUBSUB_OUTBOX", source)
+        self.assertNotIn("CHRYSOPOEIA_PUBSUB_TOPIC", source)
+
+    def test_image_runs_harness_cli_without_platform_publisher(self) -> None:
+        root = Path(__file__).parents[1]
+        dockerfile = root.joinpath("Dockerfile").read_text()
+
+        self.assertIn('ENTRYPOINT ["chrysopoeia"]', dockerfile)
+        self.assertFalse(root.joinpath("publisher.py").exists())
+        self.assertFalse(root.joinpath("tests", "test_publisher.py").exists())
 
     def test_consumer_resources_require_both_digest_and_topic(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()

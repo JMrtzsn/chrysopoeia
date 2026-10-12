@@ -6,12 +6,11 @@ FROM python:3.12-slim
 # CHRYSOPOEIA_CONFIG.
 COPY .build/*.whl /tmp/harness/
 COPY .build/chrysopoeia.toml /etc/chrysopoeia.toml
-COPY publisher.py /opt/chrysopoeia/publisher.py
 
-RUN pip install --no-cache-dir /tmp/harness/*.whl 'google-cloud-pubsub>=2,<3' \
+RUN pip install --no-cache-dir /tmp/harness/*.whl \
   && rm -rf /tmp/harness
 
 ENV CHRYSOPOEIA_CONFIG=/etc/chrysopoeia.toml
 
 # venue adapter and Vertex calls run over HTTPS; no egress broker required
-ENTRYPOINT ["python", "/opt/chrysopoeia/publisher.py"]
+ENTRYPOINT ["chrysopoeia"]

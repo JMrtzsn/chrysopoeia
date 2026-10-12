@@ -27,8 +27,8 @@ coordination decision, not a new platform work item.
   `docs/deployment.md`. The journal bucket and job remain the
   operator's durable session; multi-tenant hard isolation via one GCP project
   per tenant is deferred as described in `docs/deployment.md`.
-- [x] Optional Pub/Sub publisher (`3d942a5`): disabled by default; Harness
-  journal outbox plus Platform CLI adapter, topic-scoped publisher IAM, and
+- [x] Optional Pub/Sub publisher (`3d942a5`, later moved into Harness): disabled
+  by default; journal outbox, topic-scoped publisher IAM, and
   conditional API/topic setup. One synthetic event was published, confirmed,
   received, and acknowledged through temporary resources, then cleaned up on
   2026-10-08. No subscriber or Cloud Run rollout is included; see

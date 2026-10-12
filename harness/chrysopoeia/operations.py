@@ -1,6 +1,6 @@
 """Shared journal operations for one paper turn and venue maintenance."""
 
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -145,6 +145,8 @@ async def run_journal_turn(
     *,
     run: Callable[..., Awaitable[dict[str, object]]] | None = None,
     load_evidence: Callable[[], Sequence[EvidenceRecord]] | None = None,
+    context: str | None = None,
+    draft: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run or recover one idempotent journal-backed paper turn."""
     from chrysopoeia.cycle_runner import reserved_ceiling
@@ -174,7 +176,9 @@ async def run_journal_turn(
         finish_turn(journal, turn_id, "failed")
         raise InvalidTurnInputError("invalid turn input") from exc
     try:
-        result = await run(config, snapshot, operating, evidence=evidence)
+        result = await run(
+            config, snapshot, operating, evidence=evidence, context=context, draft=draft
+        )
         event = result.get("event")
         cost = result.get("actual_estimated_cost_usd", "0")
         if isinstance(event, dict):
@@ -196,8 +200,12 @@ async def run_journal_turn(
             }
             result["fill"] = fill
             result["status"] = "filled"
-            if accounting.outbox_enabled():
+            from chrysopoeia.events import configured_sink, drain
+
+            sink = configured_sink()
+            if sink:
                 accounting.enqueue_event(journal, event)
+                drain(journal, sink)
             accounting.record_fill(
                 journal,
                 Position(

@@ -67,10 +67,13 @@ weaken risk limits or force trades.
   and records either one paper fill or a deterministic rejection. Quote failures
   occur before admission, leave no fill, and are retryable.
 - `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
+- `outbox-pending` and `outbox-ack` remain available for manual delivery
+  recovery. Setting `CHRYSOPOEIA_EVENT_SINK` enables oldest-first direct delivery
+  and requires the journal for event-producing commands.
 
 Authenticated execution, non-YES positions, plan changes after entry, and
 partial paper exits are not part of the current accounting contract. Event
-publishing is optional through the Platform Pub/Sub adapter; subscriptions and
+publishing is optional through the Harness event sink; subscriptions and
 external consumer ledgers are not implemented here. The local development consumer
 preserves this bracket behavior in the current journal; future external
 consumers do not share it.

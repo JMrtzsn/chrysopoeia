@@ -445,14 +445,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     ack.add_argument("event_id")
     args = parser.parse_args(argv)
     if args.command in {"cycle", "run"}:
-        from chrysopoeia.accounting import outbox_enabled
+        from chrysopoeia.events import configured_sink
 
         try:
-            enabled = outbox_enabled()
+            sink = configured_sink()
         except ValueError as exc:
             parser.exit(2, f"{args.command} failed: {exc}\n")
-        if enabled and args.command == "cycle" and args.journal is None:
-            parser.exit(2, "cycle failed: enabled outbox requires --journal\n")
+        if sink and args.command == "cycle" and args.journal is None:
+            parser.exit(2, "cycle failed: event sink requires --journal\n")
     if args.command in {"outbox-pending", "outbox-ack"}:
         from chrysopoeia.accounting import (
             JournalError,
@@ -778,11 +778,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         book_state = None
         if args.journal is not None:
             from chrysopoeia.accounting import JournalError, open_session
+            from chrysopoeia.events import drain
 
             try:
                 book_state = open_session(
                     args.journal, operating.bankroll, operating.maximum_loss
                 )
+                if sink:
+                    drain(args.journal, sink)
             except (ValueError, JournalError) as exc:
                 parser.exit(2, f"cycle failed: {exc}\n")
             total_exposure += book_state.open_exposure
@@ -853,12 +856,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         operating,
                         run=run_paper_cycle,
                         load_evidence=(
-                            lambda: (
-                                load_evidence_bundle(args.evidence, snapshot)
-                                if args.evidence is not None
-                                else ()
-                            )
+                            (lambda: load_evidence_bundle(args.evidence, snapshot))
+                            if args.evidence is not None
+                            else None
                         ),
+                        context=args.context,
+                        draft=draft,
                     )
                 )
         except BaseException as exc:

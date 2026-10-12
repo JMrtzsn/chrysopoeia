@@ -911,6 +911,61 @@ class OperatorCliTests(unittest.TestCase):
             run.assert_not_called()
             consume_again.assert_not_called()
 
+    def test_journal_cycle_forwards_draft_context_and_no_evidence_as_none(self) -> None:
+        snapshot, result = self.cycle_fill_result()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            source = journal / "snapshot.json"
+            source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+            with patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=result)
+            ) as run:
+                code, _stdout, stderr = self.invoke(
+                    "cycle", "--snapshot", str(source), "--journal", str(journal),
+                    "--context", "focus on liquidity", "--draft", '{"action":"abstain"}',
+                )
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIsNone(run.call_args.kwargs["evidence"])
+        self.assertEqual(run.call_args.kwargs["context"], "focus on liquidity")
+        self.assertEqual(run.call_args.kwargs["draft"], {"action": "abstain"})
+
+    def test_cycle_sink_acknowledges_success_and_keeps_failure_pending(self) -> None:
+        from chrysopoeia.accounting import pending_events
+
+        snapshot, result = self.cycle_fill_result()
+        for failure in (None, RuntimeError("private payload")):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                journal = Path(directory)
+                source = journal / "snapshot.json"
+                source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
+                sender = Mock(side_effect=failure)
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"CHRYSOPOEIA_EVENT_SINK": "http://127.0.0.1:8080/push"},
+                    ),
+                    patch(
+                        "chrysopoeia.cycle_runner.run_paper_cycle",
+                        AsyncMock(return_value=result),
+                    ),
+                    patch("chrysopoeia.events.publish", sender),
+                ):
+                    code, stdout, stderr = self.invoke(
+                        "cycle", "--snapshot", str(source), "--journal", str(journal)
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(stdout)["status"], "filled")
+                self.assertNotIn("private payload", stderr)
+                self.assertEqual(pending_events(journal), [result["event"]] if failure else [])
+                sender.assert_called_once_with(
+                    "http://127.0.0.1:8080/push", result["event"]
+                )
+
     def test_cycle_with_journal_finishes_abstain_review_reject_and_risk_reject(
         self,
     ) -> None:

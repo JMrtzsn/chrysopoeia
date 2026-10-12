@@ -15,8 +15,8 @@ execution is not implemented.
   and model cost. `cycle` returns a reviewed and policy-accepted
   `trade_plan_ready` JSON event; `run` consumes it in-process, while `consume`
   consumes an existing event into the local paper journal using a fresh quote.
-  The journal outbox and Platform Pub/Sub publisher are optional and disabled by
-  default.
+  Direct event delivery through the journal outbox is optional and disabled by
+  default. `CHRYSOPOEIA_EVENT_SINK` selects loopback HTTP or Pub/Sub delivery.
 - Google Search context is currently uncitable. Paper exits are simulated by the
   bounded local loop. The independent paper-only Pub/Sub consumer owns separate
   entry/exit simulation and accounting. No always-on harness is required.
@@ -40,6 +40,9 @@ uv run adk run chrysopoeia
 ```
 
 Required tests and lint/type checks are listed in `harness/AGENTS.md`.
+Vertex model calls use the ambient Google project. If your default gcloud/ADC
+project is not the Chrysopoeia project, set `GOOGLE_CLOUD_PROJECT` for local
+model runs.
 For CLI syntax, run `uv run chrysopoeia --help` or a subcommand's `--help`.
 The main operator flow is `discover` → `capture` → `cycle`; `run` starts a
 bounded journal-backed session. `book`, `mark`, and `settle` inspect or update

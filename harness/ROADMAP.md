@@ -34,7 +34,7 @@ endpoint configured separately from the platform compute region.
 - Standalone local paper consumer (`31d2642`): `consume` reads an existing event,
   obtains a fresh public quote, rechecks the plan, and writes the local journal
   idempotently. Live verified 2026-10-07.
-- Optional journal-backed producer outbox and Platform Pub/Sub publisher
+- Optional journal-backed producer outbox and the former Platform Pub/Sub publisher
   (`3d942a5`): accepted plans are durably pending until publish confirmation and
   CLI acknowledgement. Bounded live verification passed 2026-10-08; no subscriber
   or consumer is included. Evidence is in `docs/verification.md`.
@@ -55,18 +55,16 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Direct event publishing:** Harness publishes to an optional sink right
-   after the outbox write; no sink keeps local runs Pub/Sub-free.
-2. **Outcome events:** versioned schemas for abstained, reviewer-rejected,
+1. **Outcome events:** versioned schemas for abstained, reviewer-rejected,
    policy-rejected, and plan-ready turns, published through the same outbox.
-3. **Citable research tools:** bounded providers normalized into provenance-
+2. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-4. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-5. **Additional venues and NO-side positions:** separate milestones after the
+4. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-6. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+5. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

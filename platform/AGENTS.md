@@ -26,10 +26,9 @@ Ordered platform work lives in `ROADMAP.md`.
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
   `job_args` Pulumi config for the current on-demand job. The harness owns
   bounded proposal cycles; platform does not drive them.
-- The optional Pub/Sub adapter invokes `outbox-pending`/`outbox-ack` around
-  journal-backed `cycle`/`run` CLI commands and never imports Harness code or
-  parses its journal. Future event consumers deploy independently and own their
-  identities, effects, and ledgers.
+- Optional Pub/Sub configuration sets the Harness-owned event sink on the plain
+  CLI image. Harness publishes from its journal outbox; Platform keeps only the
+  topic and IAM. Future consumers own their identities, effects, and ledgers.
 - Journal durability: the volume-mounted bucket behaves as `/mnt/journal`;
   record semantics belong to the harness, not here.
 - Consumer resources exist only when both `consumer_image_digest` and

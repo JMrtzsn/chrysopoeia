@@ -26,7 +26,6 @@ from chrysopoeia.trading import (
 
 SCHEMA_VERSION = 1
 JOURNAL_NAME = "chrysopoeia.jsonl"
-OUTBOX_ENV = "CHRYSOPOEIA_PUBSUB_OUTBOX"
 EVENT_TYPES = {
     "session_opened",
     "turn_admitted",
@@ -61,14 +60,6 @@ def _clean(value: str, name: str) -> None:
 
 def journal_path(directory: Path) -> Path:
     return Path(directory) / JOURNAL_NAME
-
-
-def outbox_enabled() -> bool:
-    """Return the validated opt-in state for external event delivery."""
-    value = os.environ.get(OUTBOX_ENV)
-    if value not in (None, "0", "1"):
-        raise ValueError(f"{OUTBOX_ENV} must be 0 or 1")
-    return value == "1"
 
 
 def append_record(directory: Path, record_type: str, payload: dict) -> dict:

@@ -22,9 +22,9 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
 ## Off-limits
 
 - `platform/**` (GCP deployment shape; needs operator approval to touch)
-- Any `gcloud`, `pulumi`, or GCP-SDK invocation from application code (the
-  harness never provisions or mutates cloud resources; rule from
-  `../platform/docs/deployment.md`)
+- Any provisioning or mutation of cloud resources: no `gcloud`, `pulumi`, or
+  infrastructure SDK calls. Data-plane publishing to a configured event sink is
+  allowed (rule from `../platform/docs/deployment.md`).
 
 ## Contract published to the platform
 
@@ -34,10 +34,10 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
 - The checked-in model is `gemini-3.5-flash`. Vertex calls use the `us` model
   endpoint; this is independent of the platform's Cloud Run resource region.
-- The paper journal path/record format and optional outbox are here; platform
-  selects *where* it lives (`/mnt/journal`), not what it contains. Platform may
-  use only the `outbox-pending`/`outbox-ack` CLI contract to publish through
-  Pub/Sub. It never parses the journal or imports Harness modules.
+- The paper journal path/record format, optional outbox, and direct event
+  publishing are here; platform selects *where* the journal lives
+  (`/mnt/journal`) and configures the sink. It never parses the journal or
+  imports Harness modules.
 
 ## Local verification gates (all from this folder, pre-commit enforced)
 

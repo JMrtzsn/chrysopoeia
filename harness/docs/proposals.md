@@ -93,9 +93,9 @@ adapter calling the same core. Pub/Sub is the selected optional producer
 transport with a journal-backed at-least-once outbox. Independent consumers and
 live order mechanisms remain deferred. Exit monitoring/protection is
 consumer/venue behavior; its guarantees must be specified before live
-activation. Harness `cycle` and `run` do not call Pub/Sub or subscribe: the local
-paper consumer receives the event in-process, while the Platform adapter may
-publish pending outbox events.
+activation. Harness `cycle` and `run` may publish data-plane events to the
+configured sink but never subscribe or mutate infrastructure. The local paper
+consumer still receives the event in-process.
 
 ## Later position-management details
 

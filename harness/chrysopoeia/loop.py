@@ -9,6 +9,7 @@ from pathlib import Path
 from chrysopoeia.accounting import Book, check_halt, open_session, replay
 from chrysopoeia.configuration import HarnessConfig
 from chrysopoeia.cycle_runner import reserved_ceiling
+from chrysopoeia.events import configured_sink, drain
 from chrysopoeia.operations import evaluate_exits, run_journal_turn, settle_positions
 from chrysopoeia.polymarket import Fetch, _fetch, discover_markets, load_market_snapshot
 from chrysopoeia.trading import OperatingConfig
@@ -112,6 +113,9 @@ async def run_loop(
     iterations: list[dict[str, object]] = []
     cycles = len(book.admitted_turns)
     while True:
+        sink = configured_sink()
+        if sink:
+            drain(params.journal, sink)
         book = replay(params.journal)
         check_halt(params.journal, book)
         book = replay(params.journal)
