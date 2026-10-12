@@ -21,6 +21,7 @@ from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
     DEFAULT_HARNESS_CONFIG,
+    bound_review_reason,
     complete_abstention,
     complete_paper_cycle,
     paper_cycle_workflow,
@@ -400,6 +401,19 @@ class PaperCycleTests(unittest.TestCase):
         self.assertTrue(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
         self.assertEqual(state[REVIEW_KEY], routed.model_dump())
 
+    def test_overlong_review_reason_is_truncated_not_fatal(self) -> None:
+        raw = json.dumps({
+            "snapshot_id": "snapshot-1", "market_id": "market-1", "approved": False,
+            "reason": "x" * 2_000, "citations": [],
+        })
+        response = LlmResponse(content=types.Content(role="model", parts=[types.Part(text=raw)]))
+
+        self.assertIn(bound_review_reason, reviewer_agent.after_model_callback)
+        asyncio.run(bound_review_reason(SimpleNamespace(), response))
+        review = ReviewOutput.model_validate_json(response.content.parts[0].text)
+
+        self.assertEqual(review.reason, "x" * 500)
+
     def test_approved_state_cycle_emits_event_without_fill(self) -> None:
         state = cycle_state()
         state["model_cost_policy"] = {"version": "test"}
@@ -659,7 +673,9 @@ class PaperCycleTests(unittest.TestCase):
                 self.assertNotIn(forbidden, tools)
         for agent in (trader_agent, reviewer_agent, root_agent):
             self.assertEqual(agent.before_model_callback.func, before_model_cost)
-            self.assertIs(agent.after_model_callback, after_model_cost)
+            callbacks = agent.after_model_callback
+            first = callbacks[0] if isinstance(callbacks, list) else callbacks
+            self.assertIs(first, after_model_cost)
             self.assertIs(agent.on_model_error_callback, on_model_cost_error)
         from chrysopoeia.agent import context_agent
         self.assertEqual(context_agent.before_model_callback.func, before_model_cost)

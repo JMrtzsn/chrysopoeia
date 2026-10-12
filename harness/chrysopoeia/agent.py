@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -7,6 +8,7 @@ from google.adk.agents.context import Context
 from google.adk.apps import App
 from google.adk.events.event import Event
 from google.adk.events.event_actions import EventActions
+from google.adk.models.llm_response import LlmResponse
 from google.adk.tools import ToolContext, google_search
 from google.adk.workflow import Workflow
 from pydantic import ValidationError
@@ -249,6 +251,27 @@ def complete_abstention(ctx: Context, node_input: paper_cycle.ProposalOutput) ->
     return report
 
 
+async def bound_review_reason(callback_context: Context, llm_response: LlmResponse) -> None:
+    """Truncate an overlong model rationale before schema validation.
+
+    Models ignore JSON-schema maxLength; an overlong reason must not fail the cycle.
+    Stored state still rejects overlong reasons, so tampered state stays fail-closed.
+    """
+    del callback_context
+    limit = paper_cycle.ReviewOutput.model_fields["reason"].metadata[1].max_length
+    for part in llm_response.content.parts or [] if llm_response.content else []:
+        if not part.text:
+            continue
+        try:
+            value = json.loads(part.text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("reason"), str):
+            if len(value["reason"]) > limit:
+                value["reason"] = value["reason"][:limit]
+                part.text = json.dumps(value)
+
+
 def complete_paper_cycle(ctx: Context, node_input: paper_cycle.ReviewOutput) -> paper_cycle.PaperCycleReportOutput:
     snapshot = paper_cycle._record(ctx.state.get("market_snapshot"), MarketSnapshot, "market snapshot is missing or invalid")
     paper_cycle._validate_citations(node_input.citations, paper_cycle._evidence(ctx.state, snapshot))
@@ -425,7 +448,7 @@ def build_agents(config: HarnessConfig) -> AgentSet:
         output_schema=paper_cycle.ReviewOutput,
         output_key=paper_cycle.REVIEW_KEY,
         before_model_callback=before_model_cost,
-        after_model_callback=after_model_cost,
+        after_model_callback=[after_model_cost, bound_review_reason],
         on_model_error_callback=on_model_cost_error,
     )
 

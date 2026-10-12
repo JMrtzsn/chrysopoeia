@@ -214,7 +214,9 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
     def test_all_model_agents_are_gated_and_configuration_installs_default_policy(self) -> None:
         for agent in (root_agent, trader_agent, reviewer_agent, context_agent):
             self.assertEqual(agent.before_model_callback.func, before_model_cost)
-            self.assertIs(agent.after_model_callback, after_model_cost)
+            callbacks = agent.after_model_callback
+            # Cost settlement must run first; it returns None so later callbacks still run.
+            self.assertIs(callbacks[0] if isinstance(callbacks, list) else callbacks, after_model_cost)
             self.assertIs(agent.on_model_error_callback, on_model_cost_error)
             self.assertFalse(any("cost_policy" in str(tool).lower() for tool in agent.tools))
         state: dict[str, object] = {}
