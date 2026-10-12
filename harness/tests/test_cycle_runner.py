@@ -120,6 +120,7 @@ class CycleRunnerTests(unittest.TestCase):
                 "probability": 0.46 if action == "trade" else 0.4,
                 "amount": 9 if action == "trade" else 0,
                 "citations": ["market_snapshot:snapshot"] if action == "trade" else [],
+                "rationale": "Evidence supports this choice.",
                 "max_entry_price": 0.41 if action == "trade" else None,
                 "exit_plan": {
                     "take_profit_roi": 0.1,
@@ -176,6 +177,7 @@ class CycleRunnerTests(unittest.TestCase):
             probability=1.0,
             amount=1.0,
             citations=[str(index) * 128 for index in range(10)],
+            rationale="r" * 500,
             max_entry_price=0.5,
             exit_plan={
                 "take_profit_roi": 0.1,
@@ -266,13 +268,14 @@ class CycleRunnerTests(unittest.TestCase):
                         "reviewer_called",
                         "fill",
                         "event",
+                        "outcome_event",
                         "ledger_statuses",
                         "actual_estimated_cost_usd",
                         "maximum_reserved_cost_usd",
                     },
                 )
                 if action == "abstain":
-                    self.assertNotIn("probability", json.dumps(summary))
+                    self.assertEqual(summary["outcome_event"]["proposal"]["probability"], 0.4)
                 if action == "trade":
                     self.assertEqual(summary["event"]["record_type"], "trade_plan_ready")
                     self.assertEqual(summary["event"]["event_id"], "turn-acf2dcd35e81b75dc8316170")

@@ -5,6 +5,8 @@ This independent FastAPI service accepts authenticated Pub/Sub push requests at
 is enforced by Cloud Run IAM. The service validates the Harness-owned v1 schema,
 fetches bounded public metadata/books, independently checks risk and depth, and
 records paper-only outcomes in its own append-only journal.
+The deployed subscription filters for `trade_plan_ready`; ingress also
+terminally acknowledges other Harness record types without journal writes.
 
 It is an idempotent consumer under at-least-once delivery: redeliveries with
 the same `event_id` never repeat a fill, and failures after ten attempts land in
@@ -52,7 +54,8 @@ real Pub/Sub push envelope.
 
 - Local runs have no authentication; bind to `127.0.0.1` only.
 - The service makes real public Polymarket Gamma/CLOB reads. Fills are paper only.
-- `204` means a durable fill or terminal rejection; `503` means retryable failure.
+- `204` means a durable fill, terminal rejection, or intentionally ignored
+  non-`trade_plan_ready` event; `503` means retryable failure.
 
 ## Adding a market provider
 

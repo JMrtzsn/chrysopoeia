@@ -39,13 +39,19 @@ coordination decision, not a new platform work item.
   minute sweep, retry, retention, and dead letter resources. Bounded live
   verification passed 2026-10-10 (push, fill, sweep close; temporary resources
   removed); see `docs/deployment.md`. Not left deployed.
+- [x] Pub/Sub-level `trade_plan_ready` filtering: a temporary filtered
+  subscription received only the plan fixture while an unfiltered subscription
+  received both the real outcome and plan fixture on 2026-10-12; all temporary
+  resources were deleted. The Pulumi-managed subscription remains undeployed.
 
 ## Next
 
 1. At the next deploy, rebuild the Harness image (plain `chrysopoeia`
    entrypoint) and run one bounded job execution with
    `CHRYSOPOEIA_EVENT_SINK=pubsub:...` to verify the deployed direct-publishing
-   path. Harness `pubsub:` publishing itself was live-verified 2026-10-12.
+   path and the consumer subscription's `trade_plan_ready` filter replacement.
+   Single-topic outcome publishing and Pub/Sub-level filtering were live-verified
+   2026-10-12; the Pulumi-managed subscription has not been deployed.
 2. Launch bounded paper `run` sessions from the Cloud Run Job once a released
    harness artifact includes it. The job remains request-triggered; no always-on
    harness process is required.

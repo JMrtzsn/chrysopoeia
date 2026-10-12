@@ -10,11 +10,15 @@
 - [x] Bounded live verification 2026-10-10: authenticated push, fresh-quote fill,
   one Scheduler sweep time-exit close, mounted ledger across revision deploys.
   Evidence: `../platform/docs/deployment.md`.
+- [x] Ignore routing: offline checks and a live `turn_outcome` delivery returned
+  HTTP 204 without a ledger write on 2026-10-12.
 
 ## Next
 
-1. **Remaining paper live checks:** YES/NO settlement, dead-letter delivery and
-   replay, and the revision-rollover single-writer ceiling.
+1. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
+   through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery
+   and replay, and the revision-rollover single-writer ceiling. Pub/Sub-level
+   filtering and live ignore routing are verified; the live plan path is not.
 2. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch here. Live mode stays disabled

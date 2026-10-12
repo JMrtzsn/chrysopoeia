@@ -38,6 +38,13 @@ endpoint configured separately from the platform compute region.
   (`3d942a5`): accepted plans are durably pending until publish confirmation and
   CLI acknowledgement. Bounded live verification passed 2026-10-08; no subscriber
   or consumer is included. Evidence is in `docs/verification.md`.
+- Direct Harness event publishing (`a4d71d5`, `ac64302`): configured HTTP or
+  Pub/Sub sinks drain the durable outbox and acknowledge confirmed delivery.
+  Live evidence is in `docs/verification.md`.
+- Turn-outcome events and single-topic publishing: every decided turn is
+  journaled and optionally published through the shared outbox; subscribers can
+  filter by record type. Live-verified 2026-10-12; evidence is in
+  `docs/verification.md` and `../platform/docs/deployment.md`.
 - Shared `trade_plan_ready` v1 schema in `../contracts/` (`3b495d1`), consumed
   as data by the independent paper consumer in `../consumer/`. Harness work for
   event consumption ends at the schema, event, and outbox.
@@ -55,16 +62,14 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Outcome events:** versioned schemas for abstained, reviewer-rejected,
-   policy-rejected, and plan-ready turns, published through the same outbox.
-2. **Citable research tools:** bounded providers normalized into provenance-
+1. **Citable research tools:** bounded providers normalized into provenance-
    carrying evidence shared by trader and reviewer; no execution authority.
-3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+2. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-4. **Additional venues and NO-side positions:** separate milestones after the
+3. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-5. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+4. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

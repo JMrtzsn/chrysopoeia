@@ -64,7 +64,14 @@ class EventPublishingTests(unittest.TestCase):
             set(envelope["message"]),
             {"data", "messageId", "message_id", "publishTime", "publish_time", "attributes"},
         )
-        self.assertEqual(envelope["message"]["attributes"], {"event_id": value["event_id"]})
+        self.assertEqual(
+            envelope["message"]["attributes"],
+            {
+                "event_id": value["event_id"],
+                "record_type": "trade_plan_ready",
+                "schema_version": "1",
+            },
+        )
         self.assertEqual(
             json.loads(base64.b64decode(envelope["message"]["data"])), value
         )
@@ -91,6 +98,8 @@ class EventPublishingTests(unittest.TestCase):
             "projects/p/topics/t",
             json.dumps(value, sort_keys=True, separators=(",", ":")).encode(),
             event_id=value["event_id"],
+            record_type="trade_plan_ready",
+            schema_version="1",
         )
         client.publish.return_value.result.assert_called_once_with(timeout=30)
 

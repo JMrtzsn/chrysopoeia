@@ -51,6 +51,7 @@ class TraderToolTests(unittest.TestCase):
             "snapshot_id": "snapshot", "market_id": "123", "action": "trade",
             "probability": 0.46, "amount": 9.0,
             "citations": ["market_snapshot:snapshot"], "max_entry_price": 0.41,
+            "rationale": "Evidence supports a modest edge.",
             "exit_plan": {"take_profit_roi": 0.1, "stop_loss_roi": -0.2,
                           "exit_by": "2026-10-01T00:00:00+00:00", "hold_to_resolution": False},
         }

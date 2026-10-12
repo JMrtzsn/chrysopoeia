@@ -9,7 +9,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from chrysopoeia import cli
 from chrysopoeia.accounting import cycle_turn_id
@@ -759,6 +759,7 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(operating.trader_agents, 1)
 
     def cycle_fill_result(self) -> dict[str, object]:
+        from chrysopoeia.paper_cycle import build_turn_outcome
         snapshot = MarketSnapshot(
             "placeholder",
             "12345",
@@ -826,6 +827,23 @@ class OperatorCliTests(unittest.TestCase):
             "actual_estimated_cost_usd": "0.000064",
             "maximum_reserved_cost_usd": "0.0473088",
         }
+        result["outcome_event"] = build_turn_outcome(
+            proposal={
+                "snapshot_id": snapshot.snapshot_id, "market_id": snapshot.market_id,
+                "action": "trade", "probability": 0.46, "amount": 4.0,
+                "max_entry_price": 0.41, "exit_plan": fill["exit_plan"],
+                "citations": ["market_snapshot"], "rationale": "Evidence supports a trade.",
+            },
+            review={
+                "snapshot_id": snapshot.snapshot_id, "market_id": snapshot.market_id,
+                "approved": True, "reason": "supported", "citations": ["market_snapshot"],
+            },
+            policy={"allowed": True, "reason": result["reason"]},
+            status="plan_ready", reason=str(result["reason"]),
+            created_at=snapshot.captured_at,
+            trade_plan_event_id=result["event"]["event_id"],
+            model_cost_usd=str(result["actual_estimated_cost_usd"]),
+        )
         return snapshot, result
 
     def test_cycle_without_journal_returns_event_without_consuming_it(self) -> None:
@@ -894,7 +912,7 @@ class OperatorCliTests(unittest.TestCase):
             self.assertEqual(set(state.finished_turns.values()), {"filled"})
             self.assertEqual(
                 len(journal_path(journal).read_text().splitlines()),
-                4,  # session_opened, turn_admitted, fill_recorded, turn_finished
+                5,  # session_opened, turn_admitted, outcome, fill_recorded, turn_finished
             )
 
             before = journal_path(journal).read_bytes()
@@ -961,10 +979,14 @@ class OperatorCliTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(json.loads(stdout)["status"], "filled")
                 self.assertNotIn("private payload", stderr)
-                self.assertEqual(pending_events(journal), [result["event"]] if failure else [])
-                sender.assert_called_once_with(
-                    "http://127.0.0.1:8080/push", result["event"]
+                self.assertEqual(
+                    pending_events(journal),
+                    [result["outcome_event"], result["event"]] if failure else [],
                 )
+                expected = [call("http://127.0.0.1:8080/push", result["outcome_event"])]
+                if failure is None:
+                    expected.append(call("http://127.0.0.1:8080/push", result["event"]))
+                self.assertEqual(sender.call_args_list, expected)
 
     def test_cycle_with_journal_finishes_abstain_review_reject_and_risk_reject(
         self,
@@ -991,6 +1013,20 @@ class OperatorCliTests(unittest.TestCase):
                     "fill": None,
                     "event": None,
                 }
+                self.assertIsInstance(result["outcome_event"], dict)
+                outcome = {**result["outcome_event"]}
+                outcome.update(
+                    status=("abstained" if status == "abstained" else "reviewer_rejected" if reason == "review_rejected" else "policy_rejected"),
+                    reason=reason,
+                    trade_plan_event_id=None,
+                    review=None if status == "abstained" else outcome["review"],
+                    policy=None if status == "abstained" else {"allowed": False, "reason": reason},
+                )
+                if reason == "review_rejected":
+                    outcome["review"] = {"approved": False, "reason": "rejected", "citations": []}
+                elif status != "abstained":
+                    outcome["review"] = {"approved": True, "reason": "supported", "citations": ["market_snapshot"]}
+                result["outcome_event"] = outcome
                 with patch(
                     "chrysopoeia.cycle_runner.run_paper_cycle",
                     AsyncMock(return_value=result),

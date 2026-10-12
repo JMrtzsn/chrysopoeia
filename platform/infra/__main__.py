@@ -371,6 +371,7 @@ if consumer_image_digest and pubsub_topic:
             topic=topic.id,
             ack_deadline_seconds=60,
             message_retention_duration="604800s",
+            filter='attributes.record_type = "trade_plan_ready"',
             push_config=gcp.pubsub.SubscriptionPushConfigArgs(
                 push_endpoint=pulumi.Output.concat(consumer_service.uri, "/push"),
                 oidc_token=gcp.pubsub.SubscriptionPushConfigOidcTokenArgs(

@@ -24,7 +24,9 @@ Cloud.
   runtime identity, private service pinned by digest with revision minimum zero,
   revision maximum one, and request concurrency one, plus OIDC push and minute
   sweep. Optional `consumer_sweep_schedule` sets the UTC cron schedule; it
-  defaults to `* * * * *`.
+  defaults to `* * * * *`. The push subscription filters
+  `attributes.record_type = "trade_plan_ready"`; Pub/Sub subscription filters are
+  immutable, so adding or changing this filter replaces the subscription.
 - The Consumer journal uses GCS FUSE and is safe only under this single-writer
   ceiling. The revision limit reduces overlap but does not make the mounted file
   a transactional multi-writer ledger; revision rollover can briefly overlap old
@@ -33,7 +35,8 @@ Cloud.
   never provisions cloud resources or invokes `gcloud`/`pulumi`.
 
 Harness drains old pending events before `cycle`/`run` and between run cycles,
-publishes canonical event JSON with the `event_id` attribute, and acknowledges
+publishes all canonical event types to one topic with `event_id`, `record_type`,
+and `schema_version` attributes, and acknowledges
 only after confirmation. Failures leave events pending and may duplicate
 delivery, so consumers deduplicate by `event_id`. Platform retains topic and IAM
 only; it has no publisher wrapper. No authenticated trading is part of this
@@ -82,6 +85,7 @@ can desynchronize state.
 | 2026-09-27 | `pulumi refresh`; `pulumi up`; rebuild/pin image; three `gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region> --wait` executions | Restored container deployment after discarding a VM experiment. Cached `cycle` was an idempotent no-op, `book` succeeded, fresh-capture `cycle` appended a turn. Journal bucket intentionally retained. |
 | 2026-10-08 | Inline Python with `platform/infra/.venv/bin/python` called `drain()` against one temporary Pub/Sub topic and active subscription using ambient ADC; Harness CLI `outbox-pending`/`outbox-ack` | One synthetic valid trade-plan event was published once with confirmation; one matching message was pulled and acknowledged. The temporary subscription and topic were deleted after the check. Total duration was 22.87 s. Estimated incremental Pub/Sub cost was ~$0 within monthly free usage; billing was not measured. No model, market, Cloud Run, order, IAM, API-enablement, or `pulumi up` operation occurred. |
 | 2026-10-10 | Temporary Consumer stack via `pulumi up` (18 creates; producer job env update; 0 replacements) with a pinned amd64 image and future-dated sweep cron; three synthetic paper events published to the temporary topic; one manual Scheduler run; ambient ADC | OIDC push reached the service on every delivery. Three defects found and fixed during the run: no `User-Agent` (Gamma 403), push parser rejected real envelope fields `message_id`/`publish_time`/`deliveryAttempt` (HTTP 400, retried by Pub/Sub), and books over 50 levels were rejected instead of truncated to the best 50. Final image: event 1 durably rejected (exit window expired during fixes), event 2 rejected by the pre-fix book parser, event 3 filled from a fresh quote and closed by the single sweep on its time exit. Ledger persisted across three revision deploys; HTTP results were 9×400 (pre-fix), 3×204 push, 1×204 sweep; dead-letter queue empty. Ten public Gamma/CLOB GETs (one 403), exactly the operator-raised cap of 10; no model calls or orders; about 30 minutes; estimated cost ~$0. Cleanup: ledger versions, all temporary resources, config keys, and four image versions deleted; default preview returned to 10 unchanged. The Pub/Sub API stayed enabled after a failed disable attempt, which led to `disable_on_destroy=False`. Settlement, dead-letter delivery, and concurrent-revision writers were not exercised. |
+| 2026-10-12 | Harness `events.publish()` to temporary topic `eda-verify-1791816992`; one pull subscription filtered on `attributes.record_type = "trade_plan_ready"` and one unfiltered pull subscription | Published one real `turn_outcome` and one synthetic `trade_plan_ready` fixture. The filtered subscription received only `trade_plan_ready`; the unfiltered subscription received both, each with `record_type` and `schema_version=1` attributes. Both subscriptions and the topic were deleted and confirmed absent. This verifies the Pub/Sub filter boundary, not the undeployed Pulumi subscription; that remains pending the next deploy. |
 
 ## Deferred services
 

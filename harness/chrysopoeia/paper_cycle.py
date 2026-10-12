@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from inspect import signature
 from math import isfinite
@@ -29,6 +30,7 @@ VALIDATED_EXTERNAL_EVIDENCE_KEY = "validated_external_evidence"
 PAPER_CYCLE_DECISION_KEY = "paper_cycle_decision"
 PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
 TRADE_PLAN_READY_KEY = "trade_plan_ready"
+TURN_OUTCOME_KEY = "turn_outcome"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
 LAST_SUCCESSFUL_PLAN_KEY = "last_successful_trade_plan"
 LAST_SUCCESSFUL_SNAPSHOT_KEY = "last_successful_trade_plan_snapshot"
@@ -221,6 +223,7 @@ class ProposalOutput(StrictOutput):
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
     amount: float = Field(strict=True)
     citations: list[CitationId] = Field(max_length=10)
+    rationale: str = Field(min_length=1, max_length=500)
     max_entry_price: float | None = Field(default=None, ge=0, le=1, strict=True)
     exit_plan: "ExitPlanOutput | None" = None
 
@@ -278,6 +281,135 @@ class ExitPlanOutput(StrictOutput):
 
 
 ProposalOutput.model_rebuild()
+
+
+def build_turn_outcome(
+    *,
+    proposal: Mapping[str, object],
+    review: Mapping[str, object] | None,
+    policy: Mapping[str, object] | None,
+    status: Literal[
+        "abstained",
+        "plan_check_rejected",
+        "reviewer_rejected",
+        "policy_rejected",
+        "plan_ready",
+    ],
+    reason: str,
+    created_at: str,
+    trade_plan_event_id: str | None,
+    model_cost_usd: str,
+) -> dict[str, object]:
+    """Build one deterministic, strict outcome payload from decided cycle state."""
+    output = ProposalOutput.model_validate(proposal)
+    checked_review = ReviewOutput.model_validate(review) if review is not None else None
+    if not isinstance(reason, str) or not 1 <= len(reason) <= 500:
+        raise ValueError("outcome reason is invalid")
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        raise ValueError("outcome creation time is invalid") from None
+    if created.tzinfo is None or len(created_at) > 64:
+        raise ValueError("outcome creation time is invalid")
+    checked_policy = dict(policy) if policy is not None else None
+    if checked_policy is not None and (
+        set(checked_policy) != {"allowed", "reason"}
+        or not isinstance(checked_policy.get("allowed"), bool)
+        or not isinstance(checked_policy.get("reason"), str)
+        or not 1 <= len(str(checked_policy["reason"])) <= 500
+    ):
+        raise ValueError("outcome policy is invalid")
+    if status == "plan_ready" and trade_plan_event_id is None:
+        raise ValueError("plan-ready outcome requires a trade plan event")
+    if status != "plan_ready" and trade_plan_event_id is not None:
+        raise ValueError("rejected outcome cannot reference a trade plan event")
+    turn_id = "turn-" + sha256(
+        json.dumps([output.snapshot_id, output.market_id], separators=(",", ":")).encode()
+    ).hexdigest()[:24]
+    if status in {"abstained", "plan_check_rejected"} and (
+        checked_review is not None or checked_policy is not None
+    ):
+        raise ValueError("outcome contains an unexpected review or policy")
+    if status == "reviewer_rejected" and (
+        checked_review is None
+        or checked_review.approved
+        or checked_policy is None
+        or checked_policy["allowed"] is not False
+    ):
+        raise ValueError("reviewer rejection outcome is inconsistent")
+    if status == "policy_rejected" and (
+        checked_review is None
+        or not checked_review.approved
+        or checked_policy is None
+        or checked_policy["allowed"] is not False
+    ):
+        raise ValueError("policy rejection outcome is inconsistent")
+    if status == "plan_ready" and (
+        checked_review is None
+        or not checked_review.approved
+        or checked_policy is None
+        or checked_policy["allowed"] is not True
+        or trade_plan_event_id != turn_id
+    ):
+        raise ValueError("plan-ready outcome is inconsistent")
+    try:
+        cost = Decimal(model_cost_usd)
+    except InvalidOperation:
+        raise ValueError("model cost must be non-negative") from None
+    if not cost.is_finite() or cost < 0:
+        raise ValueError("model cost must be non-negative")
+    return {
+        "schema_version": 1,
+        "record_type": "turn_outcome",
+        "event_id": "outcome-" + turn_id.removeprefix("turn-"),
+        "turn_id": turn_id,
+        "snapshot_id": output.snapshot_id,
+        "market_id": output.market_id,
+        "created_at": created_at,
+        "status": status,
+        "reason": reason,
+        "proposal": output.model_dump(exclude={"snapshot_id", "market_id"}),
+        "review": (
+            checked_review.model_dump(exclude={"snapshot_id", "market_id"})
+            if checked_review
+            else None
+        ),
+        "policy": checked_policy,
+        "trade_plan_event_id": trade_plan_event_id,
+        "model_cost_usd": float(cost),
+    }
+
+
+def validate_turn_outcome(value: object) -> dict[str, object]:
+    """Validate a serialized outcome and return its canonical payload."""
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version", "record_type", "event_id", "turn_id", "snapshot_id",
+        "market_id", "created_at", "status", "reason", "proposal", "review",
+        "policy", "trade_plan_event_id", "model_cost_usd",
+    }:
+        raise ValueError("invalid turn outcome")
+    try:
+        proposal = dict(value["proposal"])
+        proposal.update(snapshot_id=value["snapshot_id"], market_id=value["market_id"])
+        review = value["review"]
+        if review is not None:
+            review = dict(review)
+            review.update(snapshot_id=value["snapshot_id"], market_id=value["market_id"])
+        expected = build_turn_outcome(
+            proposal=proposal,
+            review=review,
+            policy=value["policy"],
+            status=value["status"],
+            reason=value["reason"],
+            created_at=value["created_at"],
+            trade_plan_event_id=value["trade_plan_event_id"],
+            model_cost_usd=str(value["model_cost_usd"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("invalid turn outcome") from None
+    if value.get("schema_version") != 1 or value.get("record_type") != "turn_outcome" or dict(value) != expected:
+        raise ValueError("invalid turn outcome")
+    return expected
 
 
 class ReviewOutput(StrictOutput):

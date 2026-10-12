@@ -411,7 +411,25 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 "expires_at": (NOW + timedelta(days=1)).isoformat(),
                 "market_end": (NOW + timedelta(days=1)).isoformat(),
             }
-            return {**abstained(), "status": "filled", "event": event, "fill": fill}
+            from chrysopoeia.paper_cycle import build_turn_outcome
+
+            outcome = build_turn_outcome(
+                proposal={
+                    "snapshot_id": current.snapshot_id, "market_id": current.market_id,
+                    "action": "trade", "probability": 0.46, "amount": 4.0,
+                    "max_entry_price": 0.41, "exit_plan": fill["exit_plan"],
+                    "citations": ["market_snapshot"], "rationale": "Evidence supports a trade.",
+                },
+                review={
+                    "snapshot_id": current.snapshot_id, "market_id": current.market_id,
+                    "approved": True, "reason": "supported", "citations": ["market_snapshot"],
+                },
+                policy={"allowed": True, "reason": "approved by review and deterministic risk policy"},
+                status="plan_ready", reason="approved by review and deterministic risk policy",
+                created_at=current.captured_at, trade_plan_event_id=event["event_id"],
+                model_cost_usd="0.01",
+            )
+            return {**abstained(), "status": "filled", "event": event, "fill": fill, "outcome_event": outcome}
         with (
             patch(
                 "chrysopoeia.loop.discover_markets",

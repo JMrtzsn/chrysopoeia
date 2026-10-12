@@ -150,6 +150,47 @@ class ConsumerTests(unittest.TestCase):
         self.assertEqual(record["plan_snapshot_id"], "plan-snapshot")
         self.assertEqual(record["quote_snapshot_id"], "fresh-snapshot")
 
+    def test_mismatched_attribute_does_not_override_valid_plan_payload(self) -> None:
+        market = FakeMarket()
+        client = self.client(market)
+
+        value = envelope(event())
+        message = value["message"]
+        assert isinstance(message, dict)
+        attributes = message["attributes"]
+        assert isinstance(attributes, dict)
+        attributes["record_type"] = "turn_outcome"
+
+        self.assertEqual(client.post("/push", json=value).status_code, 204)
+
+        self.assertEqual(market.calls, 1)
+        self.assertEqual(json.loads(self.path.read_text())["status"], "filled")
+
+    def test_non_plan_payload_is_ignored(self) -> None:
+        market = FakeMarket()
+
+        self.assertEqual(
+            self.client(market)
+            .post("/push", json=envelope(event(record_type="turn_outcome")))
+            .status_code,
+            204,
+        )
+
+        self.assertFalse(self.path.exists())
+        self.assertEqual(market.calls, 0)
+
+    def test_malformed_trade_plan_is_still_rejected(self) -> None:
+        value = envelope(event(stake="invalid"))
+        message = value["message"]
+        assert isinstance(message, dict)
+        attributes = message["attributes"]
+        assert isinstance(attributes, dict)
+        attributes["record_type"] = "trade_plan_ready"
+
+        self.assertEqual(self.client(FakeMarket()).post("/push", json=value).status_code, 204)
+        self.assertTrue(self.path.exists())
+        self.assertEqual(json.loads(self.path.read_text())["status"], "rejected")
+
     def test_restart_replays_deduplication(self) -> None:
         first = FakeMarket()
         self.assertEqual(self.client(first).post("/push", json=envelope(event())).status_code, 204)

@@ -16,7 +16,9 @@ execution is not implemented.
   `trade_plan_ready` JSON event; `run` consumes it in-process, while `consume`
   consumes an existing event into the local paper journal using a fresh quote.
   Direct event delivery through the journal outbox is optional and disabled by
-  default. `CHRYSOPOEIA_EVENT_SINK` selects loopback HTTP or Pub/Sub delivery.
+  default. `CHRYSOPOEIA_EVENT_SINK` sends `trade_plan_ready` and `turn_outcome`
+  through one loopback HTTP endpoint or Pub/Sub topic; subscriptions filter by
+  record type.
 - Google Search context is currently uncitable. Paper exits are simulated by the
   bounded local loop. The independent paper-only Pub/Sub consumer owns separate
   entry/exit simulation and accounting. No always-on harness is required.
@@ -73,12 +75,12 @@ Current and planned (see roadmaps) patterns:
 
 | Pattern | Here |
 | --- | --- |
-| Domain events / event notification | `trade_plan_ready` today; outcome events (abstained, rejected, opened, closed, settled) planned |
+| Domain events / event notification | One topic carries `trade_plan_ready` and decided-turn `turn_outcome`; subscriptions filter by `record_type` |
 | Transactional outbox | Harness journal outbox; publish after the durable write |
 | At-least-once delivery + idempotent consumer | Pub/Sub retries; consumers deduplicate by stable `event_id` |
 | Dead-letter queue | Consumer subscription dead-letters after ten attempts |
 | CQRS read model / projections | Planned: Pub/Sub BigQuery subscriptions for analytics views |
-| Decision (outcome) logging | Planned: successes and failures, including reviewer and policy rejections |
+| Decision (outcome) logging | `turn_outcome` records abstentions, reviewer/policy rejections, and accepted plans; live verification pending |
 | Retrieval-augmented context / closed learning loop | Approved future item: past outcomes as untrusted, provenance-carrying evidence |
 
 This is not event sourcing: each unit's own ledger stays authoritative; analytics

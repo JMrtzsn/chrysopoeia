@@ -22,6 +22,7 @@ from pydantic import SkipValidation, ValidationError
 from chrysopoeia.agent import (
     DEFAULT_HARNESS_CONFIG,
     bound_review_reason,
+    bound_trader_rationale,
     complete_abstention,
     complete_paper_cycle,
     paper_cycle_workflow,
@@ -97,6 +98,7 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
             "max_entry_price": 0.41,
             "exit_plan": EXIT_PLAN,
             "citations": [EVIDENCE_ID],
+            "rationale": "Evidence supports a modest edge.",
         },
         REVIEW_KEY: {
             "snapshot_id": "snapshot-1",
@@ -204,10 +206,11 @@ class PaperCycleTests(unittest.TestCase):
             process_schema(schema, None)
             with self.subTest(schema=output_schema.__name__):
                 types.Schema.model_validate(schema)
-        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0, citations=[], max_entry_price=None, exit_plan=None).action, "abstain")
+        self.assertEqual(ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="abstain", probability=0.4, amount=0, citations=[], rationale="No edge.", max_entry_price=None, exit_plan=None).action, "abstain")
         valid_trade = {
             "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade",
             "probability": 0.55, "amount": 10, "citations": [EVIDENCE_ID],
+            "rationale": "Evidence supports a trade.",
             "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
         }
         self.assertEqual(ProposalOutput.model_validate(valid_trade).exit_plan.take_profit_roi, 0.1)
@@ -222,7 +225,7 @@ class PaperCycleTests(unittest.TestCase):
                 ProposalOutput.model_validate({**valid_trade, **changes})
         for action, amount in (("trade", 0), ("abstain", 1), ("invalid", 0), ("trade", math.nan), ("trade", math.inf), ("trade", True), ("trade", "1")):
             with self.subTest(action=action, amount=amount), self.assertRaises(ValidationError):
-                ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount, citations=[EVIDENCE_ID] if action == "trade" else [])
+                ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action=action, probability=0.5, amount=amount, citations=[EVIDENCE_ID] if action == "trade" else [], rationale="Reason.")
 
     def test_cycle_request_bounds_untrusted_context_and_draft(self) -> None:
         request = PaperCycleRequest(context="weather only", draft={"action": "abstain"})
@@ -273,6 +276,7 @@ class PaperCycleTests(unittest.TestCase):
         proposal = ProposalOutput(
             snapshot_id="snapshot-1", market_id="market-1", action="trade",
             probability=0.55, amount=10, citations=[EVIDENCE_ID],
+            rationale="Evidence supports a trade.",
             max_entry_price=0.41, exit_plan=EXIT_PLAN,
         )
         reviewer_input = prepare_reviewer_input(ctx, proposal)
@@ -301,6 +305,7 @@ class PaperCycleTests(unittest.TestCase):
         base = {
             "snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade",
             "probability": 0.55, "amount": 10,
+            "rationale": "Evidence supports a trade.",
             "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
         }
         for citations in ([], ["unknown"], [EVIDENCE_ID, EVIDENCE_ID]):
@@ -337,7 +342,7 @@ class PaperCycleTests(unittest.TestCase):
         state = cycle_state()
         state.pop(LAST_SUCCESSFUL_PLAN_KEY)
         state.pop(LAST_SUCCESSFUL_SNAPSHOT_KEY)
-        proposal = ProposalOutput.model_validate(state[PROPOSAL_KEY])
+        proposal = ProposalOutput.model_validate(cycle_state()[PROPOSAL_KEY])
 
         event = route_proposal(SimpleNamespace(state=state), proposal)
         self.assertEqual(event.actions.route, "unchecked")
@@ -414,6 +419,22 @@ class PaperCycleTests(unittest.TestCase):
 
         self.assertEqual(review.reason, "x" * 500)
 
+    def test_trader_rationale_is_required_bounded_and_model_output_is_truncated(self) -> None:
+        proposal = cycle_state()[PROPOSAL_KEY]
+        with self.assertRaises(ValidationError):
+            ProposalOutput.model_validate({key: value for key, value in proposal.items() if key != "rationale"})
+        with self.assertRaises(ValidationError):
+            ProposalOutput.model_validate({**proposal, "rationale": "x" * 501})
+        response = LlmResponse(content=types.Content(parts=[types.Part(
+            function_call=types.FunctionCall(
+                name="set_model_response", args={**proposal, "rationale": "x" * 2_000}
+            )
+        )]))
+
+        asyncio.run(bound_trader_rationale(SimpleNamespace(), response))
+
+        self.assertEqual(response.content.parts[0].function_call.args["rationale"], "x" * 500)
+
     def test_approved_state_cycle_emits_event_without_fill(self) -> None:
         state = cycle_state()
         state["model_cost_policy"] = {"version": "test"}
@@ -468,7 +489,7 @@ class PaperCycleTests(unittest.TestCase):
             order.extend(paper_cycle_workflow.graph.get_next_pending_nodes(order[-1], route))
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         self.assertEqual(trader_input["market_snapshot"], state["market_snapshot"])
-        proposal = ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.46, amount=10, citations=[EVIDENCE_ID], max_entry_price=0.41, exit_plan=EXIT_PLAN)
+        proposal = ProposalOutput.model_validate(cycle_state()[PROPOSAL_KEY])
         state[PROPOSAL_KEY] = proposal.model_dump()
         reviewer_input = prepare_reviewer_input(ctx, proposal)
         self.assertEqual(reviewer_input.market_snapshot, state["market_snapshot"])
@@ -501,7 +522,7 @@ class PaperCycleTests(unittest.TestCase):
         trader_input = prepare_trader_input(ctx, PaperCycleRequest())
         reviewer_input = prepare_reviewer_input(
             ctx,
-            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10, citations=[EVIDENCE_ID], max_entry_price=0.41, exit_plan=EXIT_PLAN),
+            ProposalOutput(snapshot_id="snapshot-1", market_id="market-1", action="trade", probability=0.55, amount=10, citations=[EVIDENCE_ID], rationale="Evidence supports a trade.", max_entry_price=0.41, exit_plan=EXIT_PLAN),
         )
 
         self.assertEqual(trader_input["market_snapshot"]["question"], "Will it rain?")
@@ -516,7 +537,7 @@ class PaperCycleTests(unittest.TestCase):
             model=DEFAULT_HARNESS_CONFIG.models.trader,
             agent_name=trader_agent.name,
             calls=calls,
-            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID], "max_entry_price": 0.41, "exit_plan": EXIT_PLAN},
+            response={"snapshot_id": "snapshot-1", "market_id": "market-1", "action": "trade", "probability": 0.46, "amount": 10, "citations": [EVIDENCE_ID], "rationale": "Evidence supports a trade.", "max_entry_price": 0.41, "exit_plan": EXIT_PLAN},
         )
         fake_reviewer = StructuredFakeLlm(
             model=DEFAULT_HARNESS_CONFIG.models.reviewer,

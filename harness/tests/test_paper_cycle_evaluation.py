@@ -100,6 +100,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     "probability": 0.46,
                     "amount": 9,
                     "citations": [evaluation.EVIDENCE_ID],
+                    "rationale": "Evidence supports a modest edge.",
                     "max_entry_price": 0.41,
                     "exit_plan": {
                         "take_profit_roi": 0.1,
@@ -173,6 +174,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "probability": 0.4,
             "amount": 0,
             "citations": [],
+            "rationale": "Evidence does not support a trade.",
             "max_entry_price": None,
             "exit_plan": None,
         }
@@ -218,6 +220,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             "probability": 0.4,
             "amount": 0,
             "citations": [],
+            "rationale": "Evidence does not support a trade.",
             "max_entry_price": None,
             "exit_plan": None,
         }
@@ -247,6 +250,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 "probability": 0.4,
                 "amount": 0,
                 "citations": [],
+                "rationale": "Evidence does not support a trade.",
                 "max_entry_price": None,
                 "exit_plan": None,
             },

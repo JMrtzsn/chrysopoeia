@@ -69,7 +69,9 @@ weaken risk limits or force trades.
 - `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
 - `outbox-pending` and `outbox-ack` remain available for manual delivery
   recovery. Setting `CHRYSOPOEIA_EVENT_SINK` enables oldest-first direct delivery
-  and requires the journal for event-producing commands.
+  of accepted plans and decided-turn outcomes through one topic. It requires the
+  journal for event-producing commands; subscribers filter by the published
+  `record_type` attribute.
 
 Authenticated execution, non-YES positions, plan changes after entry, and
 partial paper exits are not part of the current accounting contract. Event

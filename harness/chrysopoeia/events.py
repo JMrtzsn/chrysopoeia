@@ -65,6 +65,11 @@ def publish(
     """Publish one canonical event and wait for confirmed delivery."""
     validate_sink(sink)
     event_id = str(event["event_id"])
+    attributes = {
+        "event_id": event_id,
+        "record_type": str(event["record_type"]),
+        "schema_version": str(event["schema_version"]),
+    }
     body = _canonical(event)
     if sink.startswith("pubsub:"):
         if publisher is None:
@@ -72,14 +77,14 @@ def publish(
 
             publisher = pubsub_v1.PublisherClient()
         publisher.publish(  # type: ignore[attr-defined]
-            sink.removeprefix("pubsub:"), body, event_id=event_id
+            sink.removeprefix("pubsub:"), body, **attributes
         ).result(timeout=TIMEOUT)
         return
     now = datetime.now(timezone.utc).isoformat()
     message_id = "local-" + event_id
     envelope = {
         "message": {
-            "attributes": {"event_id": event_id},
+            "attributes": attributes,
             "data": base64.b64encode(body).decode(),
             "messageId": message_id,
             "message_id": message_id,

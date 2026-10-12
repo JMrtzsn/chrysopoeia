@@ -66,6 +66,7 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn("max_instance_request_concurrency=1", resources)
         self.assertNotIn("ServiceScalingArgs", resources)
         self.assertIn("gcp.pubsub.Subscription(", resources)
+        self.assertIn('filter=\'attributes.record_type = "trade_plan_ready"\'', resources)
         self.assertIn("gcp.cloudscheduler.Job(", resources)
         self.assertIn(
             'consumer_sweep_schedule = config.get("consumer_sweep_schedule") or "* * * * *"',

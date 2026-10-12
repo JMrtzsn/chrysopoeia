@@ -27,7 +27,11 @@ def envelope(event: dict[str, object]) -> dict[str, object]:
     message_id = "local-" + str(event["event_id"])
     return {
         "message": {
-            "attributes": {"event_id": str(event["event_id"])},
+            "attributes": {
+                "event_id": str(event["event_id"]),
+                "record_type": str(event["record_type"]),
+                "schema_version": str(event["schema_version"]),
+            },
             "data": base64.b64encode(json.dumps(event, sort_keys=True).encode()).decode(),
             "messageId": message_id,
             "message_id": message_id,

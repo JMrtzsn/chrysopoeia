@@ -38,6 +38,7 @@ EVENT_TYPES = {
     "session_closed",
     "outbox_enqueued",
     "outbox_acknowledged",
+    "turn_outcome_recorded",
 }
 TURN_OUTCOMES = {"filled", "abstained", "rejected", "failed", "abandoned"}
 RESOLUTIONS = {"resolved_yes", "resolved_no"}
@@ -160,6 +161,7 @@ class Book:
     status: str = "empty"
     outbox: dict[str, dict] = field(default_factory=dict)
     acknowledged_events: set[str] = field(default_factory=set)
+    turn_outcomes: dict[str, dict] = field(default_factory=dict)
 
     @property
     def open_exposure(self) -> float:
@@ -392,15 +394,22 @@ def replay(directory: Path) -> Book:
         elif kind == "outbox_enqueued":
             raw_event = record.get("event")
             try:
-                event = parse_trade_plan(raw_event) if isinstance(raw_event, dict) else None
+                if isinstance(raw_event, dict) and raw_event.get("record_type") == "turn_outcome":
+                    from chrysopoeia.paper_cycle import validate_turn_outcome
+
+                    validated = validate_turn_outcome(raw_event)
+                    event_id = str(validated["event_id"])
+                else:
+                    event = parse_trade_plan(raw_event) if isinstance(raw_event, dict) else None
+                    event_id = event.event_id if event else ""
             except ValueError:
-                event = None
-            if event is None:
+                event_id = ""
+            if not event_id:
                 _fail_corrupt(journal, number)
-            existing = book.outbox.get(event.event_id)
+            existing = book.outbox.get(event_id)
             if existing is not None and existing != raw_event:
                 _fail_corrupt(journal, number)
-            book.outbox[event.event_id] = raw_event
+            book.outbox[event_id] = raw_event
         elif kind == "outbox_acknowledged":
             event_id = record.get("event_id")
             if (
@@ -410,6 +419,17 @@ def replay(directory: Path) -> Book:
             ):
                 _fail_corrupt(journal, number)
             book.acknowledged_events.add(event_id)
+        elif kind == "turn_outcome_recorded":
+            from chrysopoeia.paper_cycle import validate_turn_outcome
+
+            try:
+                outcome = validate_turn_outcome(record.get("outcome_event"))
+            except ValueError:
+                _fail_corrupt(journal, number)
+            turn_id = str(outcome["turn_id"])
+            if turn_id not in book.admitted_turns or turn_id in book.turn_outcomes:
+                _fail_corrupt(journal, number)
+            book.turn_outcomes[turn_id] = outcome
     if sessions == 0:
         book.status = "empty"
     return book
@@ -593,31 +613,55 @@ def cycle_turn_id(snapshot_id: str, market_id: str) -> str:
 
 
 def enqueue_event(directory: Path, raw_event: dict) -> dict:
-    """Durably enqueue one accepted trade plan, idempotently by event ID."""
+    """Durably enqueue one validated event, idempotently by event ID."""
     try:
-        event = parse_trade_plan(raw_event)
-        validate_trade_plan(event, now=datetime.fromisoformat(event.created_at))
-    except (TypeError, ValueError):
-        raise ValueError("invalid trade plan event") from None
+        if raw_event.get("record_type") == "turn_outcome":
+            from chrysopoeia.paper_cycle import validate_turn_outcome
+
+            event_id = str(validate_turn_outcome(raw_event)["event_id"])
+        else:
+            event = parse_trade_plan(raw_event)
+            validate_trade_plan(event, now=datetime.fromisoformat(event.created_at))
+            event_id = event.event_id
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError("invalid event") from None
     book = replay(directory)
-    existing = book.outbox.get(event.event_id)
+    existing = book.outbox.get(event_id)
     if existing is not None:
         if existing != raw_event:
             raise JournalError(
-                f"event_id {event.event_id} already exists with different content"
+                f"event_id {event_id} already exists with different content"
             )
         return existing
     return append_record(directory, "outbox_enqueued", {"event": raw_event})
 
 
-def pending_events(directory: Path) -> list[dict]:
+def pending_events(directory: Path, record_type: str | None = None) -> list[dict]:
     """Return unacknowledged canonical event payloads in journal order."""
     book = replay(directory)
     return [
         event
         for event_id, event in book.outbox.items()
         if event_id not in book.acknowledged_events
+        and (record_type is None or event.get("record_type") == record_type)
     ]
+
+
+def record_turn_outcome(directory: Path, outcome: dict) -> dict:
+    """Persist one validated decided-turn outcome, idempotently by turn."""
+    from chrysopoeia.paper_cycle import validate_turn_outcome
+
+    valid = validate_turn_outcome(outcome)
+    turn_id = str(valid["turn_id"])
+    book = replay(directory)
+    existing = book.turn_outcomes.get(turn_id)
+    if existing is not None:
+        if existing != valid:
+            raise JournalError(f"turn_id {turn_id} already has a different outcome")
+        return existing
+    if turn_id not in book.open_turns:
+        raise JournalError(f"turn_id {turn_id} is not open")
+    return append_record(directory, "turn_outcome_recorded", {"outcome_event": valid})
 
 
 def acknowledge_event(directory: Path, event_id: str) -> dict:

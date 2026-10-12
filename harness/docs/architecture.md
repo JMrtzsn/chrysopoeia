@@ -78,7 +78,9 @@ flowchart TD
 - One bounded harness invocation produces
   `trade_plan_ready` only after reviewer approval and deterministic hard-policy
   acceptance. The event is a verified request/plan, never an order, fill, open
-  position, or completed execution. Abstentions and rejections produce no event.
+  position, or completed execution. Every decided turn also emits a strict
+  `turn_outcome` containing the proposal rationale, optional review, policy
+  result, reason, and model cost; failed and abandoned turns do not.
 - The minimal event envelope contains version and type, stable `event_id`,
   creation time, market and snapshot identity, outcome, stake, maximum entry
   price, immutable ROI/time exit plan, review approval and policy/evidence
@@ -95,22 +97,26 @@ flowchart TD
 - A producer-only `cycle` returns the serialized JSON event with no fill. The
   journal-backed local `run`/`cycle` path passes that event once to the in-process
   paper consumer, then returns and stores the event separately from its achieved
-  fill. With `CHRYSOPOEIA_EVENT_SINK` set, accepted journal-backed events are
-  appended before that fill, published directly to loopback HTTP or Pub/Sub, and
+  fill. With `CHRYSOPOEIA_EVENT_SINK` set, journal-backed `turn_outcome` and
+  accepted `trade_plan_ready` events are appended in journal order, published
+  directly to loopback HTTP or Pub/Sub, and
   acknowledged only after confirmation. Pending events drain oldest-first before
   work and between run cycles. `outbox-pending` returns canonical payloads and
   `outbox-ack` records delivery; both are idempotent by `event_id`. The outbox is
   delivery state, not a financial ledger. The selected optional producer
   transport is selected by the sink with this journal-backed at-least-once
   outbox. Unset performs no publishing, Pub/Sub import, or network call.
+- Outcomes are always validated and journaled before turn finalization. One topic
+  carries all outbox event types with `record_type` and `schema_version` message
+  attributes; independent subscriptions filter the types they consume.
 - No always-on harness or manager process is required. CLI or future request
   adapters invoke the same core. The deployed paper consumer is independently
   implemented in `consumer/`; live order mechanisms remain deferred. Any live
   consumer/venue exit monitoring and protection guarantees
   must be specified before live activation.
 - In event-driven terms: the journal outbox is a transactional outbox, delivery
-  is at-least-once, and consumers are idempotent by `event_id`. Planned outcome
-  events and BigQuery read models are listed in `../../README.md`.
+  is at-least-once, and consumers are idempotent by `event_id`. BigQuery read
+  models remain future work.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.
 

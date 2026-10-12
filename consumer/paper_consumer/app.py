@@ -73,6 +73,9 @@ def create_app(
             event = parse_push(envelope)
         except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError):
             return Response(status_code=400)
+        payload_type = event.get("record_type") if isinstance(event, dict) else None
+        if payload_type not in {None, "trade_plan_ready"}:
+            return Response(status_code=204)
         try:
             consumer.consume(event, clock())
         except TransientFailure:

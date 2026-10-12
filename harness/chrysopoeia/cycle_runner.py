@@ -22,6 +22,7 @@ from chrysopoeia.configuration import HarnessConfig, ModelPrice
 from chrysopoeia.cost import LEDGER_KEY
 from chrysopoeia.models import resolve_model
 from chrysopoeia.paper_cycle import (
+    PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
     PROPOSAL_KEY,
@@ -32,6 +33,8 @@ from chrysopoeia.paper_cycle import (
     PaperCycleReportOutput,
     PaperCycleRequest,
     ProposalOutput,
+    ReviewOutput,
+    build_turn_outcome,
     validate_evidence_bundle,
 )
 from chrysopoeia.trading import MarketSnapshot, OperatingConfig
@@ -145,7 +148,7 @@ def summarize_cycle(
         raise ValueError("paper cycle snapshot identity is inconsistent")
     snapshot = selected
     report = PaperCycleReportOutput.model_validate(state.get(PAPER_CYCLE_REPORT_KEY))
-    ProposalOutput.model_validate(state.get(PROPOSAL_KEY))
+    proposal = ProposalOutput.model_validate(state.get(PROPOSAL_KEY))
     ledger = state.get(LEDGER_KEY)
     if (
         not isinstance(ledger, list)
@@ -167,6 +170,31 @@ def summarize_cycle(
         raise ValueError("model cost exceeded reserved ceiling")
     fill = state.get(PAPER_CYCLE_FILL_KEY)
     event = state.get(TRADE_PLAN_READY_KEY)
+    review_value = state.get(REVIEW_KEY)
+    review = ReviewOutput.model_validate(review_value) if review_value is not None else None
+    if report.status == "abstained":
+        outcome_status = "abstained"
+    elif review is None:
+        outcome_status = "plan_check_rejected"
+    elif not review.approved:
+        outcome_status = "reviewer_rejected"
+    elif event is None:
+        outcome_status = "policy_rejected"
+    else:
+        outcome_status = "plan_ready"
+    created_at = snapshot.captured_at if snapshot and snapshot.captured_at else None
+    if created_at is None:
+        raise ValueError("decided paper cycle is missing a capture timestamp")
+    outcome_event = build_turn_outcome(
+        proposal=proposal.model_dump(),
+        review=review.model_dump() if review else None,
+        policy=(state.get(PAPER_CYCLE_DECISION_KEY) if review else None),
+        status=outcome_status,
+        reason=report.reason,
+        created_at=created_at,
+        trade_plan_event_id=str(event["event_id"]) if isinstance(event, Mapping) else None,
+        model_cost_usd=str(actual),
+    )
     public_fill = None
     if fill is not None:
         if not isinstance(fill, Mapping):
@@ -194,6 +222,7 @@ def summarize_cycle(
         "reviewer_called": REVIEW_KEY in state,
         "fill": public_fill,
         "event": event,
+        "outcome_event": outcome_event,
         "ledger_statuses": statuses,
         "actual_estimated_cost_usd": str(actual),
         "maximum_reserved_cost_usd": str(maximum),

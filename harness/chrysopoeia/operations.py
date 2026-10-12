@@ -180,7 +180,16 @@ async def run_journal_turn(
             config, snapshot, operating, evidence=evidence, context=context, draft=draft
         )
         event = result.get("event")
+        outcome_event = result.get("outcome_event")
         cost = result.get("actual_estimated_cost_usd", "0")
+        if not isinstance(outcome_event, dict):
+            raise ValueError("producer result is missing a turn outcome")
+        accounting.record_turn_outcome(journal, outcome_event)
+        from chrysopoeia.events import configured_sink, drain
+
+        sink = configured_sink()
+        if sink:
+            accounting.enqueue_event(journal, outcome_event)
         if isinstance(event, dict):
             trade_plan = parse_trade_plan(event)
             simulated = consume_trade_plan(trade_plan, snapshot, operating)
@@ -200,12 +209,11 @@ async def run_journal_turn(
             }
             result["fill"] = fill
             result["status"] = "filled"
-            from chrysopoeia.events import configured_sink, drain
-
-            sink = configured_sink()
             if sink:
                 accounting.enqueue_event(journal, event)
-                drain(journal, sink)
+        if sink:
+            drain(journal, sink)
+        if isinstance(event, dict):
             accounting.record_fill(
                 journal,
                 Position(
