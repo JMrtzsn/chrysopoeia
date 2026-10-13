@@ -5,6 +5,7 @@ import math
 import unittest
 from collections.abc import AsyncGenerator
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 
 from google.adk.models import BaseLlm
@@ -17,6 +18,7 @@ from google.adk.sessions.state import State
 from google.adk.workflow import Workflow
 from google.genai import types
 from google.genai._transformers import process_schema
+from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import SkipValidation, ValidationError
 
 from chrysopoeia.agent import (
@@ -25,6 +27,7 @@ from chrysopoeia.agent import (
     bound_trader_rationale,
     complete_abstention,
     complete_paper_cycle,
+    complete_unchecked_trade,
     paper_cycle_workflow,
     prepare_reviewer_input,
     prepare_trader_input,
@@ -50,7 +53,9 @@ from chrysopoeia.paper_cycle import (
     ProposalOutput,
     ReviewerInput,
     ReviewOutput,
+    build_turn_outcome,
     finalize_paper_cycle,
+    validate_turn_outcome,
 )
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
@@ -308,10 +313,12 @@ class PaperCycleTests(unittest.TestCase):
             "rationale": "Evidence supports a trade.",
             "max_entry_price": 0.41, "exit_plan": EXIT_PLAN,
         }
-        for citations in ([], ["unknown"], [EVIDENCE_ID, EVIDENCE_ID]):
+        for citations in ([], [EVIDENCE_ID, EVIDENCE_ID]):
             with self.subTest(citations=citations), self.assertRaises((ValidationError, ValueError)):
                 route_proposal(ctx, ProposalOutput.model_validate({**base, "citations": citations}))
             self.assertNotIn(PAPER_CYCLE_FILL_KEY, state)
+        unresolved = ProposalOutput.model_validate({**base, "citations": ["unknown"]})
+        self.assertEqual(route_proposal(ctx, unresolved).actions.route, "unchecked")
 
         state[EVIDENCE_KEY] = [{
             **state[EVIDENCE_KEY][0],
@@ -353,6 +360,45 @@ class PaperCycleTests(unittest.TestCase):
             route_proposal(SimpleNamespace(state=state), proposal).actions.route,
             "unchecked",
         )
+
+    def test_unresolved_trader_citation_records_schema_valid_rejection(self) -> None:
+        state = cycle_state()
+        proposal = ProposalOutput.model_validate({
+            **state[PROPOSAL_KEY], "citations": ["invented-evidence-id"],
+        })
+        ctx = SimpleNamespace(state=state)
+
+        event = route_proposal(ctx, proposal)
+        report = complete_unchecked_trade(ctx, proposal)
+        outcome = build_turn_outcome(
+            proposal=event.output,
+            review=None,
+            policy=None,
+            status="plan_check_rejected",
+            reason=report.reason,
+            created_at="2026-09-01T00:00:00+00:00",
+            trade_plan_event_id=None,
+            model_cost_usd="0.25",
+        )
+
+        self.assertEqual(event.actions.route, "unchecked")
+        self.assertEqual(report.reason, "trader citations do not resolve to captured evidence")
+        self.assertEqual(outcome["proposal"]["citations"], ["invented-evidence-id"])
+        self.assertEqual(validate_turn_outcome(outcome), outcome)
+        schema = json.loads(
+            Path(__file__).parents[2].joinpath("contracts", "turn_outcome.v1.schema.json").read_text()
+        )
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(outcome)
+
+        abstention = ProposalOutput.model_validate({
+            **proposal.model_dump(),
+            "action": "abstain",
+            "amount": 0.0,
+            "max_entry_price": None,
+            "exit_plan": None,
+        })
+        self.assertEqual(route_proposal(ctx, abstention).actions.route, "unchecked")
+        self.assertEqual(complete_unchecked_trade(ctx, abstention).reason, report.reason)
 
     def test_reviewer_citations_reject_invalid_approval_and_allow_empty_rejection(self) -> None:
         with self.assertRaises(ValidationError):
