@@ -1,6 +1,8 @@
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from decimal import Decimal
+from math import nextafter
 from pathlib import Path
 
 from google.adk.agents import Agent
@@ -22,6 +24,7 @@ from chrysopoeia.polymarket import PolymarketError, discover_markets, load_marke
 from chrysopoeia.trading import (
     ExitPlan,
     MarketSnapshot,
+    MINIMUM_NET_EDGE,
     OperatingConfig,
     Proposal,
     Review,
@@ -32,6 +35,8 @@ from chrysopoeia.trading import (
 MAX_MARKET_QUERY_LENGTH = 200
 MAX_MARKET_LOOKUPS = 5
 MAX_PLAN_CHECKS = paper_cycle.MAX_PLAN_CHECKS
+MAX_PLAN_SCHEMA_ERRORS = 5
+MAX_PLAN_SCHEMA_ERROR_LENGTH = 200
 
 
 def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load=load_market_snapshot):
@@ -106,7 +111,72 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
             return {"ok": False, "reason": "market snapshot unavailable"}
         state["market_snapshot"] = asdict(snapshot)
         state[paper_cycle.EVIDENCE_KEY] = [record.model_dump() for record in paper_cycle._canonical_evidence(snapshot)]
-        return {"ok": True, "market_snapshot": asdict(snapshot), "evidence": state[paper_cycle.EVIDENCE_KEY]}
+        citation_ids = [record["evidence_id"] for record in state[paper_cycle.EVIDENCE_KEY]]
+        available_exposure = min(
+            Decimal(str(snapshot.bankroll * operating.maximum_market_exposure - snapshot.market_exposure)),
+            Decimal(str(snapshot.bankroll * operating.maximum_total_exposure - snapshot.total_exposure)),
+        )
+        available_depth = sum(
+            (Decimal(str(level.price)) * Decimal(str(level.size)) for level in snapshot.asks),
+            Decimal(0),
+        )
+        maximum_amount = nextafter(float(
+            max(
+                Decimal(0),
+                min(
+                    available_depth,
+                    available_exposure / (Decimal(1) + Decimal(str(snapshot.fee_rate))),
+                ),
+            )
+        ), 0)
+        if maximum_amount:
+            maximum_quote = paper_execute(
+                snapshot,
+                Proposal(snapshot.snapshot_id, snapshot.market_id, 1, maximum_amount),
+            )
+            maximum_entry_price = snapshot.asks[maximum_quote.levels_consumed - 1].price
+        else:
+            maximum_entry_price = snapshot.price
+        plan_inputs = {
+            "snapshot_id": snapshot.snapshot_id,
+            "market_id": snapshot.market_id,
+            "valid_citation_ids": citation_ids,
+            "captured_at": snapshot.captured_at,
+            "end_time": snapshot.end_time,
+            "exit_by_window": {
+                "exclusive_start": snapshot.captured_at,
+                "exclusive_end": snapshot.end_time,
+            },
+            "current_executable_yes_ask": snapshot.price,
+            "best_ask": snapshot.price,
+            "maximum_amount": maximum_amount,
+            "max_entry_price_for_maximum_amount": maximum_entry_price,
+            "minimum_net_edge": MINIMUM_NET_EDGE,
+            "fee_rate": snapshot.fee_rate,
+            "fee_source": snapshot.fee_source,
+            "template": {
+                "snapshot_id": snapshot.snapshot_id,
+                "market_id": snapshot.market_id,
+                "action": "trade",
+                "probability": "REPLACE_WITH_PROBABILITY",
+                "amount": "REPLACE_WITH_AMOUNT",
+                "citations": citation_ids,
+                "rationale": "REPLACE_WITH_RATIONALE",
+                "max_entry_price": maximum_entry_price,
+                "exit_plan": {
+                    "take_profit_roi": 0.1,
+                    "stop_loss_roi": None,
+                    "exit_by": None,
+                    "hold_to_resolution": True,
+                },
+            },
+        }
+        return {
+            "ok": True,
+            "market_snapshot": asdict(snapshot),
+            "evidence": state[paper_cycle.EVIDENCE_KEY],
+            "plan_inputs": plan_inputs,
+        }
 
     def check_trade_plan(plan: dict[str, object], tool_context: ToolContext) -> dict[str, object]:
         """Dry-run one candidate plan through the shared deterministic final checker."""
@@ -148,8 +218,21 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
             review = Review(output.snapshot_id, output.market_id, True, "candidate dry-run", tuple(output.citations))
             cycle = run_decision_cycle(snapshot, proposal, review, operating)
         except ValidationError as exc:
-            field = str(exc.errors()[0].get("loc", ("plan",))[0])
-            reasons = [f"plan schema error: {field} is invalid"]
+            reasons = []
+            if any(error.get("type") == "missing" for error in exc.errors()):
+                reasons.append(
+                    "plan schema error: start from plan_inputs.template and submit all fields"
+                )
+            for error in exc.errors(include_input=False)[:MAX_PLAN_SCHEMA_ERRORS]:
+                if len(reasons) >= MAX_PLAN_SCHEMA_ERRORS:
+                    break
+                field = ".".join(str(part) for part in error.get("loc", ())) or "plan"
+                message = " ".join(str(error.get("msg", "Invalid value")).split())
+                reasons.append(
+                    f"plan schema error: {field}: {message}"[
+                        :MAX_PLAN_SCHEMA_ERROR_LENGTH
+                    ]
+                )
         except (TypeError, ValueError):
             reasons = ["trade plan does not match the captured market or evidence"]
         else:
@@ -451,6 +534,7 @@ def build_agents(config: HarnessConfig) -> AgentSet:
         description="Researches prediction markets and proposes structured paper trades.",
         instruction=(
             "Use only find_markets, get_market, and check_trade_plan to select/capture public markets and propose dry-run plans. "
+            "Build the plan from plan_inputs, using its complete template, and always submit every field. Set amount ≤ maximum_amount and max_entry_price at or above the required price for that amount (the executable YES ask at the deepest consumed level), set exit_by inside its exclusive window or choose hold_to_resolution, and cite only the listed valid citation IDs. Replace the probability, amount, and rationale placeholders. "
             "Call check_trade_plan with the exact plan you intend to return. If it fails, read the reasons, revise, and re-check until it passes or the check limit is reached. "
             "After a pass, return exactly the last passed plan unchanged, with the same fields and values including rationale. Abstain if no plan check passes. "
             "Only YES positions can be taken; if your edge is on NO because your probability is below the YES price, or no YES edge exists, abstain and explain in rationale. "
