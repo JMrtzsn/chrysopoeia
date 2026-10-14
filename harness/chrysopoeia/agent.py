@@ -31,7 +31,7 @@ from chrysopoeia.trading import (
 
 MAX_MARKET_QUERY_LENGTH = 200
 MAX_MARKET_LOOKUPS = 5
-MAX_PLAN_CHECKS = 5
+MAX_PLAN_CHECKS = paper_cycle.MAX_PLAN_CHECKS
 
 
 def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load=load_market_snapshot):
@@ -111,19 +111,30 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
     def check_trade_plan(plan: dict[str, object], tool_context: ToolContext) -> dict[str, object]:
         """Dry-run one candidate plan through the shared deterministic final checker."""
         state = tool_context.state
+
+        def record(passed: bool, reasons: list[str], checked_plan: dict[str, object] | None) -> None:
+            checks = state.get(paper_cycle.PLAN_CHECKS_KEY, [])
+            if not isinstance(checks, list):
+                checks = []
+            state[paper_cycle.PLAN_CHECKS_KEY] = [
+                *checks,
+                {"passed": passed, "reasons": reasons, "plan": checked_plan},
+            ][:MAX_PLAN_CHECKS]
+
         attempts = state.get("trade_plan_check_attempts", 0)
         if not isinstance(attempts, int) or attempts >= MAX_PLAN_CHECKS:
             return {"passed": False, "reasons": ["trade plan check limit reached"]}
         state["trade_plan_check_attempts"] = attempts + 1
-        if state.get("market_snapshot") is None:
-            return {
-                "passed": False,
-                "reasons": ["capture a market snapshot before checking a plan"],
-            }
+        validated_plan = None
         try:
             output = paper_cycle.ProposalOutput.model_validate(plan)
+            validated_plan = output.model_dump()
             if output.action != "trade":
                 raise ValueError
+            if state.get("market_snapshot") is None:
+                reasons = ["capture a market snapshot before checking a plan"]
+                record(False, reasons, validated_plan)
+                return {"passed": False, "reasons": reasons}
             snapshot = paper_cycle._record(state.get("market_snapshot"), MarketSnapshot, "invalid")
             operating = paper_cycle._record(state.get("operating_config"), OperatingConfig, "invalid")
             evidence = paper_cycle._evidence(state, snapshot)
@@ -138,11 +149,15 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
             cycle = run_decision_cycle(snapshot, proposal, review, operating)
         except ValidationError as exc:
             field = str(exc.errors()[0].get("loc", ("plan",))[0])
-            return {"passed": False, "reasons": [f"plan schema error: {field} is invalid"]}
+            reasons = [f"plan schema error: {field} is invalid"]
         except (TypeError, ValueError):
-            return {"passed": False, "reasons": ["trade plan does not match the captured market or evidence"]}
-        if not cycle.decision.allowed:
-            return {"passed": False, "reasons": [cycle.decision.reason]}
+            reasons = ["trade plan does not match the captured market or evidence"]
+        else:
+            reasons = [] if cycle.decision.allowed else [cycle.decision.reason]
+        passed = not reasons
+        record(passed, reasons, validated_plan)
+        if not passed:
+            return {"passed": False, "reasons": reasons}
         quote = paper_execute(snapshot, proposal)
         state[paper_cycle.LAST_SUCCESSFUL_PLAN_KEY] = output.model_dump()
         state[paper_cycle.LAST_SUCCESSFUL_SNAPSHOT_KEY] = asdict(snapshot)
@@ -231,7 +246,7 @@ def complete_unchecked_trade(ctx: Context, node_input: paper_cycle.ProposalOutpu
     else:
         if node_input.action != "trade":
             raise ValueError("unchecked proposal is not a trade")
-        reason = "trade requires a successful matching plan check"
+        reason = paper_cycle.plan_check_rejection_reason(ctx.state)
     report = paper_cycle.PaperCycleReportOutput(
         status="rejected", reason=reason, summary=f"{node_input.snapshot_id}/{node_input.market_id}: no trade plan: {reason}",
     )
@@ -436,7 +451,8 @@ def build_agents(config: HarnessConfig) -> AgentSet:
         description="Researches prediction markets and proposes structured paper trades.",
         instruction=(
             "Use only find_markets, get_market, and check_trade_plan to select/capture public markets and propose dry-run plans. "
-            "Iterate until a plan passes, or abstain with a bounded reason after failed checks. "
+            "Call check_trade_plan with the exact plan you intend to return. If it fails, read the reasons, revise, and re-check until it passes or the check limit is reached. "
+            "After a pass, return exactly the last passed plan unchanged, with the same fields and values including rationale. Abstain if no plan check passes. "
             "Only YES positions can be taken; if your edge is on NO because your probability is below the YES price, or no YES edge exists, abstain and explain in rationale. "
             'Return action="abstain" and amount=0 with no trade terms when evidence or edge does not justify a trade; otherwise return '
             'action="trade" with a positive amount, max_entry_price, and a complete exit_plan. The exit plan must set '

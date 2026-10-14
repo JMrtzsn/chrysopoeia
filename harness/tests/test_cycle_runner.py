@@ -313,7 +313,7 @@ class CycleRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["status"], "rejected")
-        self.assertEqual(summary["reason"], "trade requires a successful matching plan check")
+        self.assertEqual(summary["reason"], "no plan check passed")
         self.assertFalse(summary["reviewer_called"])
 
     def test_trade_requires_explicit_check_tool_call_before_reviewer(self) -> None:
@@ -330,10 +330,11 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertEqual(summary["status"], "rejected")
         self.assertEqual(
             summary["reason"],
-            "trade requires a successful matching plan check",
+            "no plan check was run",
         )
         self.assertFalse(summary["reviewer_called"])
         self.assertIsNone(summary["event"])
+        self.assertEqual(summary["outcome_event"]["plan_checks"], [])
 
     def test_summary_uses_tool_selected_snapshot_and_rejects_target_switch(self) -> None:
         trader, reviewer, _ = self.models("abstain")

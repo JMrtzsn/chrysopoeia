@@ -34,6 +34,8 @@ TURN_OUTCOME_KEY = "turn_outcome"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
 LAST_SUCCESSFUL_PLAN_KEY = "last_successful_trade_plan"
 LAST_SUCCESSFUL_SNAPSHOT_KEY = "last_successful_trade_plan_snapshot"
+PLAN_CHECKS_KEY = "plan_checks"
+MAX_PLAN_CHECKS = 5
 MAX_EVIDENCE_ID_LENGTH = 200
 MAX_SNAPSHOT_ID_LENGTH = 128
 MAX_RETRIEVED_AT_LENGTH = 64
@@ -283,6 +285,14 @@ class ExitPlanOutput(StrictOutput):
 ProposalOutput.model_rebuild()
 
 
+class PlanCheck(StrictOutput):
+    passed: bool = Field(strict=True)
+    reasons: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        max_length=MAX_PLAN_CHECKS
+    )
+    plan: ProposalOutput | None
+
+
 def build_turn_outcome(
     *,
     proposal: Mapping[str, object],
@@ -299,10 +309,17 @@ def build_turn_outcome(
     created_at: str,
     trade_plan_event_id: str | None,
     model_cost_usd: str,
+    plan_checks: object = (),
 ) -> dict[str, object]:
     """Build one deterministic, strict outcome payload from decided cycle state."""
     output = ProposalOutput.model_validate(proposal)
     checked_review = ReviewOutput.model_validate(review) if review is not None else None
+    if not isinstance(plan_checks, (list, tuple)) or len(plan_checks) > MAX_PLAN_CHECKS:
+        raise ValueError("outcome plan checks are invalid")
+    try:
+        checked_plan_checks = [PlanCheck.model_validate(check) for check in plan_checks]
+    except (TypeError, ValueError):
+        raise ValueError("outcome plan checks are invalid") from None
     if not isinstance(reason, str) or not 1 <= len(reason) <= 500:
         raise ValueError("outcome reason is invalid")
     try:
@@ -368,6 +385,7 @@ def build_turn_outcome(
         "created_at": created_at,
         "status": status,
         "reason": reason,
+        "plan_checks": [check.model_dump() for check in checked_plan_checks],
         "proposal": output.model_dump(exclude={"snapshot_id", "market_id"}),
         "review": (
             checked_review.model_dump(exclude={"snapshot_id", "market_id"})
@@ -382,32 +400,37 @@ def build_turn_outcome(
 
 def validate_turn_outcome(value: object) -> dict[str, object]:
     """Validate a serialized outcome and return its canonical payload."""
-    if not isinstance(value, Mapping) or set(value) != {
+    if not isinstance(value, Mapping):
+        raise ValueError("invalid turn outcome")
+    normalized = dict(value)
+    normalized.setdefault("plan_checks", [])
+    if set(normalized) != {
         "schema_version", "record_type", "event_id", "turn_id", "snapshot_id",
         "market_id", "created_at", "status", "reason", "proposal", "review",
-        "policy", "trade_plan_event_id", "model_cost_usd",
+        "policy", "trade_plan_event_id", "model_cost_usd", "plan_checks",
     }:
         raise ValueError("invalid turn outcome")
     try:
-        proposal = dict(value["proposal"])
-        proposal.update(snapshot_id=value["snapshot_id"], market_id=value["market_id"])
-        review = value["review"]
+        proposal = dict(normalized["proposal"])
+        proposal.update(snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"])
+        review = normalized["review"]
         if review is not None:
             review = dict(review)
-            review.update(snapshot_id=value["snapshot_id"], market_id=value["market_id"])
+            review.update(snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"])
         expected = build_turn_outcome(
             proposal=proposal,
             review=review,
-            policy=value["policy"],
-            status=value["status"],
-            reason=value["reason"],
-            created_at=value["created_at"],
-            trade_plan_event_id=value["trade_plan_event_id"],
-            model_cost_usd=str(value["model_cost_usd"]),
+            policy=normalized["policy"],
+            status=normalized["status"],
+            reason=normalized["reason"],
+            created_at=normalized["created_at"],
+            trade_plan_event_id=normalized["trade_plan_event_id"],
+            model_cost_usd=str(normalized["model_cost_usd"]),
+            plan_checks=normalized["plan_checks"],
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None
-    if value.get("schema_version") != 1 or value.get("record_type") != "turn_outcome" or dict(value) != expected:
+    if normalized.get("schema_version") != 1 or normalized.get("record_type") != "turn_outcome" or normalized != expected:
         raise ValueError("invalid turn outcome")
     return expected
 
@@ -478,6 +501,18 @@ class StateShape(Protocol):
 
 StateMap = MutableMapping[str, object] | StateShape
 Record = TypeVar("Record")
+
+
+def plan_check_rejection_reason(state: StateMap) -> str:
+    checks = state.get(PLAN_CHECKS_KEY, [])
+    if not isinstance(checks, list) or not checks:
+        return "no plan check was run"
+    if not any(
+        isinstance(check, Mapping) and check.get("passed") is True
+        for check in checks
+    ):
+        return "no plan check passed"
+    return "proposal differs from the last passed plan"
 
 
 def _is_state_map(state: object) -> TypeGuard[StateMap]:
@@ -638,7 +673,7 @@ def finalize_paper_cycle(
     if cycle.event and checked:
         status, reason = "approved", cycle.decision.reason
     elif cycle.event:
-        status, reason = "rejected", "trade requires a successful matching plan check"
+        status, reason = "rejected", plan_check_rejection_reason(state)
     elif not review.approved:
         status, reason = "rejected", "review_rejected"
     else:

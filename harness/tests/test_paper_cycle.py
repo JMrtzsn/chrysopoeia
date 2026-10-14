@@ -44,6 +44,7 @@ from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
+    PLAN_CHECKS_KEY,
     PROPOSAL_KEY,
     REVIEW_KEY,
     TRADE_PLAN_READY_KEY,
@@ -115,6 +116,9 @@ def cycle_state(*, approved: bool = True) -> dict[str, object]:
     }
     state[LAST_SUCCESSFUL_PLAN_KEY] = copy.deepcopy(state[PROPOSAL_KEY])
     state[LAST_SUCCESSFUL_SNAPSHOT_KEY] = copy.deepcopy(state["market_snapshot"])
+    state[PLAN_CHECKS_KEY] = [
+        {"passed": True, "reasons": [], "plan": copy.deepcopy(state[PROPOSAL_KEY])}
+    ]
     return state
 
 
@@ -361,6 +365,29 @@ class PaperCycleTests(unittest.TestCase):
             "unchecked",
         )
 
+    def test_unchecked_trade_reason_distinguishes_plan_check_history(self) -> None:
+        proposal = ProposalOutput.model_validate(cycle_state()[PROPOSAL_KEY])
+        cases = (
+            ([], "no plan check was run"),
+            (
+                [{"passed": False, "reasons": ["minimum edge not met"], "plan": proposal.model_dump()}],
+                "no plan check passed",
+            ),
+            (
+                [{"passed": True, "reasons": [], "plan": {**proposal.model_dump(), "amount": 9.0}}],
+                "proposal differs from the last passed plan",
+            ),
+        )
+
+        for plan_checks, reason in cases:
+            state = cycle_state()
+            state["plan_checks"] = plan_checks
+            state.pop(LAST_SUCCESSFUL_PLAN_KEY)
+            state.pop(LAST_SUCCESSFUL_SNAPSHOT_KEY)
+            with self.subTest(reason=reason):
+                report = complete_unchecked_trade(SimpleNamespace(state=state), proposal)
+                self.assertEqual(report.reason, reason)
+
     def test_unresolved_trader_citation_records_schema_valid_rejection(self) -> None:
         state = cycle_state()
         proposal = ProposalOutput.model_validate({
@@ -516,7 +543,9 @@ class PaperCycleTests(unittest.TestCase):
                 }
             report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
             with self.subTest(change=change):
-                self.assertEqual(report["reason"], "trade requires a successful matching plan check")
+                self.assertEqual(
+                    report["reason"], "proposal differs from the last passed plan"
+                )
                 self.assertIsNone(state[TRADE_PLAN_READY_KEY])
 
     def test_offline_compiled_workflow_path_reaches_finalizer_in_order(self) -> None:

@@ -8,6 +8,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from chrysopoeia.accounting import (
     admit_turn,
+    append_record,
     cycle_turn_id,
     enqueue_event,
     open_session,
@@ -122,8 +123,17 @@ class TurnOutcomeTests(unittest.TestCase):
                     created_at="2026-10-09T00:00:00+00:00",
                     trade_plan_event_id=trade_event_id,
                     model_cost_usd="0.25",
+                    plan_checks=(
+                        [{"passed": False, "reasons": ["minimum edge not met"], "plan": selected}]
+                        if status == "plan_check_rejected"
+                        else []
+                    ),
                 )
                 validator.validate(outcome)
+                self.assertEqual(
+                    len(outcome["plan_checks"]),
+                    1 if status == "plan_check_rejected" else 0,
+                )
                 self.assertEqual(
                     outcome["proposal"]["rationale"], selected["rationale"]
                 )
@@ -177,6 +187,26 @@ class TurnOutcomeTests(unittest.TestCase):
         record_turn_outcome(directory, outcome)
 
         self.assertEqual(replay(directory).turn_outcomes[outcome["turn_id"]], outcome)
+
+    def test_validation_accepts_pre_plan_checks_v1_as_empty_history(self) -> None:
+        legacy = self.outcome()
+        legacy.pop("plan_checks")
+
+        validated = validate_turn_outcome(legacy)
+
+        self.assertEqual(validated["plan_checks"], [])
+
+    def test_replay_accepts_recorded_pre_plan_checks_v1(self) -> None:
+        directory = Path(tempfile.mkdtemp())
+        legacy = self.outcome()
+        legacy.pop("plan_checks")
+        open_session(directory, 1_000, 100)
+        admit_turn(directory, str(legacy["turn_id"]), "snapshot-1", "123")
+        append_record(directory, "turn_outcome_recorded", {"outcome_event": legacy})
+
+        replayed = replay(directory).turn_outcomes[legacy["turn_id"]]
+
+        self.assertEqual(replayed["plan_checks"], [])
 
     def test_single_sink_drains_all_event_types_in_journal_order(self) -> None:
         outcome = self.outcome()

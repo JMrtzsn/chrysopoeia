@@ -79,8 +79,10 @@ flowchart TD
   `trade_plan_ready` only after reviewer approval and deterministic hard-policy
   acceptance. The event is a verified request/plan, never an order, fill, open
   position, or completed execution. Every decided turn also emits a strict
-  `turn_outcome` containing the proposal rationale, optional review, policy
-  result, reason, and model cost; failed and abandoned turns do not.
+  `turn_outcome` containing the proposal rationale, bounded deterministic plan-
+  check attempts, optional review, policy result, reason, and model cost; failed
+  and abandoned turns do not. Plan-check rejection reasons distinguish no check,
+  no passing check, and a proposal changed after its last passing check.
 - The minimal event envelope contains version and type, stable `event_id`,
   creation time, market and snapshot identity, outcome, stake, maximum entry
   price, immutable ROI/time exit plan, review approval and policy/evidence

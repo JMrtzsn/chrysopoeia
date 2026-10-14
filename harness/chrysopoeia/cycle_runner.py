@@ -25,6 +25,7 @@ from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
+    PLAN_CHECKS_KEY,
     PROPOSAL_KEY,
     REVIEW_KEY,
     TRADE_PLAN_READY_KEY,
@@ -194,6 +195,7 @@ def summarize_cycle(
         created_at=created_at,
         trade_plan_event_id=str(event["event_id"]) if isinstance(event, Mapping) else None,
         model_cost_usd=str(actual),
+        plan_checks=state.get(PLAN_CHECKS_KEY, []),
     )
     public_fill = None
     if fill is not None:

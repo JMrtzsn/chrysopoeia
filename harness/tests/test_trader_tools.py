@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from chrysopoeia.agent import build_agents, build_trader_tools
 from chrysopoeia.configuration import load_harness_config
-from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY
+from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY, PLAN_CHECKS_KEY
 from chrysopoeia.polymarket import MarketCandidate
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
@@ -110,6 +110,17 @@ class TraderToolTests(unittest.TestCase):
         self.assertTrue(passed["passed"])
         self.assertEqual(passed["quote"]["fee"], 0.18)
         self.assertEqual(self.state[LAST_SUCCESSFUL_PLAN_KEY], self.plan())
+        self.assertEqual(
+            self.state[PLAN_CHECKS_KEY],
+            [
+                {
+                    "passed": False,
+                    "reasons": ["minimum net edge of 0.05 not met"],
+                    "plan": self.plan(probability=0.44),
+                },
+                {"passed": True, "reasons": [], "plan": self.plan()},
+            ],
+        )
         for _ in range(3):
             self.check(self.plan(probability=0.44), self.context)
         self.assertEqual(self.check(self.plan(), self.context), {"passed": False, "reasons": ["trade plan check limit reached"]})
@@ -119,6 +130,10 @@ class TraderToolTests(unittest.TestCase):
         result = self.check(self.plan(amount="nine"), self.context)
         self.assertEqual(result, {"passed": False, "reasons": ["plan schema error: amount is invalid"]})
         self.assertEqual(self.state["trade_plan_check_attempts"], 1)
+        self.assertEqual(
+            self.state[PLAN_CHECKS_KEY],
+            [{"passed": False, "reasons": ["plan schema error: amount is invalid"], "plan": None}],
+        )
 
     def test_check_reports_missing_snapshot_without_internal_details(self) -> None:
         result = self.check(self.plan(), self.context)
@@ -132,6 +147,15 @@ class TraderToolTests(unittest.TestCase):
             ["find_markets", "get_market", "check_trade_plan"],
         )
         self.assertEqual(agents.reviewer_agent.tools, [])
+
+    def test_trader_instruction_requires_returning_the_exact_passed_plan(self) -> None:
+        instruction = build_agents(self.config).trader_agent.instruction.lower()
+
+        self.assertIn("exact plan you intend", instruction)
+        self.assertIn("read the reasons, revise, and re-check", instruction)
+        self.assertIn("last passed plan unchanged", instruction)
+        self.assertIn("including rationale", instruction)
+        self.assertIn("abstain if no plan check passes", instruction)
 
 
 if __name__ == "__main__":

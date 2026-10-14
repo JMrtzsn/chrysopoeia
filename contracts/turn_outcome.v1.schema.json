@@ -4,7 +4,7 @@
   "title": "Harness-owned turn_outcome event v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "record_type", "event_id", "turn_id", "snapshot_id", "market_id", "created_at", "status", "reason", "proposal", "review", "policy", "trade_plan_event_id", "model_cost_usd"],
+  "required": ["schema_version", "record_type", "event_id", "turn_id", "snapshot_id", "market_id", "created_at", "status", "reason", "plan_checks", "proposal", "review", "policy", "trade_plan_event_id", "model_cost_usd"],
   "properties": {
     "schema_version": {"const": 1},
     "record_type": {"const": "turn_outcome"},
@@ -15,6 +15,7 @@
     "created_at": {"type": "string", "format": "date-time", "maxLength": 64},
     "status": {"enum": ["abstained", "plan_check_rejected", "reviewer_rejected", "policy_rejected", "plan_ready"]},
     "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+    "plan_checks": {"type": "array", "items": {"$ref": "#/$defs/plan_check"}, "maxItems": 5},
     "proposal": {
       "type": "object",
       "additionalProperties": false,
@@ -37,6 +38,26 @@
   "$defs": {
     "id": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"},
     "references": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 500}, "maxItems": 100, "uniqueItems": true},
+    "plan_check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["passed", "reasons", "plan"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "reasons": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 500}, "maxItems": 5},
+        "plan": {"anyOf": [{"$ref": "#/$defs/submitted_plan"}, {"type": "null"}]}
+      }
+    },
+    "submitted_plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["snapshot_id", "market_id", "action", "probability", "amount", "max_entry_price", "exit_plan", "citations", "rationale"],
+      "properties": {
+        "snapshot_id": {"$ref": "#/$defs/id"}, "market_id": {"$ref": "#/$defs/id"},
+        "action": {"enum": ["trade", "abstain"]}, "probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "amount": {"type": "number"}, "max_entry_price": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "exit_plan": {"anyOf": [{"$ref": "#/$defs/exit_plan"}, {"type": "null"}]},
+        "citations": {"$ref": "#/$defs/references"}, "rationale": {"type": "string", "minLength": 1, "maxLength": 500}
+      }
+    },
     "exit_plan": {
       "type": "object", "additionalProperties": false,
       "required": ["take_profit_roi", "stop_loss_roi", "exit_by", "hold_to_resolution"],

@@ -13,3 +13,4 @@ infra/state/
 platform/infra/state/
 .idea/
 .build/
+.router_key

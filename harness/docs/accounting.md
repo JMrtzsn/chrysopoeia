@@ -20,6 +20,11 @@ fills, marks, closes, settlements, loss halts, session closure, and model cost. 
 local to the operator-selected directory; there is no multi-user or distributed
 ledger.
 
+Decided-turn outcomes include up to five plan-check attempts with deterministic
+reasons and the validated submitted plan, or `null` when its schema was invalid.
+The v1 contract was amended before any external consumer persisted it; journal
+replay treats older v1 outcomes without `plan_checks` as an empty list.
+
 ## Positions and outcomes
 
 - A fill opens one YES position per market. It records the original plan
