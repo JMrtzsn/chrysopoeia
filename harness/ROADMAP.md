@@ -58,19 +58,26 @@ endpoint configured separately from the platform compute region.
   2026-10-08; evidence is in `docs/verification.md`.
 - Vertex Gemini Google Search grounding: one bounded pre-trader research call,
   strict citable evidence normalization, failure-safe status, and query cost
-  accounting. Implemented; bounded live verification remains pending.
+  accounting. Live verified 2026-10-14; evidence is in
+  `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
 
 ## Next
 
-1. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+1. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
+   event reaches the independent Consumer and produces a paper fill; the live
+   outcome/ignore path is verified, but this fill path is not.
+2. **Additional research providers:** only Vertex Google Search grounding has
+   bounded live evidence; keep other providers open until separately selected
+   and verified.
+3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-2. **Additional venues and NO-side positions:** separate milestones after the
+4. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-3. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+5. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.
