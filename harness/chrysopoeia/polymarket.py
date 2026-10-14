@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from math import isfinite
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from chrysopoeia.trading import (
@@ -23,6 +23,7 @@ WEB_HOSTS = {"polymarket.com", "www.polymarket.com"}
 MAX_BOOK_AGE = timedelta(minutes=5)
 MAX_METADATA_FUTURE_SKEW = timedelta(seconds=5)
 MAX_BOOK_LEVELS = 50
+DISCOVERY_HORIZON = timedelta(days=30)
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
@@ -281,10 +282,19 @@ def discover_markets(
     current = current.astimezone(timezone.utc)
     found: dict[str, tuple[MarketCandidate, datetime]] = {}
     for offset in (0, 25, 50):
-        endpoint = (
-            f"https://{API_HOST}/markets?active=true&closed=false"
-            f"&limit=25&offset={offset}"
+        query = urlencode(
+            {
+                "active": "true",
+                "closed": "false",
+                "order": "volume24hr",
+                "ascending": "false",
+                "end_date_min": current.isoformat(),
+                "end_date_max": (current + DISCOVERY_HORIZON).isoformat(),
+                "limit": 25,
+                "offset": offset,
+            }
         )
+        endpoint = f"https://{API_HOST}/markets?{query}"
         page = _fetch_json_list(
             endpoint, DEFAULT_TIMEOUT, DEFAULT_MAX_RESPONSE_BYTES, fetch
         )
@@ -301,8 +311,7 @@ def discover_markets(
             found[candidate.market_id] = (candidate, end)
         if len(page) < 25:
             break
-    ranked = sorted(found.values(), key=lambda item: (item[1], int(item[0].market_id)))
-    return tuple(candidate for candidate, _ in ranked[:limit])
+    return tuple(candidate for candidate, _ in found.values())[:limit]
 
 
 def _book_timestamp(value: object) -> datetime:

@@ -130,7 +130,8 @@ Cloud Run region does not select the model endpoint.
 
 The trader may discover a bounded candidate list, capture up to five canonical
 snapshots, and dry-run up to five candidate plans through the same deterministic
-checker used by the final gate. Discovery runs at most once per cycle. The
+checker used by the final gate. Discovery scans at most 75 markets ending within
+30 days in Gamma's descending 24-hour volume order and runs at most once per cycle. The
 reviewer remains tool-less. Google Search and context-agent tools are not exposed
 in this workflow. A local
 `--evidence` bundle is a snapshot-bound development/testing input, not a research

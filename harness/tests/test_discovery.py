@@ -1,6 +1,7 @@
 import json
 import unittest
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 from chrysopoeia.polymarket import (
     PolymarketError,
@@ -30,7 +31,7 @@ def record(identifier: int = 1, **changes: object) -> dict[str, object]:
 
 
 class MarketDiscoveryTests(unittest.TestCase):
-    def test_paginates_three_exact_gamma_endpoints_and_ranks_scanned_sample(
+    def test_paginates_ordered_near_term_gamma_markets_and_preserves_volume_order(
         self,
     ) -> None:
         calls: list[tuple[str, float, int]] = []
@@ -42,30 +43,27 @@ class MarketDiscoveryTests(unittest.TestCase):
 
         def fetch(url: str, timeout: float, max_bytes: int) -> bytes:
             calls.append((url, timeout, max_bytes))
+            self.assertEqual(
+                parse_qs(urlparse(url).query),
+                {
+                    "active": ["true"],
+                    "closed": ["false"],
+                    "order": ["volume24hr"],
+                    "ascending": ["false"],
+                    "end_date_min": ["2026-09-13T12:00:00+00:00"],
+                    "end_date_max": ["2026-10-13T12:00:00+00:00"],
+                    "limit": ["25"],
+                    "offset": [str((len(calls) - 1) * 25)],
+                },
+            )
             return json.dumps(pages[len(calls) - 1]).encode()
 
         candidates = discover_markets(limit=2, now=NOW, fetch=fetch)
 
-        self.assertEqual([item.market_id for item in candidates], ["51", "52"])
+        self.assertEqual([item.market_id for item in candidates], ["1", "2"])
         self.assertEqual(
-            calls,
-            [
-                (
-                    "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=25&offset=0",
-                    5.0,
-                    256 * 1024,
-                ),
-                (
-                    "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=25&offset=25",
-                    5.0,
-                    256 * 1024,
-                ),
-                (
-                    "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=25&offset=50",
-                    5.0,
-                    256 * 1024,
-                ),
-            ],
+            [(timeout, max_bytes) for _, timeout, max_bytes in calls],
+            [(5.0, 256 * 1024)] * 3,
         )
         self.assertTrue(all("clob.polymarket.com" not in call[0] for call in calls))
 
@@ -102,10 +100,10 @@ class MarketDiscoveryTests(unittest.TestCase):
         candidates = discover_markets(limit=20, now=NOW, fetch=fetch)
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual([item.market_id for item in candidates], ["3", "20"])
-        self.assertEqual(candidates[1].end_time, "2026-09-14T12:00:00+00:00")
+        self.assertEqual([item.market_id for item in candidates], ["20", "3"])
+        self.assertEqual(candidates[0].end_time, "2026-09-14T12:00:00+00:00")
         self.assertEqual(
-            candidates[1].source_url,
+            candidates[0].source_url,
             "https://polymarket.com/event/fallback-slug",
         )
 
