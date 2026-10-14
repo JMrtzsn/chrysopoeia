@@ -262,7 +262,7 @@ class OperatorCliTests(unittest.TestCase):
 
     def test_alternate_configuration_uses_supplied_relative_label(self) -> None:
         text = (ROOT / "chrysopoeia.toml").read_text(encoding="utf-8")
-        text = text.replace("gemini-3.5-flash", "alternate-model").replace(
+        text = text.replace("gemini-3.5-flash", "gemini-alternate-model").replace(
             'input_usd_per_million_tokens = "1.65"',
             'input_usd_per_million_tokens = "1.50"',
         )
@@ -276,7 +276,7 @@ class OperatorCliTests(unittest.TestCase):
         summary = json.loads(result.stdout)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(summary["config_path"], "alternate.toml")
-        self.assertEqual(summary["models"]["root"], "alternate-model")
+        self.assertEqual(summary["models"]["root"], "gemini-alternate-model")
         self.assertEqual(summary["cost_policy"]["input_usd_per_million_tokens"], "1.50")
 
     def test_absolute_config_label_is_sanitized_and_bounded(self) -> None:

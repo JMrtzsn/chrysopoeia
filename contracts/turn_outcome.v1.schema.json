@@ -4,7 +4,7 @@
   "title": "Harness-owned turn_outcome event v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "record_type", "event_id", "turn_id", "snapshot_id", "market_id", "created_at", "status", "reason", "plan_checks", "proposal", "review", "policy", "trade_plan_event_id", "model_cost_usd"],
+  "required": ["schema_version", "record_type", "event_id", "turn_id", "snapshot_id", "market_id", "created_at", "status", "reason", "plan_checks", "evidence", "research", "proposal", "review", "policy", "trade_plan_event_id", "model_cost_usd"],
   "properties": {
     "schema_version": {"const": 1},
     "record_type": {"const": "turn_outcome"},
@@ -16,6 +16,8 @@
     "status": {"enum": ["abstained", "plan_check_rejected", "reviewer_rejected", "policy_rejected", "plan_ready"]},
     "reason": {"type": "string", "minLength": 1, "maxLength": 500},
     "plan_checks": {"type": "array", "items": {"$ref": "#/$defs/plan_check"}, "maxItems": 5},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}, "maxItems": 20},
+    "research": {"$ref": "#/$defs/research"},
     "proposal": {
       "type": "object",
       "additionalProperties": false,
@@ -38,6 +40,26 @@
   "$defs": {
     "id": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"},
     "references": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 500}, "maxItems": 100, "uniqueItems": true},
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_id", "url", "title", "source_kind", "excerpt"],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1, "maxLength": 200},
+        "url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+        "source_kind": {"enum": ["market_snapshot", "external"]},
+        "excerpt": {"type": ["string", "null"], "minLength": 1, "maxLength": 500}
+      }
+    },
+    "research": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "reason", "query_count"],
+      "properties": {
+        "status": {"enum": ["ok", "unavailable"]},
+        "reason": {"type": ["string", "null"], "minLength": 1, "maxLength": 200},
+        "query_count": {"type": "integer", "minimum": 0}
+      }
+    },
     "plan_check": {
       "type": "object", "additionalProperties": false,
       "required": ["passed", "reasons", "plan"],

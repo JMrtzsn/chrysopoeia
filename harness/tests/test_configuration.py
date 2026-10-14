@@ -158,8 +158,8 @@ class HarnessConfigurationTests(unittest.TestCase):
         second_mapping["venue"]["paper_fee_rate"] = 0.03
         second_mapping["venue"]["paper_fee_source"] = "paper-assumption:test-v1"
         for mapping, model in (
-            (first_mapping, "first-model"),
-            (second_mapping, "second-model"),
+            (first_mapping, "gemini-first-model"),
+            (second_mapping, "gemini-second-model"),
         ):
             mapping["cost"]["model"] = model
             for role in ("root", "context", "trader", "reviewer"):
@@ -168,12 +168,12 @@ class HarnessConfigurationTests(unittest.TestCase):
         second = build_agents(HarnessConfig.from_mapping(second_mapping))
 
         self.assertEqual(
-            [agent.model.model for agent in first.model_agents], ["first-model"] * 4
+            [agent.model.model for agent in first.model_agents], ["gemini-first-model"] * 4
         )
         self.assertEqual(
-            [agent.model.model for agent in second.model_agents], ["second-model"] * 4
+            [agent.model.model for agent in second.model_agents], ["gemini-second-model"] * 4
         )
-        for agents, model in ((first, "first-model"), (second, "second-model")):
+        for agents, model in ((first, "gemini-first-model"), (second, "gemini-second-model")):
             callbacks = [agent.before_model_callback for agent in agents.model_agents]
             self.assertTrue(all(callback is callbacks[0] for callback in callbacks))
             self.assertEqual(callbacks[0].keywords["default_policy"]["model"], model)
@@ -181,10 +181,10 @@ class HarnessConfigurationTests(unittest.TestCase):
         second_state: dict[str, object] = {}
         first.configure_operation(SimpleNamespace(state=first_state))
         second.configure_operation(SimpleNamespace(state=second_state))
-        self.assertEqual(first_state["model_cost_policy"]["model"], "first-model")
-        self.assertEqual(second_state["model_cost_policy"]["model"], "second-model")
+        self.assertEqual(first_state["model_cost_policy"]["model"], "gemini-first-model")
+        self.assertEqual(second_state["model_cost_policy"]["model"], "gemini-second-model")
         first_state["model_cost_policy"]["model"] = "mutated"
-        self.assertEqual(second_state["model_cost_policy"]["model"], "second-model")
+        self.assertEqual(second_state["model_cost_policy"]["model"], "gemini-second-model")
         second_state["market_snapshot"] = {}
         with patch(
             "chrysopoeia.agent.load_market_snapshot", side_effect=ValueError
@@ -207,7 +207,7 @@ class HarnessConfigurationTests(unittest.TestCase):
         default_model = root_agent.model.model
         text = (Path(__file__).parents[1] / "chrysopoeia.toml").read_text()
         text = (
-            text.replace("gemini-3.5-flash", "alternate-model")
+            text.replace("gemini-3.5-flash", "gemini-alternate-model")
             .replace("paper_fee_rate = 0.02", "paper_fee_rate = 0.03")
             .replace("paper-assumption:flat-2pct-v1", "paper-assumption:alternate-v1")
             .replace(
@@ -246,7 +246,7 @@ class HarnessConfigurationTests(unittest.TestCase):
             agents.root_agent.before_model_callback,
         )
         self.assertIsNone(
-            asyncio.run(callback(callback_context, LlmRequest(model="alternate-model")))
+            asyncio.run(callback(callback_context, LlmRequest(model="gemini-alternate-model")))
         )
         record = state["model_cost_ledger"][0]
         self.assertEqual(
@@ -257,13 +257,13 @@ class HarnessConfigurationTests(unittest.TestCase):
                 record["input_usd_per_million_tokens"],
                 record["output_usd_per_million_tokens"],
             ),
-            ("alternate-model", 321, 123, "7", "11"),
+            ("gemini-alternate-model", 321, 123, "7", "11"),
         )
         operation_state: dict[str, object] = {}
         agents.configure_operation(SimpleNamespace(state=operation_state))
         self.assertEqual(operation_state["model_cost_policy"], config.cost_policy)
         self.assertEqual(
-            [agent.model.model for agent in agents.model_agents], ["alternate-model"] * 4
+            [agent.model.model for agent in agents.model_agents], ["gemini-alternate-model"] * 4
         )
         self.assertEqual(
             evaluation.reserved_ceiling(config, model_calls=2),

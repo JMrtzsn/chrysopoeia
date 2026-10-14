@@ -41,6 +41,8 @@ class TurnOutcomeTests(unittest.TestCase):
             created_at="2026-10-09T00:00:00+00:00",
             trade_plan_event_id=None,
             model_cost_usd="0.25",
+            evidence=[],
+            research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
         )
 
     def test_every_decided_status_conforms_to_shared_schema(self) -> None:
@@ -123,6 +125,14 @@ class TurnOutcomeTests(unittest.TestCase):
                     created_at="2026-10-09T00:00:00+00:00",
                     trade_plan_event_id=trade_event_id,
                     model_cost_usd="0.25",
+                    evidence=[{
+                        "evidence_id": "evidence",
+                        "url": "https://example.com/report",
+                        "title": "Report",
+                        "source_kind": "external",
+                        "excerpt": "Supporting text",
+                    }],
+                    research={"status": "ok", "reason": None, "query_count": 1},
                     plan_checks=(
                         [{"passed": False, "reasons": ["minimum edge not met"], "plan": selected}]
                         if status == "plan_check_rejected"
@@ -141,6 +151,8 @@ class TurnOutcomeTests(unittest.TestCase):
                     outcome["review"]["reason"] if outcome["review"] else None,
                     case_review["reason"] if case_review else None,
                 )
+                self.assertEqual(outcome["research"]["query_count"], 1)
+                self.assertEqual(outcome["evidence"][0]["evidence_id"], "evidence")
 
     def test_outcome_integrity_rejects_tampering_and_inconsistent_status(self) -> None:
         outcome = self.outcome()
@@ -173,6 +185,8 @@ class TurnOutcomeTests(unittest.TestCase):
                 created_at="2026-10-09T00:00:00+00:00",
                 trade_plan_event_id=cycle_turn_id("snapshot-1", "123"),
                 model_cost_usd="0.25",
+                evidence=[],
+                research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
             )
 
     def test_journal_records_outcome_without_sink_and_replay_is_idempotent(
@@ -191,10 +205,17 @@ class TurnOutcomeTests(unittest.TestCase):
     def test_validation_accepts_pre_plan_checks_v1_as_empty_history(self) -> None:
         legacy = self.outcome()
         legacy.pop("plan_checks")
+        legacy.pop("evidence")
+        legacy.pop("research")
 
         validated = validate_turn_outcome(legacy)
 
         self.assertEqual(validated["plan_checks"], [])
+        self.assertEqual(validated["evidence"], [])
+        self.assertEqual(
+            validated["research"],
+            {"status": "unavailable", "reason": "legacy outcome", "query_count": 0},
+        )
 
     def test_replay_accepts_recorded_pre_plan_checks_v1(self) -> None:
         directory = Path(tempfile.mkdtemp())

@@ -194,6 +194,7 @@ def grade(
         "retrieved_at": snapshot["captured_at"],
         "source_kind": "market_snapshot",
         "snapshot_id": SNAPSHOT_ID,
+        "excerpt": None,
     }:
         raise ValueError("paper-cycle evidence differs from the canonical snapshot")
     report = PaperCycleReportOutput.model_validate(

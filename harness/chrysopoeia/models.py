@@ -11,3 +11,11 @@ def resolve_model(config: ModelConfig, model_name: str) -> BaseLlm:
             client_kwargs={"vertexai": True, "location": config.location},
         )
     return LLMRegistry.new_llm(model=model_name)
+
+
+def resolve_context_model(config: ModelConfig) -> BaseLlm:
+    """Google Search grounding requires Vertex Gemini regardless of role adapter."""
+    return Gemini(
+        model=config.context,
+        client_kwargs={"vertexai": True, "location": config.location},
+    )

@@ -17,6 +17,8 @@ from pydantic import Field, SkipValidation
 from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.cost import LEDGER_KEY, settle_model_call
 from chrysopoeia.cycle_runner import (
+    GROUNDING_QUERY_PRICE_USD,
+    normalize_grounding_metadata,
     reserved_ceiling,
     run_paper_cycle,
     run_paper_cycle_state,
@@ -82,6 +84,55 @@ class FakeLlm(BaseLlm):
                 prompt_token_count=11, candidates_token_count=7
             ),
         )
+
+
+class FailingLlm(FakeLlm):
+    async def generate_content_async(
+        self, llm_request: LlmRequest, stream: bool = False
+    ) -> AsyncGenerator[LlmResponse, None]:
+        del llm_request, stream
+        raise RuntimeError("search unavailable")
+        yield
+
+
+class GroundedLlm(FakeLlm):
+    async def generate_content_async(
+        self, llm_request: LlmRequest, stream: bool = False
+    ) -> AsyncGenerator[LlmResponse, None]:
+        del stream
+        self.requests.append(llm_request)
+        yield LlmResponse(
+            content=types.Content(role="model", parts=[types.Part(text="Grounded.")]),
+            grounding_metadata=types.GroundingMetadata(
+                grounding_chunks=[
+                    types.GroundingChunk(
+                        web={"uri": "https://example.com/report", "title": "Report"}
+                    )
+                ],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        grounding_chunk_indices=[0],
+                        segment=types.Segment(text="Relevant evidence."),
+                    )
+                ],
+                web_search_queries=["market evidence"],
+            ),
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=11, candidates_token_count=7
+            ),
+        )
+
+
+class OverCeilingGroundedLlm(GroundedLlm):
+    async def generate_content_async(
+        self, llm_request: LlmRequest, stream: bool = False
+    ) -> AsyncGenerator[LlmResponse, None]:
+        async for response in super().generate_content_async(llm_request, stream):
+            assert response.grounding_metadata is not None
+            response.grounding_metadata.web_search_queries = [
+                str(index) for index in range(100)
+            ]
+            yield response
 
 
 class CycleRunnerTests(unittest.TestCase):
@@ -162,10 +213,66 @@ class CycleRunnerTests(unittest.TestCase):
             self.assertIs(request.config.response_schema, schema)
 
     def test_reserved_ceiling_uses_configured_model_call_cap(self) -> None:
-        self.assertEqual(reserved_ceiling(self.config), Decimal("0.2838528"))
+        self.assertEqual(
+            reserved_ceiling(self.config),
+            Decimal("0.2838528") + 30 * GROUNDING_QUERY_PRICE_USD,
+        )
+
+    def test_cycle_cost_includes_grounding_queries(self) -> None:
+        trader, reviewer, _ = self.models("abstain")
+        state, _, _ = asyncio.run(
+            run_paper_cycle_state(
+                self.config, self.snapshot, OperatingConfig(), trader, reviewer
+            )
+        )
+        base = Decimal(summarize_cycle(self.config, self.snapshot, state)["actual_estimated_cost_usd"])
+        state["research"] = {"status": "ok", "reason": None, "query_count": 2}
+
+        charged = Decimal(
+            summarize_cycle(self.config, self.snapshot, state)["actual_estimated_cost_usd"]
+        )
+
+        self.assertEqual(charged - base, 2 * GROUNDING_QUERY_PRICE_USD)
+
+    def test_grounding_metadata_becomes_bounded_deduplicated_evidence(self) -> None:
+        metadata = types.GroundingMetadata(
+            grounding_chunks=[
+                types.GroundingChunk(web={"uri": "https://EXAMPLE.com:443/a", "title": " A\nreport "}),
+                types.GroundingChunk(web={"uri": "https://example.com/a", "title": "duplicate"}),
+                types.GroundingChunk(web={"uri": "http://example.com/b", "title": "bad"}),
+                *(types.GroundingChunk(web={"uri": f"https://example.com/{index}", "title": str(index)}) for index in range(10)),
+            ],
+            grounding_supports=[
+                types.GroundingSupport(
+                    grounding_chunk_indices=[0],
+                    segment=types.Segment(text=" useful\u0000 " + "x" * 600),
+                )
+            ],
+            web_search_queries=["one", "two"],
+        )
+
+        evidence, query_count = normalize_grounding_metadata(self.snapshot, [metadata])
+
+        self.assertEqual(query_count, 2)
+        self.assertEqual(len(evidence), 8)
+        self.assertEqual(evidence[0].url, "https://example.com/a")
+        self.assertEqual(evidence[0].title, "A report")
+        self.assertEqual(len(evidence[0].excerpt or ""), 500)
+
+    def test_grounding_metadata_records_every_billed_query(self) -> None:
+        metadata = types.GroundingMetadata(
+            web_search_queries=[str(index) for index in range(31)]
+        )
+
+        _, query_count = normalize_grounding_metadata(self.snapshot, [metadata])
+
+        self.assertEqual(query_count, 31)
 
     def test_temporary_five_call_verification_cap(self) -> None:
-        self.assertEqual(reserved_ceiling(self.config, 5), Decimal("0.118272"))
+        self.assertEqual(
+            reserved_ceiling(self.config, 5),
+            Decimal("0.118272") + 30 * GROUNDING_QUERY_PRICE_USD,
+        )
 
     def test_largest_bounded_proposal_is_compact_relative_to_output_ceiling(
         self,
@@ -251,9 +358,9 @@ class CycleRunnerTests(unittest.TestCase):
                 self.assertEqual(len(calls), count)
                 self.assertEqual(summary["status"], status)
                 self.assertEqual(summary["reviewer_called"], action == "trade")
-                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.2838528")
+                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.7038528")
                 self.assertLessEqual(
-                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.2838528")
+                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.7038528")
                 )
                 self.assertEqual(
                     set(summary),
@@ -399,6 +506,93 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertTrue(trader.requests[1].config.tools)
         self.assertFalse(trader.requests[2].config.tools)
 
+    def test_research_failure_keeps_canonical_cycle_available(self) -> None:
+        trader, reviewer, _ = self.models("abstain")
+        context = FailingLlm(model=self.config.models.context, calls=[], response={})
+
+        summary = asyncio.run(
+            run_paper_cycle(
+                self.config,
+                self.snapshot,
+                OperatingConfig(),
+                trader,
+                reviewer,
+                context,
+            )
+        )
+
+        self.assertEqual(summary["status"], "abstained")
+        self.assertEqual(
+            summary["outcome_event"]["research"],
+            {"status": "unavailable", "reason": "research failed", "query_count": 0},
+        )
+        self.assertEqual(
+            [item["source_kind"] for item in summary["outcome_event"]["evidence"]],
+            ["market_snapshot"],
+        )
+
+    def test_research_disables_thinking_and_keeps_event_grounding_metadata(self) -> None:
+        trader, reviewer, _ = self.models("abstain")
+        context = GroundedLlm(
+            model=self.config.models.context, calls=[], requests=[], response={}
+        )
+
+        summary = asyncio.run(
+            run_paper_cycle(
+                self.config,
+                self.snapshot,
+                OperatingConfig(),
+                trader,
+                reviewer,
+                context,
+            )
+        )
+
+        self.assertEqual(context.requests[0].config.thinking_config.thinking_budget, 0)
+        self.assertEqual(
+            summary["outcome_event"]["research"],
+            {"status": "ok", "reason": None, "query_count": 1},
+        )
+        self.assertEqual(
+            summary["outcome_event"]["evidence"][1]["url"],
+            "https://example.com/report",
+        )
+
+    def test_research_query_ceiling_discards_evidence_before_trader(self) -> None:
+        trader, reviewer, calls = self.models("abstain")
+        context = OverCeilingGroundedLlm(
+            model=self.config.models.context, calls=[], requests=[], response={}
+        )
+
+        summary = asyncio.run(
+            run_paper_cycle(
+                self.config,
+                self.snapshot,
+                OperatingConfig(),
+                trader,
+                reviewer,
+                context,
+            )
+        )
+
+        self.assertEqual(calls, [self.config.models.trader])
+        self.assertEqual(
+            summary["outcome_event"]["research"],
+            {
+                "status": "unavailable",
+                "reason": "query ceiling exceeded",
+                "query_count": 100,
+            },
+        )
+        self.assertEqual(
+            [item["source_kind"] for item in summary["outcome_event"]["evidence"]],
+            ["market_snapshot"],
+        )
+        self.assertGreater(
+            Decimal(summary["actual_estimated_cost_usd"]),
+            Decimal(summary["maximum_reserved_cost_usd"]),
+        )
+
     def test_cycle_rejects_unvalidated_external_evidence_before_model_calls(
         self,
     ) -> None:
@@ -439,6 +633,17 @@ class CycleRunnerTests(unittest.TestCase):
             self.assertIn("litellm", str(raised))
         else:
             self.assertEqual(type(luz).__name__, "LiteLlm")
+
+    def test_context_model_always_resolves_to_vertex_under_registry_config(self) -> None:
+        from chrysopoeia.models import resolve_context_model
+
+        resolved = resolve_context_model(
+            replace(self.config.models, adapter="adk-registry"),
+        )
+
+        self.assertIsInstance(resolved, Gemini)
+        self.assertEqual(resolved.model, self.config.models.context)
+        self.assertEqual(resolved.client_kwargs, {"vertexai": True, "location": "us"})
 
 
 if __name__ == "__main__":

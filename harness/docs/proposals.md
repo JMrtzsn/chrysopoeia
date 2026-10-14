@@ -38,16 +38,18 @@ remain deferred.
 
 ## Research tools
 
-The trader now has bounded read-only venue discovery, snapshot capture, and
-deterministic plan-check tools. Give it additional research tools for markets available through
-configured venues. Candidate capabilities: web search, financial/economic data,
-company records, and category-specific sources when needed. Search, FRED,
-CoinGecko, and SEC EDGAR are candidate providers, not locked dependencies.
+Vertex Gemini Google Search grounding is implemented as one bounded step after
+snapshot capture. Only normalized grounding metadata becomes citable evidence;
+free-text model output is discarded. Research failures leave canonical evidence
+available. The context role uses Vertex even when trader/reviewer use another ADK
+adapter.
 
-Normalize and validate results with provenance before the trader/reviewer can
-cite them. Decide provider scope, whether the evidence includes source metadata
-only or bounded observations too, and per-cycle call/cost limits before building.
-Each shipped provider needs offline contract tests and a bounded live check.
+Additional candidate capabilities are financial/economic data, company records,
+and category-specific sources when needed. FRED, CoinGecko, and SEC EDGAR remain
+candidate providers, not locked dependencies.
+
+Each additional provider must normalize and validate results with provenance and
+needs offline contract tests plus a bounded live check.
 
 ## Binary outcome sides
 

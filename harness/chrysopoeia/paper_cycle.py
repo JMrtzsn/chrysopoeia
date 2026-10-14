@@ -39,6 +39,7 @@ MAX_PLAN_CHECKS = 5
 MAX_EVIDENCE_ID_LENGTH = 200
 MAX_SNAPSHOT_ID_LENGTH = 128
 MAX_RETRIEVED_AT_LENGTH = 64
+MAX_EVIDENCE_EXCERPT_LENGTH = 500
 
 
 class StrictOutput(BaseModel):
@@ -54,6 +55,7 @@ class EvidenceRecord(StrictOutput):
     retrieved_at: str = Field(min_length=1, max_length=MAX_RETRIEVED_AT_LENGTH)
     source_kind: Literal["market_snapshot", "external"]
     snapshot_id: str = Field(min_length=1, max_length=MAX_SNAPSHOT_ID_LENGTH)
+    excerpt: str | None = Field(default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH)
 
     @field_validator("url")
     @classmethod
@@ -70,6 +72,16 @@ class EvidenceRecord(StrictOutput):
             raise ValueError("title must not be blank")
         return value
 
+    @field_validator("excerpt")
+    @classmethod
+    def validate_excerpt(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise ValueError("excerpt must be non-blank and contain no controls")
+        return value
+
     @field_validator("snapshot_id")
     @classmethod
     def validate_snapshot_id(cls, value: str) -> str:
@@ -84,7 +96,7 @@ class EvidenceRecord(StrictOutput):
         if self.source_kind == "external":
             normalized = _normalize_web_url(self.url)
             expected = _external_evidence_id(
-                self.snapshot_id, normalized, self.title, self.retrieved_at
+                self.snapshot_id, normalized, self.title, self.retrieved_at, self.excerpt
             )
             if self.evidence_id != expected:
                 raise ValueError("evidence_id does not match external evidence")
@@ -180,11 +192,16 @@ def _normalize_web_url(value: str) -> str:
 
 
 def _external_evidence_id(
-    snapshot_id: str, normalized_url: str, normalized_title: str, retrieved_at: str
+    snapshot_id: str,
+    normalized_url: str,
+    normalized_title: str,
+    retrieved_at: str,
+    excerpt: str | None = None,
 ) -> str:
-    digest = sha256(
-        f"{snapshot_id}\n{normalized_url}\n{normalized_title}\n{retrieved_at}".encode()
-    ).hexdigest()[:56]
+    value = f"{snapshot_id}\n{normalized_url}\n{normalized_title}\n{retrieved_at}"
+    if excerpt is not None:
+        value += f"\n{excerpt}"
+    digest = sha256(value.encode()).hexdigest()[:56]
     return f"external:{snapshot_id}:{digest}"
 
 
@@ -193,19 +210,26 @@ def external_evidence(
     url: str,
     title: str,
     retrieved_at: str,
+    excerpt: str | None = None,
 ) -> EvidenceRecord:
     """Construct one normalized, snapshot-bound external evidence record."""
     normalized_url = _normalize_web_url(url)
     normalized_title = title.strip() if isinstance(title, str) else title
+    normalized_excerpt = excerpt.strip() if isinstance(excerpt, str) else excerpt
     return EvidenceRecord(
         evidence_id=_external_evidence_id(
-            snapshot.snapshot_id, normalized_url, normalized_title, retrieved_at
+            snapshot.snapshot_id,
+            normalized_url,
+            normalized_title,
+            retrieved_at,
+            normalized_excerpt,
         ),
         url=normalized_url,
         title=normalized_title,
         retrieved_at=retrieved_at,
         source_kind="external",
         snapshot_id=snapshot.snapshot_id,
+        excerpt=normalized_excerpt,
     )
 
 
@@ -293,6 +317,20 @@ class PlanCheck(StrictOutput):
     plan: ProposalOutput | None
 
 
+class OutcomeEvidence(StrictOutput):
+    evidence_id: str = Field(min_length=1, max_length=MAX_EVIDENCE_ID_LENGTH)
+    url: str = Field(min_length=1, max_length=2048)
+    title: str = Field(min_length=1, max_length=500)
+    source_kind: Literal["market_snapshot", "external"]
+    excerpt: str | None = Field(default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH)
+
+
+class ResearchStatus(StrictOutput):
+    status: Literal["ok", "unavailable"]
+    reason: str | None = Field(default=None, min_length=1, max_length=200)
+    query_count: int = Field(ge=0, strict=True)
+
+
 def build_turn_outcome(
     *,
     proposal: Mapping[str, object],
@@ -310,6 +348,8 @@ def build_turn_outcome(
     trade_plan_event_id: str | None,
     model_cost_usd: str,
     plan_checks: object = (),
+    evidence: object = (),
+    research: object | None = None,
 ) -> dict[str, object]:
     """Build one deterministic, strict outcome payload from decided cycle state."""
     output = ProposalOutput.model_validate(proposal)
@@ -320,6 +360,15 @@ def build_turn_outcome(
         checked_plan_checks = [PlanCheck.model_validate(check) for check in plan_checks]
     except (TypeError, ValueError):
         raise ValueError("outcome plan checks are invalid") from None
+    if not isinstance(evidence, (list, tuple)) or len(evidence) > 20:
+        raise ValueError("outcome evidence is invalid")
+    try:
+        checked_evidence = [OutcomeEvidence.model_validate(record) for record in evidence]
+        checked_research = ResearchStatus.model_validate(
+            research or {"status": "unavailable", "reason": "legacy outcome", "query_count": 0}
+        )
+    except (TypeError, ValueError):
+        raise ValueError("outcome research is invalid") from None
     if not isinstance(reason, str) or not 1 <= len(reason) <= 500:
         raise ValueError("outcome reason is invalid")
     try:
@@ -386,6 +435,8 @@ def build_turn_outcome(
         "status": status,
         "reason": reason,
         "plan_checks": [check.model_dump() for check in checked_plan_checks],
+        "evidence": [record.model_dump() for record in checked_evidence],
+        "research": checked_research.model_dump(),
         "proposal": output.model_dump(exclude={"snapshot_id", "market_id"}),
         "review": (
             checked_review.model_dump(exclude={"snapshot_id", "market_id"})
@@ -404,10 +455,15 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         raise ValueError("invalid turn outcome")
     normalized = dict(value)
     normalized.setdefault("plan_checks", [])
+    normalized.setdefault("evidence", [])
+    normalized.setdefault(
+        "research",
+        {"status": "unavailable", "reason": "legacy outcome", "query_count": 0},
+    )
     if set(normalized) != {
         "schema_version", "record_type", "event_id", "turn_id", "snapshot_id",
         "market_id", "created_at", "status", "reason", "proposal", "review",
-        "policy", "trade_plan_event_id", "model_cost_usd", "plan_checks",
+        "policy", "trade_plan_event_id", "model_cost_usd", "plan_checks", "evidence", "research",
     }:
         raise ValueError("invalid turn outcome")
     try:
@@ -427,6 +483,8 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
             trade_plan_event_id=normalized["trade_plan_event_id"],
             model_cost_usd=str(normalized["model_cost_usd"]),
             plan_checks=normalized["plan_checks"],
+            evidence=normalized["evidence"],
+            research=normalized["research"],
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None

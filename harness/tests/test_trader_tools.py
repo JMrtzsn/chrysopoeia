@@ -67,6 +67,11 @@ class TraderToolTests(unittest.TestCase):
         self.assertEqual(self.discovery_calls, 1)
         self.assertEqual(self.find("x" * 201, SimpleNamespace(state={})), {"ok": False, "reason": "invalid market query"})
 
+    def test_context_agent_limits_searches_in_its_instruction(self) -> None:
+        instruction = build_agents(self.config).context_agent.instruction
+
+        self.assertIn("at most 3 focused searches", instruction)
+
     def test_non_empty_discovery_returns_only_matches_including_zero_results(self) -> None:
         self.assertEqual(self.find("hail", self.context)["candidates"], [])
 
@@ -100,6 +105,9 @@ class TraderToolTests(unittest.TestCase):
         self.assertEqual(plan_inputs["max_entry_price_for_maximum_amount"], 0.4)
         self.assertEqual(plan_inputs["minimum_net_edge"], 0.05)
         self.assertEqual(plan_inputs["fee_rate"], 0.02)
+        self.assertEqual(
+            plan_inputs["template"]["amount"], plan_inputs["maximum_amount"]
+        )
 
     def test_plan_at_maximum_amount_and_required_entry_price_passes_across_ask_levels(self) -> None:
         self.snapshot = replace(
@@ -259,10 +267,12 @@ class TraderToolTests(unittest.TestCase):
         self.assertIn("build the plan from plan_inputs", instruction)
         self.assertIn("complete template", instruction)
         self.assertIn("amount ≤ maximum_amount", instruction)
+        self.assertIn("never infer amount from bankroll", instruction)
         self.assertIn("required price for that amount", instruction)
         self.assertIn("max_entry_price", instruction)
         self.assertIn("executable yes ask", instruction)
         self.assertIn("exit_by inside", instruction)
+        self.assertIn("never equal to either endpoint", instruction)
         self.assertIn("hold_to_resolution", instruction)
         self.assertIn("cite only the listed", instruction)
 

@@ -9,6 +9,9 @@ flowchart TD
     Loop --> Discover["Discover and select market"]
     Discover --> Venue["Polymarket adapter<br/>public metadata and depth"]
     Venue --> Snapshot["Canonical market snapshot"]
+    Snapshot --> Research["Vertex Gemini Google Search<br/>one bounded call"]
+    Research --> Evidence["Normalized grounding metadata<br/>URL + title + excerpt"]
+    Evidence --> State
     Snapshot --> State[("ADK cycle state")]
 
     State --> Trader["Trader ADK agent"]
@@ -43,7 +46,7 @@ flowchart TD
     ExecutionConsumer -.-> LiveLedger[("Consumer-owned execution ledger")]
     Platform["Platform deployment/trigger adapter"] -.-> ExecutionConsumer
 
-    subgraph Planned["Proposed citable research tools"]
+    subgraph Planned["Proposed additional research tools"]
         Tool["Typed ADK tool"]
         Core["Research normalization and validation"]
         Integration["Provider integration"]
@@ -51,7 +54,7 @@ flowchart TD
         Tool --> Core --> Integration --> Source
         Source --> Integration --> Core
     end
-    Trader -. "research request" .-> Tool
+    Trader -. "future provider request" .-> Tool
     Core -. "validated evidence" .-> State
     Core -. "bounded result" .-> Tool
     Tool -. "tool response" .-> Trader
@@ -124,21 +127,24 @@ flowchart TD
 
 ## Context and evidence
 
-The harness configures every ADK Gemini client for Vertex at the `us` model
-endpoint. The platform independently owns deployment resource placement; its
+The context role always uses Vertex Gemini at the configured `us` model endpoint,
+including when other roles use the ADK registry. This is required by Google Search
+grounding. The platform independently owns deployment resource placement; its
 Cloud Run region does not select the model endpoint.
 
 The trader may discover a bounded candidate list, capture up to five canonical
 snapshots, and dry-run up to five candidate plans through the same deterministic
 checker used by the final gate. Discovery scans at most 75 markets ending within
 30 days in Gamma's descending 24-hour volume order and runs at most once per cycle. The
-reviewer remains tool-less. Google Search and context-agent tools are not exposed
-in this workflow. A local
+reviewer remains tool-less. After snapshot capture, deterministic orchestration
+runs the context agent once. It keeps at most eight unique public HTTPS grounding
+chunks, maps bounded support text into excerpts, discards free-text answers, and
+continues with canonical evidence if research fails or returns no grounding. A local
 `--evidence` bundle is a snapshot-bound development/testing input, not a research
 provider.
 
-The current evidence record identifies its source URL, title, capture/retrieval
-time, source kind, and snapshot. Citations must resolve to evidence IDs for the
+The current evidence record identifies its source URL, title, optional bounded
+excerpt, capture/retrieval time, source kind, and snapshot. Citations must resolve to evidence IDs for the
 current snapshot; raw URLs and unknown IDs do not resolve. The reviewer gets the
 same validated evidence and proposal, without trader history.
 

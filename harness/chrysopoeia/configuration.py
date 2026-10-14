@@ -187,6 +187,8 @@ class HarnessConfig:
             model_location,
             *(_text(models[name], f"{name} model") for name in ("root", "context", "trader", "reviewer")),
         )
+        if not model_config.context.startswith("gemini-"):
+            raise ConfigurationError("context model must be a Gemini model")
         configured_models = [
             getattr(model_config, role)
             for role in ("root", "context", "trader", "reviewer")

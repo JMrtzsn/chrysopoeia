@@ -56,20 +56,21 @@ endpoint configured separately from the platform compute region.
 - Bounded trader-tool loop through OpenRouter/LiteLLM using
   `openai/gpt-4.1-mini` at the explicitly recorded rates. Live verified
   2026-10-08; evidence is in `docs/verification.md`.
+- Vertex Gemini Google Search grounding: one bounded pre-trader research call,
+  strict citable evidence normalization, failure-safe status, and query cost
+  accounting. Implemented; bounded live verification remains pending.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
 
 ## Next
 
-1. **Citable research tools:** bounded providers normalized into provenance-
-   carrying evidence shared by trader and reviewer; no execution authority.
-2. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+1. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-3. **Additional venues and NO-side positions:** separate milestones after the
+2. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-4. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
+3. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
    live path is verified, plan this milestone and decide whether to select CCXT,
    which exchange to support, and whether to cover spot or derivatives. CCXT is
    not selected or installed by this roadmap item.

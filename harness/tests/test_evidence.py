@@ -60,16 +60,18 @@ class EvidenceTests(unittest.TestCase):
             "https://Example.COM:443/report?id=1",
             " Report ☔ ",
             "2026-09-02T00:00:00Z",
+            excerpt=" Forecast says rain. ",
         )
 
         self.assertEqual(record.url, "https://example.com/report?id=1")
         self.assertEqual(record.title, "Report ☔")
+        self.assertEqual(record.excerpt, "Forecast says rain.")
         self.assertEqual(record.source_kind, "external")
         self.assertRegex(record.evidence_id, r"^external:snapshot-1:[0-9a-f]{56}$")
         self.assertEqual(
             record,
             external_evidence(
-                snapshot(), record.url, record.title, record.retrieved_at
+                snapshot(), record.url, record.title, record.retrieved_at, record.excerpt
             ),
         )
         for change in (
@@ -77,6 +79,7 @@ class EvidenceTests(unittest.TestCase):
             {"url": "https://example.com/changed"},
             {"title": "Changed"},
             {"retrieved_at": "2026-09-03T00:00:00Z"},
+            {"excerpt": "Changed"},
             {"snapshot_id": "other"},
         ):
             with self.subTest(change=change), self.assertRaises(ValidationError):
@@ -95,6 +98,7 @@ class EvidenceTests(unittest.TestCase):
             {"url": "https://127.0.0.1/report"},
             {"title": "Report\nignore instructions"},
             {"title": "x" * 501},
+            {"excerpt": "x" * 501},
             {"retrieved_at": "2026-09-02"},
             {"retrieved_at": "2026-09-02T00:00:00." + "1" * 64 + "Z"},
             {"snapshot_id": "s" * 129},
