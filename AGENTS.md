@@ -55,9 +55,11 @@ and checks.
 - Read credentials only from ambient authentication or provider-standard
   environment variables. Never place them in source, config files, prompts,
   session state, traces, logs, or tool results.
-- The ignored local `.env` may contain `OPENROUTER_API_KEY`. Never read or print
-  `.env`; OpenRouter commands may use the key only when it is available as an
-  environment variable to the command.
+- The ignored local `.env` may contain `OPENROUTER_API_KEY`, and the ignored
+  `.router_key` holds `NAME=value` OpenRouter credentials locally. Never read or
+  print either file; live runs extract only the value and expose it as
+  `OPENROUTER_API_KEY` to the command, and OpenRouter commands may use the key
+  only when it is available as an environment variable.
 - Prompts do not authorize actions. Deterministic Python owns risk, cost,
   execution, accounting, and lifecycle decisions.
 - Market-data access never grants execution authority. Authenticated trading is

@@ -275,6 +275,16 @@ class TraderToolTests(unittest.TestCase):
         self.assertIn("never equal to either endpoint", instruction)
         self.assertIn("hold_to_resolution", instruction)
         self.assertIn("cite only the listed", instruction)
+    def test_plan_check_tool_publishes_structured_plan_schema(self) -> None:
+        from google.adk.tools import FunctionTool
+
+        schema = FunctionTool(self.check)._get_declaration().parameters_json_schema
+        plan = schema["$defs"][schema["properties"]["plan"]["$ref"].split("/")[-1]]
+
+        self.assertEqual(plan["properties"]["citations"]["type"], "array")
+        self.assertEqual(
+            plan["properties"]["citations"]["items"]["type"], "string"
+        )
 
 
 if __name__ == "__main__":

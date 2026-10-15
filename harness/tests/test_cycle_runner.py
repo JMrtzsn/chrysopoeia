@@ -634,16 +634,32 @@ class CycleRunnerTests(unittest.TestCase):
         else:
             self.assertEqual(type(luz).__name__, "LiteLlm")
 
-    def test_context_model_always_resolves_to_vertex_under_registry_config(self) -> None:
-        from chrysopoeia.models import resolve_context_model
+    def test_context_model_uses_the_selected_adapter(self) -> None:
+        from chrysopoeia.models import resolve_context_model, supports_grounding
 
-        resolved = resolve_context_model(
+        vertex = resolve_context_model(self.config.models)
+        self.assertIsInstance(vertex, Gemini)
+        self.assertTrue(supports_grounding(vertex))
+        self.assertEqual(vertex.client_kwargs, {"vertexai": True, "location": "us"})
+
+        registry = resolve_context_model(
             replace(self.config.models, adapter="adk-registry"),
         )
+        self.assertEqual(registry.model, self.config.models.context)
 
-        self.assertIsInstance(resolved, Gemini)
-        self.assertEqual(resolved.model, self.config.models.context)
-        self.assertEqual(resolved.client_kwargs, {"vertexai": True, "location": "us"})
+        try:
+            other = resolve_context_model(
+                replace(
+                    self.config.models,
+                    adapter="adk-registry",
+                    context="openrouter/openai/gpt-4.1-mini",
+                )
+            )
+        except ValueError as raised:
+            # litellm is an optional google-adk[extensions] provider extra
+            self.assertIn("litellm", str(raised))
+        else:
+            self.assertFalse(supports_grounding(other))
 
 
 if __name__ == "__main__":

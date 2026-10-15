@@ -367,6 +367,25 @@ class ModelAdapterTests(unittest.TestCase):
             },
         )
 
+    def test_registry_adapter_accepts_non_gemini_context(self) -> None:
+        value = self.multi_model()
+        models = value["models"]  # type: ignore[index]
+        cost = value["cost"]  # type: ignore[index]
+        assert isinstance(models, dict) and isinstance(cost, dict)
+        models["context"] = "openrouter/openai/gpt-4.1-mini"
+        cost["models"]["openrouter/openai/gpt-4.1-mini"] = {
+            "input_usd_per_million_tokens": "0.40",
+            "output_usd_per_million_tokens": "1.60",
+        }
+        config = HarnessConfig.from_mapping(value)
+        self.assertEqual(config.models.context, "openrouter/openai/gpt-4.1-mini")
+
+    def test_bundled_openrouter_config_is_valid(self) -> None:
+        path = Path(__file__).parents[1] / "configs" / "openrouter.toml"
+        config = load_harness_config(path)
+        self.assertEqual(config.models.adapter, "adk-registry")
+        self.assertTrue(config.models.context.startswith("openrouter/"))
+
     def test_unpriced_configured_model_is_rejected(self) -> None:
         value = self.multi_model()
         models = value["models"]  # type: ignore[index]

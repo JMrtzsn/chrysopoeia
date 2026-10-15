@@ -25,11 +25,18 @@ execution is not implemented.
 - The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
   priced at $1.65 input and $9.90 text output per million tokens. The model
   endpoint is separate from the Cloud Run resource region.
-- OpenRouter is opt-in through an alternate `--config` with
-  `models.adapter = "adk-registry"`, OpenRouter model IDs, and matching explicit
-  prices. Supply its API key only through the shell `OPENROUTER_API_KEY`; never
-  put it in config. The checked-in default remains Vertex and does not
-  auto-select OpenRouter merely because that environment variable exists.
+- The model provider is BYOK and applies to every role. Set
+  `models.adapter = "adk-registry"` with provider model IDs (OpenRouter, Ollama,
+  OpenAI, ...) and matching explicit prices; see the bundled
+  [`configs/openrouter.toml`](harness/configs/openrouter.toml), selected with
+  `--config` or `CHRYSOPOEIA_CONFIG`. Grounded Google Search research requires a
+  Google model for the `context` role; with any other provider research is
+  unavailable and the cycle proceeds on canonical snapshot evidence. Supply a
+  provider API key only through its standard environment variable (e.g.
+  `OPENROUTER_API_KEY`); never put it in config. Locally the ignored
+  `.router_key` holds that credential as `NAME=value`, and live runs extract only
+  the value into the environment. The checked-in default remains Vertex and does
+  not auto-select another provider merely because its key exists.
 
 ## Start locally
 

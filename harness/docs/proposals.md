@@ -38,11 +38,12 @@ remain deferred.
 
 ## Research tools
 
-Vertex Gemini Google Search grounding is implemented as one bounded step after
-snapshot capture. Only normalized grounding metadata becomes citable evidence;
-free-text model output is discarded. Research failures leave canonical evidence
-available. The context role uses Vertex even when trader/reviewer use another ADK
-adapter.
+Google Search grounding is implemented as one bounded step after snapshot
+capture; it is a capability of Google Gemini models. Only normalized grounding
+metadata becomes citable evidence; free-text model output is discarded.
+Research failures leave canonical evidence available. The context/research role
+uses the same BYOK provider boundary as the other roles, so a non-Google
+research model simply yields unavailable research instead of blocking a cycle.
 
 Additional candidate capabilities are financial/economic data, company records,
 and category-specific sources when needed. FRED, CoinGecko, and SEC EDGAR remain

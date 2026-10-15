@@ -127,10 +127,14 @@ flowchart TD
 
 ## Context and evidence
 
-The context role always uses Vertex Gemini at the configured `us` model endpoint,
-including when other roles use the ADK registry. This is required by Google Search
-grounding. The platform independently owns deployment resource placement; its
-Cloud Run region does not select the model endpoint.
+The model provider is BYOK and applies to every role through the selected ADK
+boundary (`adk-gemini` for Vertex, `adk-registry` for other providers). The
+context/research role uses the same provider boundary as the other roles.
+Grounded Google Search is a capability of Google Gemini models only: when the
+configured context model is not a Gemini model, the grounding tool is omitted,
+research is recorded as unavailable, and the cycle proceeds on canonical
+snapshot evidence. The platform independently owns deployment resource
+placement; its Cloud Run region does not select the model endpoint.
 
 The trader may discover a bounded candidate list, capture up to five canonical
 snapshots, and dry-run up to five candidate plans through the same deterministic

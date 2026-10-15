@@ -14,8 +14,10 @@ def resolve_model(config: ModelConfig, model_name: str) -> BaseLlm:
 
 
 def resolve_context_model(config: ModelConfig) -> BaseLlm:
-    """Google Search grounding requires Vertex Gemini regardless of role adapter."""
-    return Gemini(
-        model=config.context,
-        client_kwargs={"vertexai": True, "location": config.location},
-    )
+    """Resolve the research model through the same provider boundary as every role."""
+    return resolve_model(config, config.context)
+
+
+def supports_grounding(model: BaseLlm) -> bool:
+    """Only Google Gemini models expose the bounded Google Search grounding tool."""
+    return isinstance(model, Gemini)

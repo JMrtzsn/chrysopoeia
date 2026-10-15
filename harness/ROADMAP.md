@@ -60,6 +60,11 @@ endpoint configured separately from the platform compute region.
   strict citable evidence normalization, failure-safe status, and query cost
   accounting. Live verified 2026-10-14; evidence is in
   `docs/verification.md`.
+- BYOK model provider for every role through the ADK boundary (`adk-gemini` for
+  Vertex or `adk-registry` for other providers): the checked-in Vertex default is
+  unchanged, and grounded Google Search is gated on a Gemini context model while
+  other providers run with research unavailable. Live verified 2026-10-15;
+  evidence is in `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
@@ -67,8 +72,10 @@ The recorded commands and evidence for harness milestones are in
 ## Next
 
 1. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
-   event reaches the independent Consumer and produces a paper fill; the live
-   outcome/ignore path is verified, but this fill path is not.
+   event reaches the independent Consumer and produces a paper fill. A
+   model-produced accepted plan and the harness in-process paper fill are now
+   live-verified on the checked-in Vertex model (2026-10-14, `docs/verification.md`);
+   delivery to the independent Consumer remains unverified.
 2. **Additional research providers:** only Vertex Google Search grounding has
    bounded live evidence; keep other providers open until separately selected
    and verified.
