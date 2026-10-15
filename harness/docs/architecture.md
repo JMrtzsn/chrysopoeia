@@ -129,12 +129,14 @@ flowchart TD
 
 The model provider is BYOK and applies to every role through the selected ADK
 boundary (`adk-gemini` for Vertex, `adk-registry` for other providers). The
-context/research role uses the same provider boundary as the other roles.
-Grounded Google Search is a capability of Google Gemini models only: when the
-configured context model is not a Gemini model, the grounding tool is omitted,
-research is recorded as unavailable, and the cycle proceeds on canonical
-snapshot evidence. The platform independently owns deployment resource
-placement; its Cloud Run region does not select the model endpoint.
+context/research role selects a research provider from its configured model: a
+Gemini model uses the bounded Google Search grounding tool, an OpenRouter model
+uses the OpenRouter web search plugin (Exa), and any other model runs without
+research. Provider output is normalized into the same snapshot-bound external
+evidence records, bounded by result count and URL/title/excerpt limits; a failed
+or uncitable research step leaves canonical snapshot evidence available. The
+platform independently owns deployment resource placement; its Cloud Run region
+does not select the model endpoint.
 
 The trader may discover a bounded candidate list, capture up to five canonical
 snapshots, and dry-run up to five candidate plans through the same deterministic

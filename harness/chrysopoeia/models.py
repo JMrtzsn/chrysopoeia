@@ -21,3 +21,12 @@ def resolve_context_model(config: ModelConfig) -> BaseLlm:
 def supports_grounding(model: BaseLlm) -> bool:
     """Only Google Gemini models expose the bounded Google Search grounding tool."""
     return isinstance(model, Gemini)
+
+
+def resolve_research_provider(config: ModelConfig) -> str:
+    """Select the research provider implied by the configured context model."""
+    if config.context.startswith("openrouter/"):
+        return "openrouter-web"
+    if config.context.startswith("gemini-"):
+        return "google-search"
+    return "none"

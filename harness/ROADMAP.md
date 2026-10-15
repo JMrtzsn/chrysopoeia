@@ -61,10 +61,12 @@ endpoint configured separately from the platform compute region.
   accounting. Live verified 2026-10-14; evidence is in
   `docs/verification.md`.
 - BYOK model provider for every role through the ADK boundary (`adk-gemini` for
-  Vertex or `adk-registry` for other providers): the checked-in Vertex default is
-  unchanged, and grounded Google Search is gated on a Gemini context model while
-  other providers run with research unavailable. Live verified 2026-10-15;
+  Vertex or `adk-registry` for other providers). Live verified 2026-10-15;
   evidence is in `docs/verification.md`.
+- BYOK research providers selected by the context model: Google Search grounding
+  (Vertex Gemini) and OpenRouter web search (Exa), normalized into
+  snapshot-bound external evidence with bounded results and cost accounting.
+  OpenRouter web live verified 2026-10-15; evidence is in `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
@@ -76,9 +78,9 @@ The recorded commands and evidence for harness milestones are in
    delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local
    Consumer, paper fill recorded; `docs/verification.md`); the deployed path
    (Pulumi subscription) remains unverified.
-2. **Additional research providers:** only Vertex Google Search grounding has
-   bounded live evidence; keep other providers open until separately selected
-   and verified.
+2. **Additional research providers:** Google Search grounding and OpenRouter web
+   search have bounded live evidence; financial/company-data sources (e.g. FRED,
+   CoinGecko, SEC EDGAR) remain open until separately selected and verified.
 3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
 4. **Additional venues and NO-side positions:** separate milestones after the

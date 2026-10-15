@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -23,8 +24,17 @@ from chrysopoeia.agent import (
     route_proposal,
 )
 from chrysopoeia.configuration import HarnessConfig, ModelPrice
-from chrysopoeia.cost import LEDGER_KEY
-from chrysopoeia.models import resolve_context_model, resolve_model
+from chrysopoeia.cost import (
+    LEDGER_KEY,
+    release_model_call,
+    reserve_model_call,
+    settle_model_call,
+)
+from chrysopoeia.models import (
+    resolve_context_model,
+    resolve_model,
+    resolve_research_provider,
+)
 from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
@@ -43,15 +53,36 @@ from chrysopoeia.paper_cycle import (
     external_evidence,
     validate_evidence_bundle,
 )
+from chrysopoeia.research import openrouter_web_research
 from chrysopoeia.trading import MarketSnapshot, OperatingConfig
 
 logger = logging.getLogger(__name__)
 MAX_RESEARCH_RECORDS = 8
 MAX_RESEARCH_QUERIES = 30
+MAX_WEB_RESULTS = 5
 RESEARCH_TIMEOUT_SECONDS = 60
-# ponytail: ignores Vertex's monthly free tier; replace if billing exports become authoritative.
+# ponytail: ignores the Vertex free tier and OpenRouter's own billing; replace if billing exports become authoritative.
 GROUNDING_QUERY_PRICE_USD = Decimal("0.014")
+OPENROUTER_WEB_RESULT_PRICE_USD = Decimal("0.004")
 RESEARCH_KEY = "research"
+
+
+def research_query_price(config: HarnessConfig) -> Decimal:
+    """Per-unit research price for the configured provider."""
+    provider = resolve_research_provider(config.models)
+    if provider == "openrouter-web":
+        return OPENROUTER_WEB_RESULT_PRICE_USD
+    return GROUNDING_QUERY_PRICE_USD
+
+
+def research_allowance(config: HarnessConfig) -> Decimal:
+    """Reserved research cost for one cycle under the configured provider."""
+    provider = resolve_research_provider(config.models)
+    if provider == "google-search":
+        return MAX_RESEARCH_QUERIES * GROUNDING_QUERY_PRICE_USD
+    if provider == "openrouter-web":
+        return MAX_WEB_RESULTS * OPENROUTER_WEB_RESULT_PRICE_USD
+    return Decimal(0)
 
 
 def _clean_text(value: object, limit: int) -> str:
@@ -118,7 +149,7 @@ def reserved_ceiling(config: HarnessConfig, model_calls: int | None = None) -> D
             * config.cost.maximum_output_tokens_per_call
         )
         / Decimal(1_000_000)
-    ) + MAX_RESEARCH_QUERIES * GROUNDING_QUERY_PRICE_USD
+    ) + research_allowance(config)
 
 
 def build_cycle_workflow(
@@ -237,9 +268,9 @@ def summarize_cycle(
         raise ValueError("invalid research status") from None
     if isinstance(research.get("query_count"), bool) or query_count < 0:
         raise ValueError("invalid research status")
-    actual += query_count * GROUNDING_QUERY_PRICE_USD
+    actual += query_count * research_query_price(config)
     maximum = reserved_ceiling(config)
-    if model_actual > maximum - MAX_RESEARCH_QUERIES * GROUNDING_QUERY_PRICE_USD:
+    if model_actual > maximum - research_allowance(config):
         raise ValueError("model cost exceeded reserved ceiling")
     fill = state.get(PAPER_CYCLE_FILL_KEY)
     event = state.get(TRADE_PLAN_READY_KEY)
@@ -379,15 +410,11 @@ async def run_paper_cycle_state(
                 ),
             },
         )
+        provider = resolve_research_provider(config.models)
         research = {"status": "unavailable", "reason": "research not run", "query_count": 0}
+        ledger_records: list[dict[str, object]] | None = None
         if snapshot is not None and context_model is not None:
-            if not agents.context_agent.tools:
-                research = {
-                    "status": "unavailable",
-                    "reason": "research model does not support grounding",
-                    "query_count": 0,
-                }
-            else:
+            if provider == "google-search" and agents.context_agent.tools:
                 context_agent = agents.context_agent.clone(
                     update={
                         "model": context_model,
@@ -435,12 +462,79 @@ async def run_paper_cycle_state(
                     research = {"status": "unavailable", "reason": "research timeout", "query_count": 0}
                 except Exception:
                     research = {"status": "unavailable", "reason": "research failed", "query_count": 0}
+            elif provider == "openrouter-web":
+                api_key = os.environ.get("OPENROUTER_API_KEY")
+                if not isinstance(api_key, str) or not api_key.strip():
+                    research = {
+                        "status": "unavailable",
+                        "reason": "research provider credential unavailable",
+                        "query_count": 0,
+                    }
+                else:
+                    session = await sessions.get_session(app_name=app_name, user_id=user_id, session_id=session_id)
+                    if session is None:
+                        raise ValueError("paper cycle session is missing")
+                    state = dict(session.state)
+                    call_id = f"research:{snapshot.snapshot_id}"
+                    try:
+                        reserve_model_call(
+                            state, "research", config.models.context,
+                            config.cost.maximum_input_tokens_per_call,
+                            config.cost.maximum_output_tokens_per_call,
+                            call_id, datetime.now(timezone.utc), f"research:{session_id}",
+                        )
+                    except ValueError:
+                        research = {
+                            "status": "unavailable",
+                            "reason": "research cost reservation denied",
+                            "query_count": 0,
+                        }
+                    else:
+                        try:
+                            async with asyncio.timeout(RESEARCH_TIMEOUT_SECONDS):
+                                researched, result_count, input_tokens, output_tokens = await asyncio.to_thread(
+                                    openrouter_web_research,
+                                    snapshot,
+                                    model=config.models.context,
+                                    api_key=api_key,
+                                )
+                            settle_model_call(state, call_id, input_tokens, output_tokens)
+                        except TimeoutError:
+                            release_model_call(state, call_id)
+                            research = {"status": "unavailable", "reason": "research timeout", "query_count": 0}
+                        except Exception:
+                            if any(
+                                record.get("call_id") == call_id and record.get("status") == "reserved"
+                                for record in state.get(LEDGER_KEY, [])
+                            ):
+                                release_model_call(state, call_id)
+                            research = {"status": "unavailable", "reason": "research failed", "query_count": 0}
+                        else:
+                            urls = {item.url for item in external}
+                            external.extend(
+                                record for record in researched if record.url not in urls
+                            )
+                            external = external[:19]
+                            research = {
+                                "status": "ok" if researched else "unavailable",
+                                "reason": None if researched else "no web citations",
+                                "query_count": result_count,
+                            }
+                        ledger_records = list(state.get(LEDGER_KEY, []))
+            else:
+                research = {
+                    "status": "unavailable",
+                    "reason": "no research provider configured",
+                    "query_count": 0,
+                }
             session = await sessions.get_session(app_name=app_name, user_id=user_id, session_id=session_id)
             if session is None:
                 raise ValueError("paper cycle session is missing")
             delta: dict[str, object] = {RESEARCH_KEY: research}
             if external:
                 delta[VALIDATED_EXTERNAL_EVIDENCE_KEY] = [record.model_dump() for record in external]
+            if ledger_records is not None:
+                delta[LEDGER_KEY] = ledger_records
             await sessions.append_event(session, Event(author="research", actions=EventActions(state_delta=delta)))
         runner = Runner(app_name=app_name, node=workflow, session_service=sessions)
         function_calls: list[str] = []

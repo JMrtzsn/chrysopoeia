@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import unittest
 from collections.abc import AsyncGenerator
 from dataclasses import replace
@@ -18,13 +19,14 @@ from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.cost import LEDGER_KEY, settle_model_call
 from chrysopoeia.cycle_runner import (
     GROUNDING_QUERY_PRICE_USD,
+    MAX_RESEARCH_QUERIES,
     normalize_grounding_metadata,
     reserved_ceiling,
     run_paper_cycle,
     run_paper_cycle_state,
     summarize_cycle,
 )
-from chrysopoeia.models import resolve_model
+from chrysopoeia.models import resolve_context_model, resolve_model
 from chrysopoeia.paper_cycle import (
     PAPER_CYCLE_FILL_KEY,
     ProposalOutput,
@@ -660,6 +662,85 @@ class CycleRunnerTests(unittest.TestCase):
             self.assertIn("litellm", str(raised))
         else:
             self.assertFalse(supports_grounding(other))
+
+
+    def test_research_provider_and_allowance_follow_the_context_model(self) -> None:
+        from chrysopoeia.cycle_runner import research_allowance
+        from chrysopoeia.models import resolve_research_provider
+
+        self.assertEqual(resolve_research_provider(self.config.models), "google-search")
+        openrouter = replace(self.config.models, context="openrouter/openai/gpt-4.1-mini")
+        self.assertEqual(resolve_research_provider(openrouter), "openrouter-web")
+        self.assertEqual(
+            resolve_research_provider(replace(self.config.models, context="ollama/llama3.1:8b")),
+            "none",
+        )
+        self.assertEqual(
+            research_allowance(self.config),
+            Decimal(MAX_RESEARCH_QUERIES) * GROUNDING_QUERY_PRICE_USD,
+        )
+        self.assertEqual(
+            research_allowance(replace(self.config, models=openrouter)),
+            Decimal("0.02"),
+        )
+
+    def test_cycle_uses_openrouter_web_research_when_configured(self) -> None:
+        config = load_harness_config(ROOT / "configs" / "openrouter.toml")
+        cited = external_evidence(
+            self.snapshot,
+            "https://example.com/report",
+            "Report",
+            self.snapshot.captured_at,
+            excerpt="Relevant excerpt.",
+        )
+        calls: list[str] = []
+        requests: list[LlmRequest] = []
+        trader = FakeLlm(
+            model=config.models.trader,
+            calls=calls,
+            requests=requests,
+            response={
+                "snapshot_id": "snapshot",
+                "market_id": "market",
+                "action": "abstain",
+                "probability": 0.4,
+                "amount": 0,
+                "citations": [],
+                "rationale": "No edge.",
+                "max_entry_price": None,
+                "exit_plan": None,
+            },
+        )
+        reviewer = FakeLlm(
+            model=config.models.reviewer, calls=calls, requests=requests, response={}
+        )
+        with (
+            patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}),
+            patch(
+                "chrysopoeia.cycle_runner.openrouter_web_research",
+                return_value=([cited], 1, 100, 20),
+            ) as researched,
+        ):
+            summary = asyncio.run(
+                run_paper_cycle(
+                    config,
+                    self.snapshot,
+                    OperatingConfig(),
+                    trader,
+                    reviewer,
+                    resolve_context_model(config.models),
+                )
+            )
+
+        researched.assert_called_once()
+        self.assertEqual(summary["outcome_event"]["research"]["status"], "ok")
+        self.assertEqual(
+            [item["url"] for item in summary["outcome_event"]["evidence"]],
+            [
+                "https://polymarket.com/event/will-it-rain",
+                "https://example.com/report",
+            ],
+        )
 
 
 if __name__ == "__main__":

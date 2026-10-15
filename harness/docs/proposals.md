@@ -38,12 +38,12 @@ remain deferred.
 
 ## Research tools
 
-Google Search grounding is implemented as one bounded step after snapshot
-capture; it is a capability of Google Gemini models. Only normalized grounding
-metadata becomes citable evidence; free-text model output is discarded.
-Research failures leave canonical evidence available. The context/research role
-uses the same BYOK provider boundary as the other roles, so a non-Google
-research model simply yields unavailable research instead of blocking a cycle.
+Google Search grounding and OpenRouter web search are implemented as one
+bounded step after snapshot capture, selected by the configured research model.
+Only normalized, snapshot-bound web citations become citable evidence; free-text
+model output is discarded. Research failures leave canonical evidence available.
+A model with no configured research provider yields unavailable research instead
+of blocking a cycle.
 
 Additional candidate capabilities are financial/economic data, company records,
 and category-specific sources when needed. FRED, CoinGecko, and SEC EDGAR remain

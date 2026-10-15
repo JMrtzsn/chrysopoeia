@@ -29,14 +29,16 @@ execution is not implemented.
   `models.adapter = "adk-registry"` with provider model IDs (OpenRouter, Ollama,
   OpenAI, ...) and matching explicit prices; see the bundled
   [`configs/openrouter.toml`](harness/configs/openrouter.toml), selected with
-  `--config` or `CHRYSOPOEIA_CONFIG`. Grounded Google Search research requires a
-  Google model for the `context` role; with any other provider research is
-  unavailable and the cycle proceeds on canonical snapshot evidence. Supply a
-  provider API key only through its standard environment variable (e.g.
-  `OPENROUTER_API_KEY`); never put it in config. Locally the ignored
-  `.router_key` holds that credential as `NAME=value`, and live runs extract only
-  the value into the environment. The checked-in default remains Vertex and does
-  not auto-select another provider merely because its key exists.
+  `--config` or `CHRYSOPOEIA_CONFIG`. Research is BYOK and selected by the
+  `context` model: a Google model uses Google Search grounding; an OpenRouter
+  model uses OpenRouter web search (Exa) with the same `OPENROUTER_API_KEY`;
+  other models run without research, and the cycle proceeds on canonical
+  snapshot evidence. Supply a provider API key only through its standard
+  environment variable (e.g. `OPENROUTER_API_KEY`); never put it in config.
+  Locally the ignored `.router_key` holds that credential as `NAME=value`, and
+  live runs extract only the value into the environment. The checked-in default
+  remains Vertex and does not auto-select another provider merely because its key
+  exists.
 
 ## Start locally
 
