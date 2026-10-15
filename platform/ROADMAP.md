@@ -46,15 +46,17 @@ coordination decision, not a new platform work item.
 
 ## Next
 
-1. At the next deploy, rebuild the Harness image (plain `chrysopoeia`
-   entrypoint) and run one bounded job execution with
-   `CHRYSOPOEIA_EVENT_SINK=pubsub:...` to verify the deployed direct-publishing
-   path and the consumer subscription's `trade_plan_ready` filter replacement.
-   Single-topic outcome publishing and Pub/Sub-level filtering were live-verified
-   2026-10-12; the Pulumi-managed subscription has not been deployed.
-2. Launch bounded paper `run` sessions from the Cloud Run Job once a released
-   harness artifact includes it. The job remains request-triggered; no always-on
-   harness process is required.
+1. Deploy the Pulumi-managed consumer subscription and verify its
+   `trade_plan_ready` filter replacement. The rebuilt image and a bounded job
+   execution with `CHRYSOPOEIA_EVENT_SINK=pubsub:...` were live-verified
+   2026-10-14 (see `docs/deployment.md`): the deployed direct-publishing path is
+   confirmed, so only the undeployed subscription remains.
+2. Launch bounded paper `run` sessions from the Cloud Run Job. Live-verified
+   2026-10-14: the job now runs `run --journal /mnt/journal/run --max-cycles 2`,
+   and one execution completed two bounded cycles. The job remains
+   request-triggered; no always-on harness process is required. Repeat
+   executions should pass a fresh `--journal` via `execute --args`, since
+   resuming a session immediately hits its cycle cap.
 3. Deploy the live-execution consumer (separate identity and secret handling)
    only after `../consumer/ROADMAP.md` live-execution gates pass and are
    approved.
