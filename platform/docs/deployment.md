@@ -63,6 +63,10 @@ Run Pulumi preview and applies from `platform/`; see
 [`../AGENTS.md`](../AGENTS.md) and [`../ROADMAP.md`](../ROADMAP.md). Live applies,
 image publication, and job executions require approval and bounded verification
 per [`../../harness/docs/verification.md`](../../harness/docs/verification.md).
+Running the platform is explicit and off by default: use `platform/run.sh
+{deploy|job}`, which refuses unless `CHRYSOPOEIA_RUN_PLATFORM=1` is set, and the
+Pulumi program itself refuses any real apply (or destroy) without it. `pulumi
+preview` is always allowed and needs neither the script nor the variable.
 The 2026-10-10 bounded live check below covered authenticated push, the mounted
 ledger across revision restarts, bucket and invoker IAM, and live Gamma/CLOB
 timestamp freshness. Dead-letter delivery, YES/NO settlement, and concurrent

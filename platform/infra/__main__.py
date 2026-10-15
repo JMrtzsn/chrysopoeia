@@ -15,8 +15,17 @@ database. Multi-tenant or public deployment remains out of scope pending an
 explicit Level 3 design.
 """
 
+import os
+
 import pulumi
 import pulumi_gcp as gcp
+
+# Running the platform is explicit. Previews are always allowed, but any real
+# apply or destroy requires the operator to opt in for that invocation.
+if not pulumi.runtime.is_dry_run() and os.environ.get("CHRYSOPOEIA_RUN_PLATFORM") != "1":
+    raise pulumi.RunError(
+        "refusing to apply the platform; set CHRYSOPOEIA_RUN_PLATFORM=1 to confirm"
+    )
 
 config = pulumi.Config()
 project_id = config.require("project_id")
