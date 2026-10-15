@@ -33,6 +33,7 @@ class CycleSnapshotTests(unittest.TestCase):
             source_url="https://polymarket.com/event/will-it-rain",
             yes_token_id="yes-token",
             asks=(BookLevel(0.4, 20), BookLevel(0.5, 10)),
+            bids=(BookLevel(0.3, 5),),
             fee_rate=0.02,
             fee_source="paper-assumption:flat-2pct-v1",
             book_captured_at="2026-09-01T00:00:00+00:00",

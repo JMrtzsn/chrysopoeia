@@ -201,7 +201,6 @@ def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
             "source_url": snapshot.source_url,
             "yes_token_id": snapshot.yes_token_id,
             "asks": [(float(level.price), float(level.size)) for level in snapshot.asks],
-            "bids": [(float(level.price), float(level.size)) for level in snapshot.bids],
             "fee_rate": float(snapshot.fee_rate),
             "fee_source": snapshot.fee_source,
         },

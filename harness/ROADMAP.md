@@ -72,10 +72,10 @@ The recorded commands and evidence for harness milestones are in
 ## Next
 
 1. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
-   event reaches the independent Consumer and produces a paper fill. A
-   model-produced accepted plan and the harness in-process paper fill are now
-   live-verified on the checked-in Vertex model (2026-10-14, `docs/verification.md`);
-   delivery to the independent Consumer remains unverified.
+   event reaches the independent Consumer and produces a paper fill. Local
+   delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local
+   Consumer, paper fill recorded; `docs/verification.md`); the deployed path
+   (Pulumi subscription) remains unverified.
 2. **Additional research providers:** only Vertex Google Search grounding has
    bounded live evidence; keep other providers open until separately selected
    and verified.

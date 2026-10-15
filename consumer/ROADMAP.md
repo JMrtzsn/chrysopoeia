@@ -17,8 +17,10 @@
 
 1. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
    through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery
-   and replay, and the revision-rollover single-writer ceiling. Pub/Sub-level
-   filtering and live ignore routing are verified; the live plan path is not.
+   and replay, and the revision-rollover single-writer ceiling. A model-produced
+   plan reaching a local Consumer fill was verified 2026-10-15
+   (`../harness/docs/verification.md`); deployed ingress, settlement, dead-letter,
+   and rollover remain unverified.
 2. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch here. Live mode stays disabled
