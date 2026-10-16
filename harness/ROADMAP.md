@@ -72,9 +72,10 @@ endpoint configured separately from the platform compute region.
   snapshot-bound citations. Verified locally 2026-10-15; evidence is in
   `docs/verification.md`.
 - Polymarket BTC 5m series history and local forecast evaluation: the trader can
-  inspect resolved sibling windows, and `polymarket-eval` scores in-window
-  probabilities with Brier against Gamma-resolved Chainlink outcomes, compared
-  with CLOB prices at the same forecast time. The initial five-window CLOB
+  inspect resolved sibling windows, and `polymarket-eval` scores each binary
+  market's first pre-close P(YES), trade or abstain, with Brier against the
+  Gamma-resolved outcome and same-time CLOB price (optionally filtered to one
+  series). Up/Down markets are now capturable, with Up as the YES side. The initial five-window CLOB
   baseline scored 0.247; there are not yet agent forecasts in the local journal.
   Evidence is in `docs/verification.md`.
 
@@ -83,10 +84,10 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Forward BTC 5m benchmark:** collect at least 20 local in-window BTC Up/Down
-   P(Up) forecasts (trade or abstain) and check their Brier score against the same-time CLOB
-   baseline. `polymarket-eval` currently has historical market outcomes and
-   baseline scoring, but no agent sample yet. No platform is needed.
+1. **Forward BTC 5m benchmark:** run the trader on at least 20 live BTC Up/Down
+   5m windows and score them with `polymarket-eval --series-url ...` against the
+   same-time CLOB baseline. Capture of these markets now works; no agent sample
+   exists yet. No platform is needed.
 2. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
    event reaches the independent Consumer and produces a paper fill. Local
    delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local

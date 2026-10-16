@@ -71,19 +71,21 @@ The main operator flow is `discover` → `capture` → `cycle`; `run` starts a
 bounded journal-backed session. `book`, `mark`, and `settle` inspect or update
 the paper journal. No cycle guarantees a trade.
 
-For the Polymarket BTC Up/Down 5m benchmark, paper-run forecasts locally and
-score them after resolution:
+To score forecasts after their markets resolve (any binary Yes/No or Up/Down
+Polymarket market; Up is treated as the YES side):
 
 ```sh
+uv run chrysopoeia polymarket-eval --journal /path/to/journal
+# only one recurring series, e.g. the BTC 5m benchmark:
 uv run chrysopoeia polymarket-eval --journal /path/to/journal \
-  --event-url https://polymarket.com/event/btc-updown-5m-1792212300 --limit 10
+  --series-url https://polymarket.com/event/btc-updown-5m-1792212300
 ```
 
-The primary metric is Brier score for the agent's P(Up), compared with the CLOB
-Up price at the same forecast timestamp. Lower is better. The tool uses Gamma's
-resolved Up/Down result (Chainlink BTC/USD TWAP resolution) as ground truth;
-open windows and forecasts made outside the 5-minute event window are excluded.
-It reads/writes no platform resources and places no orders.
+The metric is the Brier score of the agent's first pre-close P(YES) per market,
+including abstentions, against Gamma's resolved outcome; it is compared with the
+CLOB YES price at the same forecast time. Lower is better (0.25 = always 50/50).
+Trades and trade coverage are reported separately. Open markets are counted as
+pending. No platform resources, keys, or orders are involved.
 
 ## Documentation map
 

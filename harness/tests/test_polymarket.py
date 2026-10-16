@@ -8,6 +8,7 @@ from chrysopoeia.polymarket import (
     PolymarketError,
     load_market_snapshot,
     load_price_history,
+    load_resolved_market,
     load_series_history,
 )
 
@@ -58,6 +59,36 @@ def fixture_fetch(calls: list[tuple[str, float, int]] | None = None):
 
 
 class PolymarketAdapterTests(unittest.TestCase):
+    def test_up_down_market_snapshot_buys_the_up_side(self) -> None:
+        snapshot = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW,
+            fetch=lambda url, *_: book() if "clob" in url else market(outcomes='["Up", "Down"]'),
+            **FEE,
+        )
+        self.assertEqual(snapshot.yes_token_id, "yes-token")
+
+    def test_book_stamped_just_after_capture_start_is_accepted(self) -> None:
+        later = str(int(NOW.timestamp() * 1000) + 1_000)
+        snapshot = load_market_snapshot(
+            "12345", 1_000, 0, 0, now=NOW,
+            fetch=lambda url, *_: book(timestamp=later) if "clob" in url else market(),
+            **FEE,
+        )
+        self.assertEqual(snapshot.captured_at, snapshot.book_captured_at)
+
+    def test_resolved_market_reports_first_outcome_result(self) -> None:
+        def fetch(closed: bool, prices: str):
+            body = market(
+                id="12345", closed=closed, outcomes='["Up", "Down"]',
+                outcomePrices=prices, clobTokenIds='["111", "222"]',
+            )
+            return lambda *_: body
+
+        resolved = load_resolved_market("12345", fetch=fetch(True, '["0", "1"]'))
+        self.assertEqual((resolved.yes_won, resolved.yes_token_id), (False, "111"))
+        self.assertIsNone(load_resolved_market("12345", fetch=fetch(False, '["0.5", "0.5"]')).yes_won)
+        with self.assertRaises(PolymarketError):
+            load_resolved_market("1x")
     def test_series_history_returns_only_past_resolved_up_down_siblings(self) -> None:
         calls: list[str] = []
         start = datetime(2026, 7, 21, 11, 45, tzinfo=timezone.utc)

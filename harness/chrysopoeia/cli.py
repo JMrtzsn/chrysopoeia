@@ -448,9 +448,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="score local forecasts against resolved Polymarket outcomes",
     )
     polymarket_eval.add_argument("--journal", type=Path, required=True)
-    polymarket_eval.add_argument("--event-url", required=True)
     polymarket_eval.add_argument(
-        "--limit", type=int, choices=range(1, 21), default=10
+        "--series-url",
+        help="optional: only score markets in this market URL's recurring series",
     )
     args = parser.parse_args(argv)
     if args.command in {"cycle", "run"}:
@@ -483,9 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from chrysopoeia.polymarket_evaluation import evaluate_journal
 
         try:
-            result = evaluate_journal(
-                args.journal, args.event_url, limit=args.limit
-            )
+            result = evaluate_journal(args.journal, series_url=args.series_url)
         except (JournalError, OSError, ValueError) as exc:
             parser.exit(2, f"polymarket-eval failed: {exc}\n")
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))

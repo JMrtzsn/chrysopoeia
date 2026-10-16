@@ -4,38 +4,49 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from chrysopoeia.polymarket import (
-    HistoricalPrice,
-    PolymarketSeriesHistory,
-    SeriesOutcome,
-)
+from chrysopoeia.polymarket import HistoricalPrice, PolymarketError, ResolvedMarket
 from chrysopoeia.polymarket_evaluation import brier_score, evaluate_journal
 
 
+def at(seconds: int) -> datetime:
+    return datetime.fromtimestamp(seconds, timezone.utc)
+
+
+def turn(market_id: str, seconds: int, probability: float, action: str, slug: str) -> dict:
+    return {
+        "market_id": market_id,
+        "created_at": at(seconds).isoformat(),
+        "evidence": [{"url": f"https://polymarket.com/event/{slug}"}],
+        "proposal": {"action": action, "probability": probability},
+    }
+
+
+MARKETS = {
+    "1": ResolvedMarket("1", "btc-updown-5m-1000", at(1300), True, "11"),
+    "2": ResolvedMarket("2", "fed-holds-rates", at(5000), False, "21"),
+    "3": ResolvedMarket("3", "btc-updown-5m-1300", at(1600), None, "31"),
+}
+
+
+def load_market(market_id: str) -> ResolvedMarket:
+    if market_id not in MARKETS:
+        raise PolymarketError("unknown")
+    return MARKETS[market_id]
+
+
+def load_prices(token_id: str, start: datetime, end: datetime):
+    return (HistoricalPrice(int(end.timestamp()) - 10, {"11": 0.6, "21": 0.4}[token_id]),)
+
+
 class PolymarketEvaluationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.anchor = "https://polymarket.com/event/btc-updown-5m-1000"
-        self.first_start = datetime.fromtimestamp(1000, timezone.utc)
-        self.second_start = datetime.fromtimestamp(1300, timezone.utc)
-        self.history = PolymarketSeriesHistory(
-            "10684",
-            "btc-up-or-down-5m",
-            "https://gamma-api.polymarket.com/events?series_id=10684",
-            (
-                SeriesOutcome(
-                    "1", "btc-updown-5m-1000", "BTC Up or Down",
-                    self.first_start, datetime.fromtimestamp(1300, timezone.utc),
-                    datetime.fromtimestamp(1301, timezone.utc), True, "11", "12",
-                    "https://data.chain.link/btc",
-                ),
-                SeriesOutcome(
-                    "2", "btc-updown-5m-1300", "BTC Up or Down",
-                    self.second_start, datetime.fromtimestamp(1600, timezone.utc),
-                    datetime.fromtimestamp(1601, timezone.utc), False, "21", "22",
-                    "https://data.chain.link/btc",
-                ),
-            ),
-        )
+    def evaluate(self, turns: dict, **kwargs) -> dict:
+        with patch(
+            "chrysopoeia.polymarket_evaluation.accounting.replay",
+            return_value=SimpleNamespace(turn_outcomes=turns),
+        ):
+            return evaluate_journal(
+                Path("unused"), load_market=load_market, load_prices=load_prices, **kwargs
+            )
 
     def test_brier_score_rewards_probabilities_close_to_outcomes(self) -> None:
         score = brier_score([0.8, 0.2], [True, False])
@@ -47,76 +58,39 @@ class PolymarketEvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             brier_score([0.2], [True, False])
 
-    def test_evaluation_compares_agent_and_clob_at_each_forecast_time(self) -> None:
-        turns = {
-            "t1": {
-                "market_id": "1",
-                "created_at": datetime.fromtimestamp(1100, timezone.utc).isoformat(),
-                "status": "plan_ready",
-                "evidence": [{"url": self.anchor}],
-                "proposal": {"action": "trade", "probability": 0.8},
-            },
-            "t2": {
-                "market_id": "2",
-                "created_at": datetime.fromtimestamp(1400, timezone.utc).isoformat(),
-                "status": "plan_ready",
-                "evidence": [{"url": "https://polymarket.com/event/btc-updown-5m-1300"}],
-                "proposal": {"action": "trade", "probability": 0.2},
-            },
-        }
-        calls: list[tuple[str, datetime, datetime]] = []
-
-        def load_prices(token_id: str, start: datetime, end: datetime):
-            calls.append((token_id, start, end))
-            p = {"11": 0.6, "21": 0.4}[token_id]
-            return (HistoricalPrice(int(end.timestamp()) - 10, p),)
-
-        with (
-            patch("chrysopoeia.polymarket_evaluation.accounting.replay", return_value=SimpleNamespace(turn_outcomes=turns)),
-            patch("chrysopoeia.polymarket_evaluation.load_series_history", return_value=self.history),
-        ):
-            result = evaluate_journal(
-                Path("unused"),
-                self.anchor,
-                limit=2,
-                load_prices=load_prices,
-            )
-
-        self.assertEqual(result["metric"], "brier_score")
-        self.assertEqual(result["agent"]["samples"], 2)
+    def test_scores_any_binary_market_including_abstentions(self) -> None:
+        result = self.evaluate(
+            {
+                "a": turn("1", 1100, 0.8, "trade", "btc-updown-5m-1000"),
+                "b": turn("2", 1200, 0.2, "abstain", "fed-holds-rates"),
+                "c": turn("3", 1400, 0.5, "trade", "btc-updown-5m-1300"),
+            }
+        )
+        self.assertEqual(result["scored_markets"], 2)
+        self.assertEqual(result["pending_markets"], 1)
         self.assertAlmostEqual(result["agent"]["brier_score"], 0.04)
-        self.assertAlmostEqual(result["market_baseline"]["brier_score"], 0.16)
+        self.assertEqual(result["agent"]["trades"], 1)
+        self.assertEqual(result["agent"]["trade_coverage"], 0.5)
+        self.assertAlmostEqual(result["market_baseline"]["market_brier"], 0.16)
         self.assertAlmostEqual(result["market_baseline"]["agent_improvement"], 0.12)
-        self.assertEqual([call[0] for call in calls], ["11", "21"])
 
-    def test_evaluation_scores_abstentions_and_excludes_out_of_window(self) -> None:
-        turns = {
-            "abstain": {
-                "market_id": "1",
-                "created_at": datetime.fromtimestamp(1100, timezone.utc).isoformat(),
-                "evidence": [{"url": self.anchor}],
-                "proposal": {"action": "abstain", "probability": 0.7},
+    def test_series_filter_first_forecast_and_late_forecasts(self) -> None:
+        result = self.evaluate(
+            {
+                "a": turn("1", 1100, 0.8, "trade", "btc-updown-5m-1000"),
+                "a2": turn("1", 1150, 0.1, "trade", "btc-updown-5m-1000"),
+                "b": turn("2", 6000, 0.2, "trade", "fed-holds-rates"),
             },
-            "late": {
-                "market_id": "1",
-                "created_at": datetime.fromtimestamp(1500, timezone.utc).isoformat(),
-                "evidence": [{"url": self.anchor}],
-                "proposal": {"action": "trade", "probability": 0.7},
-            },
-        }
-        with (
-            patch("chrysopoeia.polymarket_evaluation.accounting.replay", return_value=SimpleNamespace(turn_outcomes=turns)),
-            patch("chrysopoeia.polymarket_evaluation.load_series_history", return_value=self.history),
-            patch("chrysopoeia.polymarket_evaluation.load_price_history", return_value=()),
-        ):
-            result = evaluate_journal(Path("unused"), self.anchor, limit=2)
+            series_url="https://polymarket.com/event/btc-updown-5m-1792212300",
+        )
+        self.assertEqual(result["series_filter"], "btc-updown-5m-")
+        self.assertEqual(result["scored_markets"], 1)
+        self.assertEqual(result["repeated_forecasts_ignored"], 1)
+        self.assertAlmostEqual(result["agent"]["brier_score"], 0.04)
 
-        self.assertEqual(result["agent"]["samples"], 1)
-        self.assertAlmostEqual(result["agent"]["brier_score"], 0.09)
-        self.assertEqual(result["agent"]["trades"], 0)
-        self.assertEqual(result["agent"]["trade_coverage"], 0.0)
-        self.assertEqual(result["agent"]["abstentions_in_loaded_windows"], 1)
-        self.assertEqual(result["agent"]["out_of_window_forecasts"], 1)
+        late = self.evaluate({"b": turn("2", 6000, 0.2, "trade", "fed-holds-rates")})
+        self.assertEqual(late["scored_markets"], 0)
+        self.assertEqual(late["late_forecasts_skipped"], 1)
 
 
 if __name__ == "__main__":

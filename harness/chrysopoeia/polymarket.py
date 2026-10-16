@@ -27,6 +27,8 @@ DISCOVERY_HORIZON = timedelta(days=30)
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
+# First outcome is the "YES side" the harness buys; Up/Down markets map Up to it.
+BINARY_OUTCOMES = (["Yes", "No"], ["Up", "Down"])
 
 
 class PolymarketError(ValueError):
@@ -91,6 +93,15 @@ class PolymarketSeriesHistory:
 class HistoricalPrice:
     timestamp: int
     price: float
+
+
+@dataclass(frozen=True)
+class ResolvedMarket:
+    market_id: str
+    slug: str
+    end_time: datetime
+    yes_won: bool | None
+    yes_token_id: str
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -238,7 +249,7 @@ def _candidate(data: object, current: datetime) -> tuple[MarketCandidate, dateti
             value = data.get(name)
             if isinstance(value, str) and len(value) > 10_000:
                 return None
-        if _list_field(data.get("outcomes"), "outcomes") != ["Yes", "No"]:
+        if _list_field(data.get("outcomes"), "outcomes") not in BINARY_OUTCOMES:
             return None
         tokens = _list_field(data.get("clobTokenIds"), "token")
         if (
@@ -421,6 +432,51 @@ def load_market_resolution(
         market_id,
         resolution,
         current.astimezone(timezone.utc).isoformat(),
+    )
+
+
+def load_resolved_market(
+    market_id: str,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    fetch: Fetch = _fetch,
+) -> ResolvedMarket:
+    """Load any binary market's first-outcome ("YES side") token and resolution.
+
+    `yes_won` is None while the market is open or not dominantly resolved.
+    """
+    if not isinstance(market_id, str) or not market_id.isdigit() or len(market_id) > 100:
+        raise PolymarketError("Polymarket market ID is invalid")
+    data = _fetch_json(
+        f"https://{API_HOST}/markets/{quote(market_id)}",
+        float(timeout),
+        max_response_bytes,
+        fetch,
+    )
+    if str(data.get("id")) != market_id:
+        raise PolymarketError("Polymarket adapter response does not match the requested market")
+    if _list_field(data.get("outcomes"), "outcomes") not in BINARY_OUTCOMES:
+        raise PolymarketError("Polymarket market is not a supported binary market")
+    tokens = _list_field(data.get("clobTokenIds"), "token")
+    if len(tokens) != 2 or not all(isinstance(t, str) and t.isdigit() for t in tokens):
+        raise PolymarketError("Polymarket market has unsupported token structure")
+    yes_won: bool | None = None
+    if data.get("closed") is True:
+        try:
+            prices = [float(p) for p in _list_field(data.get("outcomePrices"), "outcome prices")]
+        except (TypeError, ValueError):
+            prices = []
+        if len(prices) == 2 and prices[0] >= 0.999 and prices[1] <= 0.001:
+            yes_won = True
+        elif len(prices) == 2 and prices[0] <= 0.001 and prices[1] >= 0.999:
+            yes_won = False
+    return ResolvedMarket(
+        market_id,
+        _text(data.get("slug"), "market slug"),
+        _timestamp(data.get("endDate")),
+        yes_won,
+        tokens[0],
     )
 
 
@@ -697,8 +753,8 @@ def load_market_snapshot(
     outcomes = _list_field(data.get("outcomes"), "outcomes")
     if len(outcomes) != 2:
         raise PolymarketError("Polymarket adapter supports only binary markets")
-    if outcomes != ["Yes", "No"]:
-        raise PolymarketError("Polymarket adapter requires YES and NO outcomes in canonical order")
+    if outcomes not in BINARY_OUTCOMES:
+        raise PolymarketError("Polymarket adapter requires YES/NO or Up/Down outcomes in canonical order")
     tokens = _list_field(data.get("clobTokenIds"), "token")
     if len(tokens) != 2 or any(not isinstance(token, str) or not token for token in tokens) or tokens[0] == tokens[1]:
         raise PolymarketError("Polymarket adapter has unsupported token structure")
@@ -724,7 +780,8 @@ def load_market_snapshot(
         raise PolymarketError("Polymarket adapter book token does not match the YES token")
     book_time = _book_timestamp(book.get("timestamp"))
     book_age = current_utc - book_time
-    if book_age < timedelta(0) or book_age > MAX_BOOK_AGE:
+    # `current` predates the fetch, so a fresh book can be stamped slightly later.
+    if book_age < -MAX_METADATA_FUTURE_SKEW or book_age > MAX_BOOK_AGE:
         raise PolymarketError("Polymarket adapter book is stale")
     asks = tuple(sorted(
         _levels(book.get("asks"), "asks", required=True),
@@ -740,6 +797,8 @@ def load_market_snapshot(
     if bids and bids[0].price >= asks[0].price:
         raise PolymarketError("Polymarket adapter book is crossed")
     price = asks[0].price
+    # The capture is complete only once the book has been received.
+    current_utc = max(current_utc, book_time)
 
     try:
         snapshot = MarketSnapshot(

@@ -150,10 +150,11 @@ trade instructions. Stock history uses Yahoo Finance's public chart endpoint
 (keyless, unofficial, raw OHLCV without split/dividend adjustment); crypto history
 uses CCXT's public OHLCV interface without exchange credentials or order methods.
 `analyze_polymarket_history` adds up to ten resolved outcomes from the current
-recurring series, filtered to settlements available at snapshot capture time. The
-local `polymarket-eval` command scores the first in-window P(Up) per window, trade or abstain, with Brier
-against resolved Up/Down outcomes and compares the CLOB baseline at the same
-forecast time. The reviewer remains tool-less. After snapshot capture,
+recurring series, filtered to settlements available at snapshot capture time. Binary
+markets with Yes/No or Up/Down outcomes are supported; the first outcome is the
+YES side the harness can buy. The local `polymarket-eval` command scores each
+market's first pre-close P(YES), trade or abstain, with Brier against the
+Gamma-resolved outcome and the same-time CLOB YES price. The reviewer remains tool-less. After snapshot capture,
 deterministic orchestration
 runs the context agent once. It keeps at most eight unique public HTTPS grounding
 chunks, maps bounded support text into excerpts, discards free-text answers, and
