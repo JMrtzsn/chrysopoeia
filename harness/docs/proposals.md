@@ -46,8 +46,10 @@ A model with no configured research provider yields unavailable research instead
 of blocking a cycle.
 
 Additional candidate capabilities are financial/economic data, company records,
-and category-specific sources when needed. FRED, CoinGecko, and SEC EDGAR remain
-candidate providers, not locked dependencies.
+and category-specific sources when needed. Bounded stock/crypto OHLCV history is
+implemented through Yahoo Finance's public chart endpoint and CCXT. FRED,
+CoinGecko, and SEC EDGAR remain candidate fundamentals/macro providers, not
+locked dependencies.
 
 Each additional provider must normalize and validate results with provenance and
 needs offline contract tests plus a bounded live check.

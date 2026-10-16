@@ -285,9 +285,16 @@ def grade(
     if actual_cost > MAX_RESERVED_ESTIMATE_USD:
         raise ValueError("paper-cycle actual cost exceeded its reservation")
 
-    if any(call not in {"find_markets", "get_market", "check_trade_plan"} for call in function_calls):
+    allowed_tools = {
+        "find_markets",
+        "get_market",
+        "check_trade_plan",
+        "analyze_stock_history",
+        "analyze_crypto_history",
+    }
+    if any(call not in allowed_tools for call in function_calls):
         raise ValueError("paper-cycle made an unavailable tool call")
-    if set(available_tools) - {"find_markets", "get_market", "check_trade_plan"}:
+    if set(available_tools) - allowed_tools:
         raise ValueError("paper-cycle model agents expose tools")
 
     decision = _mapping(state, PAPER_CYCLE_DECISION_KEY)

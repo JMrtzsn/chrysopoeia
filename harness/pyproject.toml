@@ -5,6 +5,7 @@ requires-python = ">=3.10"
 dependencies = [
     "a2a-sdk[http-server]>=1.0,<2",
     "aiohttp>=3.13.4",
+    "ccxt>=4,<5",
     "gcsfs>=2024.11.0",
     "google-adk[gcp]>=2.6.0,<3.0.0",
     "google-cloud-pubsub>=2,<3",

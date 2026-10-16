@@ -142,7 +142,15 @@ The trader may discover a bounded candidate list, capture up to five canonical
 snapshots, and dry-run up to five candidate plans through the same deterministic
 checker used by the final gate. Discovery scans at most 75 markets ending within
 30 days in Gamma's descending 24-hour volume order and runs at most once per cycle. The
-reviewer remains tool-less. After snapshot capture, deterministic orchestration
+trader can also call bounded financial-history tools for named US stock symbols
+and CCXT crypto pairs. These fetch public OHLCV and compute deterministic
+statistics (returns, means, volatility, moving averages, RSI, stochastic %K/%D,
+and ATR); the results are snapshot-bound external evidence, not forecasts or
+trade instructions. Stock history uses Yahoo Finance's public chart endpoint
+(keyless, unofficial, raw OHLCV without split/dividend adjustment); crypto history
+uses CCXT's public OHLCV interface without exchange credentials or order methods.
+The reviewer remains tool-less. After snapshot capture,
+deterministic orchestration
 runs the context agent once. It keeps at most eight unique public HTTPS grounding
 chunks, maps bounded support text into excerpts, discards free-text answers, and
 continues with canonical evidence if research fails or returns no grounding. A local

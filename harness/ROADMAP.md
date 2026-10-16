@@ -67,6 +67,10 @@ endpoint configured separately from the platform compute region.
   (Vertex Gemini) and OpenRouter web search (Exa), normalized into
   snapshot-bound external evidence with bounded results and cost accounting.
   OpenRouter web live verified 2026-10-15; evidence is in `docs/verification.md`.
+- Trader-facing financial analysis tools for daily US equities and public crypto
+  OHLCV: bounded history, deterministic statistical/technical indicators, and
+  snapshot-bound citations. Verified locally 2026-10-15; evidence is in
+  `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
@@ -78,18 +82,19 @@ The recorded commands and evidence for harness milestones are in
    delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local
    Consumer, paper fill recorded; `docs/verification.md`); the deployed path
    (Pulumi subscription) remains unverified.
-2. **Additional research providers:** Google Search grounding and OpenRouter web
-   search have bounded live evidence; financial/company-data sources (e.g. FRED,
-   CoinGecko, SEC EDGAR) remain open until separately selected and verified.
+2. **Additional research providers:** Google Search, OpenRouter web search, and
+   public stock/crypto OHLCV analysis are implemented. Financial/company-data
+   sources (e.g. FRED, CoinGecko, SEC EDGAR) remain open until separately
+   selected and verified.
 3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
 4. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-5. **Future CCXT crypto-trading integration:** after the Polymarket YES-only
-   live path is verified, plan this milestone and decide whether to select CCXT,
-   which exchange to support, and whether to cover spot or derivatives. CCXT is
-   not selected or installed by this roadmap item.
+5. **Future CCXT crypto-trading integration:** CCXT is now used only for public
+   OHLCV data. After the Polymarket YES-only live path is verified, separately
+   plan any crypto venue execution, including exchange, spot/derivatives, and
+   its own risk and activation gates.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved
 feature proposals; proposals do not expand this roadmap.

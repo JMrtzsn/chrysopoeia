@@ -19,8 +19,9 @@ execution is not implemented.
   default. `CHRYSOPOEIA_EVENT_SINK` sends `trade_plan_ready` and `turn_outcome`
   through one loopback HTTP endpoint or Pub/Sub topic; subscriptions filter by
   record type.
-- Google Search context is currently uncitable. Paper exits are simulated by the
-  bounded local loop. The independent paper-only Pub/Sub consumer owns separate
+- Google Search grounding and financial-analysis results are normalized into
+  citable snapshot-bound evidence. Paper exits are simulated by the bounded local
+  loop. The independent paper-only Pub/Sub consumer owns separate
   entry/exit simulation and accounting. No always-on harness is required.
 - The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
   priced at $1.65 input and $9.90 text output per million tokens. The model
@@ -39,6 +40,15 @@ execution is not implemented.
   live runs extract only the value into the environment. The checked-in default
   remains Vertex and does not auto-select another provider merely because its key
   exists.
+- The trader has bounded, read-only financial-history tools: `analyze_stock_history`
+  fetches daily US-equity candles; `analyze_crypto_history` fetches public OHLCV
+  through CCXT (e.g. `coinbase`, `BTC/USD`, `1d`). Both return deterministic
+  measurements including means/returns, volatility, SMA/EMA, RSI, stochastic
+  %K/%D, and ATR as cited evidence. Stock history uses the keyless but unofficial
+  Yahoo Finance chart endpoint and raw OHLCV (no split/dividend adjustment);
+  crypto calls use public exchange endpoints only, with no exchange credentials
+  or order methods. These tools analyze instruments mentioned by a market; they
+  do not add stock/crypto execution venues (Polymarket remains the only venue).
 
 ## Start locally
 

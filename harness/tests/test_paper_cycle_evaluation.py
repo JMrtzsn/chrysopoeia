@@ -162,7 +162,13 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 self.assertEqual(function_calls, ["check_trade_plan"])
                 self.assertEqual(
                     available_tools,
-                    ["find_markets", "get_market", "check_trade_plan"],
+                    [
+                        "find_markets",
+                        "get_market",
+                        "check_trade_plan",
+                        "analyze_stock_history",
+                        "analyze_crypto_history",
+                    ],
                 )
 
     def test_real_runner_terminates_trader_abstention_before_reviewer(self) -> None:
@@ -348,7 +354,13 @@ class PaperCycleEvaluationTests(unittest.TestCase):
             )
         self.assertEqual(
             [tool.__name__ for tool in agents[0].tools],
-            ["find_markets", "get_market", "check_trade_plan"],
+            [
+                "find_markets",
+                "get_market",
+                "check_trade_plan",
+                "analyze_stock_history",
+                "analyze_crypto_history",
+            ],
         )
         self.assertEqual(agents[1].tools, [])
 

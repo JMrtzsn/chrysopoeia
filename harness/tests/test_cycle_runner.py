@@ -502,7 +502,13 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertEqual(function_calls, ["check_trade_plan"])
         self.assertEqual(
             available_tools,
-            ["find_markets", "get_market", "check_trade_plan"],
+            [
+                "find_markets",
+                "get_market",
+                "check_trade_plan",
+                "analyze_stock_history",
+                "analyze_crypto_history",
+            ],
         )
         self.assertTrue(trader.requests[0].config.tools)
         self.assertTrue(trader.requests[1].config.tools)

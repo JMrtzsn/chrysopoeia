@@ -2,9 +2,17 @@ import unittest
 from copy import deepcopy
 from dataclasses import asdict, replace
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from chrysopoeia.agent import build_agents, build_trader_tools
+from chrysopoeia import paper_cycle
+from chrysopoeia.agent import (
+    analyze_crypto_history,
+    analyze_stock_history,
+    build_agents,
+    build_trader_tools,
+)
 from chrysopoeia.configuration import load_harness_config
+from chrysopoeia.financial_analysis import Candle
 from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY, PLAN_CHECKS_KEY
 from chrysopoeia.polymarket import MarketCandidate
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
@@ -248,9 +256,69 @@ class TraderToolTests(unittest.TestCase):
         agents = build_agents(self.config)
         self.assertEqual(
             [getattr(tool, "name", tool.__name__) for tool in agents.trader_agent.tools],
-            ["find_markets", "get_market", "check_trade_plan"],
+            [
+                "find_markets",
+                "get_market",
+                "check_trade_plan",
+                "analyze_stock_history",
+                "analyze_crypto_history",
+            ],
         )
         self.assertEqual(agents.reviewer_agent.tools, [])
+
+    def test_financial_analysis_tool_schemas_are_bounded_and_symbol_based(self) -> None:
+        from google.adk.tools import FunctionTool
+
+        stock_schema = FunctionTool(analyze_stock_history)._get_declaration().parameters_json_schema
+        crypto_schema = FunctionTool(analyze_crypto_history)._get_declaration().parameters_json_schema
+        self.assertEqual(set(stock_schema["properties"]), {"symbol", "limit"})
+        self.assertEqual(
+            set(crypto_schema["properties"]),
+            {"exchange_id", "symbol", "interval", "limit"},
+        )
+
+    def test_financial_tool_adds_snapshot_bound_citable_analysis(self) -> None:
+        candles = [
+            Candle(1_760_000_000 + i * 86_400, 100 + i, 102 + i, 99 + i, 101 + i, 10 + i)
+            for i in range(20)
+        ]
+        self.state["market_snapshot"] = asdict(self.snapshot)
+        self.state[paper_cycle.EVIDENCE_KEY] = [
+            item.model_dump() for item in paper_cycle._canonical_evidence(self.snapshot)
+        ]
+        with patch(
+            "chrysopoeia.agent.stock_history",
+            return_value={
+                "symbol": "AAPL",
+                "currency": "USD",
+                "interval": "1d",
+                "source": "test source",
+                "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
+                "candles": candles,
+            },
+        ):
+            result = analyze_stock_history("AAPL", self.context)
+
+        self.assertTrue(result["ok"])
+        evidence_id = result["evidence_id"]
+        evidence = paper_cycle._evidence(self.state, self.snapshot)
+        self.assertEqual(evidence[-1].evidence_id, evidence_id)
+        self.assertEqual(
+            self.state[paper_cycle.VALIDATED_EXTERNAL_EVIDENCE_KEY][0]["evidence_id"],
+            evidence_id,
+        )
+        self.assertEqual(self.state["financial_analysis_calls"], 1)
+
+    def test_financial_tools_are_bounded_per_cycle(self) -> None:
+        self.state["market_snapshot"] = asdict(self.snapshot)
+        self.state[paper_cycle.EVIDENCE_KEY] = [
+            item.model_dump() for item in paper_cycle._canonical_evidence(self.snapshot)
+        ]
+        self.state["financial_analysis_calls"] = 2
+        self.assertEqual(
+            analyze_stock_history("AAPL", self.context),
+            {"ok": False, "reason": "financial-analysis call limit reached"},
+        )
 
     def test_trader_instruction_requires_returning_the_exact_passed_plan(self) -> None:
         instruction = build_agents(self.config).trader_agent.instruction.lower()

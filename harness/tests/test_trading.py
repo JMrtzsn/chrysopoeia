@@ -246,7 +246,7 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIn("no yes edge exists", instruction)
         self.assertIn("abstain and explain in rationale", instruction)
         self.assertIn(
-            "cite only evidence_id values returned by get_market for the market you propose",
+            "cite only evidence_id values returned by get_market or the financial-analysis tools",
             instruction,
         )
 
@@ -263,14 +263,20 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIn("harness selects", root_agent.instruction)
         self.assertIn("not market picks", root_agent.instruction)
 
-    def test_trader_exposes_only_bounded_market_tools(self) -> None:
+    def test_trader_exposes_bounded_market_and_financial_tools(self) -> None:
         interfaces = discover_context("Check current evidence for this market")
 
         self.assertEqual(interfaces[0]["interface_id"], "public_web")
         self.assertEqual(context_agent.name, "call_context")
         self.assertEqual(
             [tool.__name__ for tool in trader_agent.tools],
-            ["find_markets", "get_market", "check_trade_plan"],
+            [
+                "find_markets",
+                "get_market",
+                "check_trade_plan",
+                "analyze_stock_history",
+                "analyze_crypto_history",
+            ],
         )
         with self.assertRaises(ValueError):
             discover_context("")
