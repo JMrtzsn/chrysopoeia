@@ -71,27 +71,37 @@ endpoint configured separately from the platform compute region.
   OHLCV: bounded history, deterministic statistical/technical indicators, and
   snapshot-bound citations. Verified locally 2026-10-15; evidence is in
   `docs/verification.md`.
+- Polymarket BTC 5m series history and local forecast evaluation: the trader can
+  inspect resolved sibling windows, and `polymarket-eval` scores in-window
+  probabilities with Brier against Gamma-resolved Chainlink outcomes, compared
+  with CLOB prices at the same forecast time. The initial five-window CLOB
+  baseline scored 0.247; there are not yet agent forecasts in the local journal.
+  Evidence is in `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
 
 ## Next
 
-1. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
+1. **Forward BTC 5m benchmark:** collect at least 20 local in-window BTC Up/Down
+   P(Up) forecasts (trade or abstain) and check their Brier score against the same-time CLOB
+   baseline. `polymarket-eval` currently has historical market outcomes and
+   baseline scoring, but no agent sample yet. No platform is needed.
+2. **Live accepted-plan delivery:** verify a model-produced `trade_plan_ready`
    event reaches the independent Consumer and produces a paper fill. Local
    delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local
    Consumer, paper fill recorded; `docs/verification.md`); the deployed path
    (Pulumi subscription) remains unverified.
-2. **Additional research providers:** Google Search, OpenRouter web search, and
+3. **Additional research providers:** Google Search, OpenRouter web search, and
    public stock/crypto OHLCV analysis are implemented. Financial/company-data
    sources (e.g. FRED, CoinGecko, SEC EDGAR) remain open until separately
    selected and verified.
-3. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+4. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-4. **Additional venues and NO-side positions:** separate milestones after the
+5. **Additional venues and NO-side positions:** separate milestones after the
    Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
    event-contract change is a new schema version.
-5. **Future CCXT crypto-trading integration:** CCXT is now used only for public
+6. **Future CCXT crypto-trading integration:** CCXT is now used only for public
    OHLCV data. After the Polymarket YES-only live path is verified, separately
    plan any crypto venue execution, including exchange, spot/derivatives, and
    its own risk and activation gates.

@@ -1,12 +1,14 @@
 import unittest
 from copy import deepcopy
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from chrysopoeia import paper_cycle
 from chrysopoeia.agent import (
     analyze_crypto_history,
+    analyze_polymarket_history,
     analyze_stock_history,
     build_agents,
     build_trader_tools,
@@ -14,7 +16,11 @@ from chrysopoeia.agent import (
 from chrysopoeia.configuration import load_harness_config
 from chrysopoeia.financial_analysis import Candle
 from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY, PLAN_CHECKS_KEY
-from chrysopoeia.polymarket import MarketCandidate
+from chrysopoeia.polymarket import (
+    MarketCandidate,
+    PolymarketSeriesHistory,
+    SeriesOutcome,
+)
 from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 
@@ -262,6 +268,7 @@ class TraderToolTests(unittest.TestCase):
                 "check_trade_plan",
                 "analyze_stock_history",
                 "analyze_crypto_history",
+                "analyze_polymarket_history",
             ],
         )
         self.assertEqual(agents.reviewer_agent.tools, [])
@@ -319,6 +326,41 @@ class TraderToolTests(unittest.TestCase):
             analyze_stock_history("AAPL", self.context),
             {"ok": False, "reason": "financial-analysis call limit reached"},
         )
+
+    def test_polymarket_history_tool_returns_snapshot_bound_resolved_context(self) -> None:
+        start = datetime(2026, 8, 31, 23, 55, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
+        history = PolymarketSeriesHistory(
+            "10684",
+            "btc-up-or-down-5m",
+            "https://gamma-api.polymarket.com/events?series_id=10684",
+            (
+                SeriesOutcome("1", "btc-updown-5m-1", "BTC Up or Down", start, end, end, True, "11", "12", "https://data.chain.link/btc"),
+                SeriesOutcome("2", "btc-updown-5m-2", "BTC Up or Down", start, end, end, False, "21", "22", "https://data.chain.link/btc"),
+            ),
+        )
+        self.state["market_snapshot"] = asdict(self.snapshot)
+        self.state[paper_cycle.EVIDENCE_KEY] = [
+            item.model_dump() for item in paper_cycle._canonical_evidence(self.snapshot)
+        ]
+        with patch("chrysopoeia.agent.load_series_history", return_value=history):
+            result = analyze_polymarket_history(self.context, limit=2)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["history"]["up_rate"], 0.5)
+        self.assertEqual(
+            [row["outcome"] for row in result["history"]["recent_resolved_windows"]],
+            ["Up", "Down"],
+        )
+        evidence = paper_cycle._evidence(self.state, self.snapshot)
+        self.assertEqual(evidence[-1].evidence_id, result["evidence_id"])
+
+    def test_polymarket_history_tool_schema_is_bounded(self) -> None:
+        from google.adk.tools import FunctionTool
+
+        schema = FunctionTool(analyze_polymarket_history)._get_declaration().parameters_json_schema
+        self.assertEqual(set(schema["properties"]), {"limit"})
+        self.assertEqual(schema["properties"]["limit"]["default"], 10)
 
     def test_trader_instruction_requires_returning_the_exact_passed_plan(self) -> None:
         instruction = build_agents(self.config).trader_agent.instruction.lower()

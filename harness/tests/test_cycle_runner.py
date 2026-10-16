@@ -508,6 +508,7 @@ class CycleRunnerTests(unittest.TestCase):
                 "check_trade_plan",
                 "analyze_stock_history",
                 "analyze_crypto_history",
+                "analyze_polymarket_history",
             ],
         )
         self.assertTrue(trader.requests[0].config.tools)

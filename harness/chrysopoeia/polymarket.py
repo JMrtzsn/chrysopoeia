@@ -65,6 +65,34 @@ class MarketResolution:
         }
 
 
+@dataclass(frozen=True)
+class SeriesOutcome:
+    market_id: str
+    slug: str
+    question: str
+    start_time: datetime
+    end_time: datetime
+    resolved_at: datetime
+    up_won: bool
+    up_token_id: str
+    down_token_id: str
+    resolution_source: str
+
+
+@dataclass(frozen=True)
+class PolymarketSeriesHistory:
+    series_id: str
+    series_slug: str
+    source_url: str
+    outcomes: tuple[SeriesOutcome, ...]
+
+
+@dataclass(frozen=True)
+class HistoricalPrice:
+    timestamp: int
+    price: float
+
+
 class _NoRedirects(HTTPRedirectHandler):
     def redirect_request(self, req: Request, fp: object, code: int, msg: str, headers: object, newurl: str) -> None:
         return None
@@ -396,6 +424,226 @@ def load_market_resolution(
     )
 
 
+def load_series_history(
+    event_url: str,
+    *,
+    limit: int = 10,
+    now: datetime | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    fetch: Fetch = _fetch,
+) -> PolymarketSeriesHistory:
+    """Load a bounded list of resolved sibling outcomes for a recurring event."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+        raise PolymarketError("Polymarket series history limit must be between 1 and 20")
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 10:
+        raise PolymarketError("Polymarket adapter timeout must be between 0 and 10 seconds")
+    if not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool) or not 0 < max_response_bytes <= 1_000_000:
+        raise PolymarketError("Polymarket adapter response limit must be between 1 and 1,000,000 bytes")
+    current = now or datetime.now(timezone.utc)
+    if not isinstance(current, datetime) or current.tzinfo is None:
+        raise PolymarketError("Polymarket adapter current time must include a UTC offset")
+    current = current.astimezone(timezone.utc)
+    _, event_slug, uses_slug = _endpoint(event_url)
+    if not uses_slug:
+        raise PolymarketError("Polymarket series history requires an event URL")
+
+    event_url_api = f"https://{API_HOST}/events?{urlencode({'slug': event_slug})}"
+    event_matches = _fetch_json_list(
+        event_url_api, float(timeout), max_response_bytes, fetch
+    )
+    event = next(
+        (
+            value
+            for value in event_matches
+            if isinstance(value, dict) and value.get("slug") == event_slug
+        ),
+        None,
+    )
+    if not isinstance(event, dict):
+        raise PolymarketError("Polymarket event series is unavailable")
+    series_values = event.get("series")
+    if not isinstance(series_values, list):
+        raise PolymarketError("Polymarket event series is unavailable")
+    series = next(
+        (
+            value
+            for value in series_values
+            if isinstance(value, dict)
+            and isinstance(value.get("id"), (str, int))
+            and not isinstance(value.get("id"), bool)
+            and str(value["id"]).isdigit()
+            and isinstance(value.get("slug"), str)
+        ),
+        None,
+    )
+    if not isinstance(series, dict):
+        raise PolymarketError("Polymarket event series is unavailable")
+    series_id = str(series["id"])
+    series_slug = _text(series["slug"], "series slug")
+    query = urlencode(
+        {
+            "series_id": series_id,
+            "closed": "true",
+            "limit": limit,
+            "order": "endDate",
+            "ascending": "false",
+        }
+    )
+    series_url = f"https://{API_HOST}/events?{query}"
+    siblings = _fetch_json_list(series_url, float(timeout), max_response_bytes, fetch)
+    outcomes: list[SeriesOutcome] = []
+    seen: set[str] = set()
+    for sibling in siblings:
+        if (
+            not isinstance(sibling, dict)
+            or sibling.get("closed") is not True
+            or sibling.get("seriesSlug") != series_slug
+        ):
+            continue
+        try:
+            markets = _list_field(sibling.get("markets"), "series markets")
+        except PolymarketError:
+            continue
+        for market in markets:
+            if not isinstance(market, dict) or market.get("closed") is not True:
+                continue
+            try:
+                market_id_value = market.get("id")
+                if (
+                    isinstance(market_id_value, bool)
+                    or not isinstance(market_id_value, (str, int))
+                    or not str(market_id_value).isdigit()
+                ):
+                    continue
+                market_id = str(market_id_value)
+                slug = _text(market.get("slug"), "series market slug")
+                question = _text(market.get("question"), "series market question")
+                raw_start = sibling.get("eventStartTime") or sibling.get("startTime")
+                if isinstance(raw_start, str):
+                    start_time = _timestamp(raw_start)
+                else:
+                    start_epoch = slug.rsplit("-", 1)[-1]
+                    if not start_epoch.isdigit():
+                        continue
+                    start_time = datetime.fromtimestamp(int(start_epoch), timezone.utc)
+                end_time = _timestamp(market.get("endDate") or sibling.get("endDate"))
+                resolved_at = _timestamp(market.get("closedTime") or market.get("endDate"))
+                labels = _list_field(market.get("outcomes"), "series outcomes")
+                prices = _list_field(market.get("outcomePrices"), "series outcome prices")
+                tokens = _list_field(market.get("clobTokenIds"), "series token IDs")
+                if (
+                    end_time >= current
+                    or resolved_at > current
+                    or start_time >= end_time
+                    or len(labels) != 2
+                    or len(prices) != 2
+                    or len(tokens) != 2
+                    or labels.count("Up") != 1
+                    or labels.count("Down") != 1
+                    or not all(isinstance(token, str) and token.isdigit() for token in tokens)
+                ):
+                    continue
+                up_index, down_index = labels.index("Up"), labels.index("Down")
+                up_price, down_price = float(prices[up_index]), float(prices[down_index])
+                if up_price >= 0.999 and down_price <= 0.001:
+                    up_won = True
+                elif up_price <= 0.001 and down_price >= 0.999:
+                    up_won = False
+                else:
+                    continue
+                resolution_source = _text(
+                    market.get("resolutionSource") or sibling.get("resolutionSource"),
+                    "resolution source",
+                )
+            except (PolymarketError, TypeError, ValueError):
+                continue
+            if market_id in seen:
+                continue
+            outcomes.append(
+                SeriesOutcome(
+                    market_id,
+                    slug,
+                    question,
+                    start_time,
+                    end_time,
+                    resolved_at,
+                    up_won,
+                    tokens[up_index],
+                    tokens[down_index],
+                    resolution_source,
+                )
+            )
+            seen.add(market_id)
+    outcomes.sort(key=lambda value: value.start_time, reverse=True)
+    return PolymarketSeriesHistory(series_id, series_slug, series_url, tuple(outcomes[:limit]))
+
+
+def load_price_history(
+    token_id: str,
+    start: datetime,
+    end: datetime,
+    *,
+    fidelity: int = 1,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    fetch: Fetch = _fetch,
+) -> tuple[HistoricalPrice, ...]:
+    """Load sparse CLOB price points in a bounded explicit time range."""
+    if not isinstance(token_id, str) or not token_id.isdigit() or len(token_id) > 100:
+        raise PolymarketError("Polymarket token ID is invalid")
+    if (
+        not isinstance(start, datetime)
+        or not isinstance(end, datetime)
+        or start.tzinfo is None
+        or end.tzinfo is None
+        or start >= end
+        or (end - start).total_seconds() > 15 * 24 * 60 * 60
+    ):
+        raise PolymarketError("Polymarket price history time range is invalid")
+    if isinstance(fidelity, bool) or not isinstance(fidelity, int) or not 1 <= fidelity <= 1_440:
+        raise PolymarketError("Polymarket price history fidelity is invalid")
+    query = urlencode(
+        {
+            "market": token_id,
+            "startTs": int(start.timestamp()),
+            "endTs": int(end.timestamp()),
+            "fidelity": fidelity,
+        }
+    )
+    data = _fetch_json(
+        f"https://{CLOB_HOST}/prices-history?{query}",
+        float(timeout),
+        max_response_bytes,
+        fetch,
+    )
+    raw = data.get("history")
+    if not isinstance(raw, list) or len(raw) > 20_000:
+        raise PolymarketError("Polymarket price history response is invalid")
+    start_ts, end_ts = int(start.timestamp()), int(end.timestamp())
+    points: list[HistoricalPrice] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise PolymarketError("Polymarket price history point is invalid")
+        timestamp, price = item.get("t"), item.get("p")
+        if (
+            isinstance(timestamp, bool)
+            or not isinstance(timestamp, (int, float))
+            or not isfinite(float(timestamp))
+            or not isinstance(price, (int, float, str))
+            or isinstance(price, bool)
+        ):
+            raise PolymarketError("Polymarket price history point is invalid")
+        try:
+            price_value = float(price)
+        except ValueError:
+            raise PolymarketError("Polymarket price history point is invalid") from None
+        if not isfinite(price_value) or not 0 <= price_value <= 1:
+            raise PolymarketError("Polymarket price history point is out of range")
+        timestamp_value = int(timestamp)
+        if start_ts <= timestamp_value <= end_ts:
+            points.append(HistoricalPrice(timestamp_value, price_value))
+    return tuple(sorted(points, key=lambda point: point.timestamp))
 def load_market_snapshot(
     market: str,
     bankroll: float,

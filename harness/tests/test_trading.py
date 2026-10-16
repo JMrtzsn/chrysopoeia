@@ -246,7 +246,7 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIn("no yes edge exists", instruction)
         self.assertIn("abstain and explain in rationale", instruction)
         self.assertIn(
-            "cite only evidence_id values returned by get_market or the financial-analysis tools",
+            "cite only evidence_id values returned by get_market or the analysis tools",
             instruction,
         )
 
@@ -276,6 +276,7 @@ class DecisionCycleTests(unittest.TestCase):
                 "check_trade_plan",
                 "analyze_stock_history",
                 "analyze_crypto_history",
+                "analyze_polymarket_history",
             ],
         )
         with self.assertRaises(ValueError):

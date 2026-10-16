@@ -443,6 +443,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ack = commands.add_parser("outbox-ack")
     ack.add_argument("--journal", type=Path, required=True)
     ack.add_argument("event_id")
+    polymarket_eval = commands.add_parser(
+        "polymarket-eval",
+        help="score local forecasts against resolved Polymarket outcomes",
+    )
+    polymarket_eval.add_argument("--journal", type=Path, required=True)
+    polymarket_eval.add_argument("--event-url", required=True)
+    polymarket_eval.add_argument(
+        "--limit", type=int, choices=range(1, 21), default=10
+    )
     args = parser.parse_args(argv)
     if args.command in {"cycle", "run"}:
         from chrysopoeia.events import configured_sink
@@ -468,6 +477,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 acknowledge_event(args.journal, args.event_id)
         except (JournalError, OSError, ValueError) as exc:
             parser.exit(2, f"{args.command} failed: {exc}\n")
+        return 0
+    if args.command == "polymarket-eval":
+        from chrysopoeia.accounting import JournalError
+        from chrysopoeia.polymarket_evaluation import evaluate_journal
+
+        try:
+            result = evaluate_journal(
+                args.journal, args.event_url, limit=args.limit
+            )
+        except (JournalError, OSError, ValueError) as exc:
+            parser.exit(2, f"polymarket-eval failed: {exc}\n")
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "consume":
         from chrysopoeia.accounting import JournalError, replay

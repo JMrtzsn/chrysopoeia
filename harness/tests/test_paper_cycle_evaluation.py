@@ -168,6 +168,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                         "check_trade_plan",
                         "analyze_stock_history",
                         "analyze_crypto_history",
+                        "analyze_polymarket_history",
                     ],
                 )
 
@@ -360,6 +361,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                 "check_trade_plan",
                 "analyze_stock_history",
                 "analyze_crypto_history",
+                "analyze_polymarket_history",
             ],
         )
         self.assertEqual(agents[1].tools, [])

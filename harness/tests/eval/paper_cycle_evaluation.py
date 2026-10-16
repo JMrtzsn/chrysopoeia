@@ -291,6 +291,7 @@ def grade(
         "check_trade_plan",
         "analyze_stock_history",
         "analyze_crypto_history",
+        "analyze_polymarket_history",
     }
     if any(call not in allowed_tools for call in function_calls):
         raise ValueError("paper-cycle made an unavailable tool call")

@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from urllib.error import URLError
 
 from chrysopoeia.paper_cycle import _canonical_evidence
-from chrysopoeia.polymarket import PolymarketError, load_market_snapshot
+from chrysopoeia.polymarket import (
+    PolymarketError,
+    load_market_snapshot,
+    load_price_history,
+    load_series_history,
+)
 
 
 NOW = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
@@ -53,6 +58,77 @@ def fixture_fetch(calls: list[tuple[str, float, int]] | None = None):
 
 
 class PolymarketAdapterTests(unittest.TestCase):
+    def test_series_history_returns_only_past_resolved_up_down_siblings(self) -> None:
+        calls: list[str] = []
+        start = datetime(2026, 7, 21, 11, 45, tzinfo=timezone.utc)
+        sibling_slug = f"btc-updown-5m-{int(start.timestamp())}"
+        event = {
+            "slug": "btc-updown-5m-1000",
+            "series": [{"id": "10684", "slug": "btc-up-or-down-5m"}],
+        }
+        sibling = {
+            "closed": True,
+            "seriesSlug": "btc-up-or-down-5m",
+            "endDate": "2026-07-21T11:50:00Z",
+            "markets": [
+                {
+                    "id": "12345",
+                    "slug": sibling_slug,
+                    "question": "BTC Up or Down 5m",
+                    "closed": True,
+                    "closedTime": "2026-07-21T11:50:01Z",
+                    "outcomes": '["Up", "Down"]',
+                    "outcomePrices": '["1", "0"]',
+                    "clobTokenIds": '["111", "222"]',
+                    "resolutionSource": "https://data.chain.link/btc-usd",
+                }
+            ],
+        }
+
+        def fetch(url: str, _timeout: float, _max_bytes: int) -> bytes:
+            calls.append(url)
+            return json.dumps([event] if "events?slug=" in url else [sibling]).encode()
+
+        history = load_series_history(
+            "https://polymarket.com/event/btc-updown-5m-1000",
+            limit=5,
+            now=NOW,
+            fetch=fetch,
+        )
+
+        self.assertEqual((history.series_id, history.series_slug), ("10684", "btc-up-or-down-5m"))
+        self.assertEqual(len(history.outcomes), 1)
+        self.assertEqual(history.outcomes[0].start_time, start)
+        self.assertTrue(history.outcomes[0].up_won)
+        self.assertEqual(history.outcomes[0].up_token_id, "111")
+        self.assertEqual(len(calls), 2)
+
+    def test_clob_history_parses_sparse_points_in_time_order(self) -> None:
+        calls: list[str] = []
+
+        def fetch(url: str, _timeout: float, _max_bytes: int) -> bytes:
+            calls.append(url)
+            return json.dumps(
+                {
+                    "history": [
+                        {"t": 140, "p": 0.9},
+                        {"t": 120, "p": 0.6},
+                        {"t": 90, "p": 0.1},
+                        {"t": 110, "p": 0.4},
+                    ]
+                }
+            ).encode()
+
+        points = load_price_history(
+            "123456",
+            datetime.fromtimestamp(100, timezone.utc),
+            datetime.fromtimestamp(130, timezone.utc),
+            fetch=fetch,
+        )
+        self.assertEqual([(point.timestamp, point.price) for point in points], [(110, 0.4), (120, 0.6)])
+        self.assertIn("startTs=100", calls[0])
+        self.assertIn("fidelity=1", calls[0])
+
     def test_active_binary_market_becomes_snapshot(self) -> None:
         calls: list[tuple[str, float, int]] = []
 

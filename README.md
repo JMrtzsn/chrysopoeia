@@ -47,8 +47,10 @@ execution is not implemented.
   %K/%D, and ATR as cited evidence. Stock history uses the keyless but unofficial
   Yahoo Finance chart endpoint and raw OHLCV (no split/dividend adjustment);
   crypto calls use public exchange endpoints only, with no exchange credentials
-  or order methods. These tools analyze instruments mentioned by a market; they
-  do not add stock/crypto execution venues (Polymarket remains the only venue).
+  or order methods. `analyze_polymarket_history` returns up to ten previously
+  resolved windows from the current repeating Polymarket series, bounded to the
+  snapshot time. These tools analyze instruments/markets; they do not add
+  stock/crypto execution venues (Polymarket remains the only venue).
 
 ## Start locally
 
@@ -68,6 +70,20 @@ For CLI syntax, run `uv run chrysopoeia --help` or a subcommand's `--help`.
 The main operator flow is `discover` → `capture` → `cycle`; `run` starts a
 bounded journal-backed session. `book`, `mark`, and `settle` inspect or update
 the paper journal. No cycle guarantees a trade.
+
+For the Polymarket BTC Up/Down 5m benchmark, paper-run forecasts locally and
+score them after resolution:
+
+```sh
+uv run chrysopoeia polymarket-eval --journal /path/to/journal \
+  --event-url https://polymarket.com/event/btc-updown-5m-1792212300 --limit 10
+```
+
+The primary metric is Brier score for the agent's P(Up), compared with the CLOB
+Up price at the same forecast timestamp. Lower is better. The tool uses Gamma's
+resolved Up/Down result (Chainlink BTC/USD TWAP resolution) as ground truth;
+open windows and forecasts made outside the 5-minute event window are excluded.
+It reads/writes no platform resources and places no orders.
 
 ## Documentation map
 
