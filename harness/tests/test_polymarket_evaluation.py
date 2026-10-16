@@ -92,6 +92,11 @@ class PolymarketEvaluationTests(unittest.TestCase):
         self.assertEqual(late["scored_markets"], 0)
         self.assertEqual(late["late_forecasts_skipped"], 1)
 
+    def test_abstention_placeholder_probability_is_not_scored(self) -> None:
+        result = self.evaluate({"a": turn("1", 1100, 0.0, "abstain", "btc-updown-5m-1000")})
+        self.assertEqual(result["scored_markets"], 0)
+        self.assertEqual(result["abstentions_without_estimate"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -316,6 +316,32 @@ class TraderToolTests(unittest.TestCase):
         )
         self.assertEqual(self.state["financial_analysis_calls"], 1)
 
+    def test_financial_tool_works_with_adk_session_state(self) -> None:
+        from google.adk.sessions.state import State
+
+        candles = [
+            Candle(1_760_000_000 + i * 60, 100 + i, 102 + i, 99 + i, 101 + i, 10 + i)
+            for i in range(20)
+        ]
+        value = {
+            "market_snapshot": asdict(self.snapshot),
+            paper_cycle.EVIDENCE_KEY: [
+                item.model_dump() for item in paper_cycle._canonical_evidence(self.snapshot)
+            ],
+        }
+        context = SimpleNamespace(state=State(value=value, delta={}))
+        history = {
+            "symbol": "BTC/USD", "currency": "USD", "interval": "1m",
+            "source": "bitstamp via CCXT public OHLCV",
+            "source_url": "https://www.bitstamp.net/?market=BTC%2FUSD",
+            "candles": candles,
+        }
+        with patch("chrysopoeia.agent.crypto_history", return_value=history) as fetched:
+            result = analyze_crypto_history("bitstamp", "BTC/USD", context, "1m", 10)
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(fetched.call_args.kwargs["limit"], 14)
+
     def test_financial_tools_are_bounded_per_cycle(self) -> None:
         self.state["market_snapshot"] = asdict(self.snapshot)
         self.state[paper_cycle.EVIDENCE_KEY] = [

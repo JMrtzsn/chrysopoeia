@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -48,10 +48,15 @@ MAX_FINANCIAL_ANALYSIS_CALLS = 2
 MAX_POLYMARKET_HISTORY_CALLS = 1
 
 
+def _history_limit(limit: object) -> int:
+    """Clamp a model-chosen bar count into the supported 14..200 range."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        return 100
+    return min(max(limit, 14), 200)
+
+
 def _begin_financial_analysis(tool_context: ToolContext) -> dict[str, object] | None:
     state = tool_context.state
-    if not isinstance(state, MutableMapping):
-        return {"ok": False, "reason": "cycle context is unavailable"}
     snapshot = state.get("market_snapshot")
     if not isinstance(snapshot, Mapping):
         return {"ok": False, "reason": "capture a market before analyzing an instrument"}
@@ -70,8 +75,6 @@ def _register_analysis_evidence(
     excerpt: str,
 ) -> dict[str, object]:
     state = tool_context.state
-    if not isinstance(state, MutableMapping):
-        return {"ok": False, "reason": "cycle context is unavailable"}
     snapshot_value = state.get("market_snapshot")
     if snapshot_value is None:
         return {"ok": False, "reason": "capture a market before analyzing an instrument"}
@@ -142,7 +145,8 @@ def analyze_stock_history(
         return unavailable
     try:
         return _record_financial_analysis(
-            tool_context, analyze_history(stock_history(symbol, limit=limit))
+            tool_context,
+            analyze_history(stock_history(symbol, limit=_history_limit(limit))),
         )
     except Exception:
         return {"ok": False, "reason": "stock price history is unavailable or invalid"}
@@ -162,7 +166,9 @@ def analyze_crypto_history(
         return _record_financial_analysis(
             tool_context,
             analyze_history(
-                crypto_history(exchange_id, symbol, interval=interval, limit=limit)
+                crypto_history(
+                    exchange_id, symbol, interval=interval, limit=_history_limit(limit)
+                )
             ),
         )
     except Exception:
@@ -176,8 +182,6 @@ def analyze_polymarket_history(
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10:
         return {"ok": False, "reason": "history limit must be between 1 and 10"}
     state = tool_context.state
-    if not isinstance(state, MutableMapping):
-        return {"ok": False, "reason": "cycle context is unavailable"}
     snapshot_value = state.get("market_snapshot")
     if not isinstance(snapshot_value, Mapping):
         return {"ok": False, "reason": "capture a Polymarket market first"}
@@ -396,7 +400,9 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
             output = paper_cycle.ProposalOutput.model_validate(plan)
             validated_plan = output.model_dump()
             if output.action != "trade":
-                raise ValueError
+                reasons = ["only trade plans are checked; return an abstention directly"]
+                record(False, reasons, validated_plan)
+                return {"passed": False, "reasons": reasons}
             if state.get("market_snapshot") is None:
                 reasons = ["capture a market snapshot before checking a plan"]
                 record(False, reasons, validated_plan)
@@ -731,11 +737,11 @@ def build_agents(config: HarnessConfig) -> AgentSet:
         description="Researches prediction markets and proposes structured paper trades.",
         instruction=(
             "Use find_markets, get_market, check_trade_plan, analyze_stock_history, analyze_crypto_history, and analyze_polymarket_history to select/capture public markets, examine asset prices and relevant resolved series outcomes, and propose dry-run plans. "
-            "The financial-analysis tools return bounded historical OHLCV indicators, not forecasts. For crypto use a CCXT exchange id and spot symbol such as coinbase and BTC/USD. Cite returned evidence IDs when used; indicators are not trade instructions. "
+            "The financial-analysis tools return bounded historical OHLCV indicators, not forecasts. For crypto use a CCXT exchange id and spot symbol such as bitstamp and BTC/USD. Cite returned evidence IDs when used; indicators are not trade instructions. "
             "Build the plan from plan_inputs, using its complete template, and always submit every field. Set amount ≤ maximum_amount; never infer amount from bankroll. Set max_entry_price at or above the required price for that amount (the executable YES ask at the deepest consumed level), set exit_by inside its exclusive window, never equal to either endpoint, or choose hold_to_resolution, and cite only the listed valid citation IDs. Replace the probability and rationale placeholders. "
             "Call check_trade_plan with the exact plan you intend to return. If it fails, read the reasons, revise, and re-check until it passes or the check limit is reached. "
             "After a pass, return exactly the last passed plan unchanged, with the same fields and values including rationale. Abstain if no plan check passes. "
-            "Only YES positions can be taken; if your edge is on NO because your probability is below the YES price, or no YES edge exists, abstain and explain in rationale. "
+            "probability is always your genuine estimate that the YES side (Up for Up/Down markets) resolves true, including when you abstain; never use 0 or 1 as a placeholder. For short crypto Up/Down windows, call analyze_crypto_history(exchange_id=\"bitstamp\", symbol=\"BTC/USD\", interval=\"1m\") for the named asset before estimating. Only YES positions can be taken; if your edge is on NO because your probability is below the YES price, or no YES edge exists, abstain and explain in rationale. "
             'Return action="abstain" and amount=0 with no trade terms when evidence or edge does not justify a trade; otherwise return '
             'action="trade" with a positive amount, max_entry_price, and a complete exit_plan. The exit plan must set '
             "take_profit_roi, stop_loss_roi or an explicit hold_to_resolution choice, and exit_by or hold_to_resolution. "

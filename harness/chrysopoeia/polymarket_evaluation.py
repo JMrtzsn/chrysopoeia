@@ -62,7 +62,7 @@ def evaluate_journal(
         anchor = urlsplit(series_url).path.rsplit("/", 1)[-1]
         prefix = f"{anchor.rsplit('-', 1)[0]}-"
     first: dict[str, tuple[datetime, float, str]] = {}
-    repeated = 0
+    repeated = missing = 0
     outcomes = [
         value
         for value in accounting.replay(journal).turn_outcomes.values()
@@ -82,10 +82,15 @@ def evaluate_journal(
                 continue
         except ValueError:
             continue
+        action = str(proposal.get("action"))
+        if action != "trade" and raw in (0, 1):
+            # Abstentions at exactly 0/1 are placeholders, not genuine estimates.
+            missing += 1
+            continue
         if market_id in first:
             repeated += 1
             continue
-        first[market_id] = (created_at, float(raw), str(proposal.get("action")))
+        first[market_id] = (created_at, float(raw), action)
     if len(first) > MAX_MARKETS:
         raise ValueError(f"more than {MAX_MARKETS} markets to evaluate")
 
@@ -151,6 +156,7 @@ def evaluate_journal(
         "late_forecasts_skipped": late,
         "unavailable_markets": unavailable,
         "repeated_forecasts_ignored": repeated,
+        "abstentions_without_estimate": missing,
         "agent": {
             "brier_score": brier_score(agent_p, agent_y),
             "trades": trades,

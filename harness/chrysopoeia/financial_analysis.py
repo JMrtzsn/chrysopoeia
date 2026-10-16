@@ -15,6 +15,7 @@ from typing import Protocol
 MAX_CANDLES = 200
 MAX_RESPONSE_BYTES = 1_000_000
 HTTP_TIMEOUT_SECONDS = 10.0
+CCXT_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "Chrysopoeia/0.1 read-only market analysis"
 CRYPTO_TIMEFRAMES = {
     "1m": 60,
@@ -148,6 +149,10 @@ def crypto_history(
 ) -> dict[str, object]:
     """Fetch bounded public OHLCV candles through CCXT, without credentials."""
     limit = _valid_limit(limit)
+    if isinstance(exchange_id, str):
+        exchange_id = exchange_id.strip().lower()
+    if isinstance(symbol, str):
+        symbol = symbol.strip().upper().replace("-", "/")
     if not isinstance(exchange_id, str) or re.fullmatch(r"[a-z0-9]{2,24}", exchange_id) is None:
         raise ValueError("invalid CCXT exchange id")
     match = re.fullmatch(r"([A-Z0-9]{2,12})/([A-Z0-9]{2,12})", symbol) if isinstance(symbol, str) else None
@@ -164,12 +169,12 @@ def crypto_history(
         if not callable(exchange_class):
             raise ValueError("unsupported CCXT exchange")
         exchange = exchange_class(
-            {"enableRateLimit": True, "timeout": int(HTTP_TIMEOUT_SECONDS * 1000)}
+            {"enableRateLimit": True, "timeout": int(CCXT_TIMEOUT_SECONDS * 1000)}
         )
     else:
         exchange = exchange_factory(
             exchange_id,
-            {"enableRateLimit": True, "timeout": int(HTTP_TIMEOUT_SECONDS * 1000)},
+            {"enableRateLimit": True, "timeout": int(CCXT_TIMEOUT_SECONDS * 1000)},
         )
     try:
         if not exchange.has.get("fetchOHLCV") or interval not in exchange.timeframes:
