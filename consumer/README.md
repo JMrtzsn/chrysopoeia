@@ -2,7 +2,7 @@
 
 This independent FastAPI service accepts authenticated Pub/Sub push requests at
 `POST /push` and authenticated Scheduler requests at `POST /sweep`. Authentication
-is enforced by Cloud Run IAM. The service validates the Harness-owned v1 schema,
+is enforced by Cloud Run IAM. The service validates Harness-owned v1/v2 schemas,
 fetches bounded public metadata/books, independently checks risk and depth, and
 records paper-only outcomes in its own append-only journal.
 The deployed subscription filters for `trade_plan_ready`; ingress also
@@ -46,8 +46,13 @@ uv run python scripts/send_event.py --sweep      # POST /sweep (exits/settlement
 cat /tmp/consumer/ledger.jsonl
 ```
 
-`event.json` is a `trade_plan_ready` v1 event
-(`../contracts/trade_plan_ready.v1.schema.json`). Its `event_id` must be
+`event.json` is a `trade_plan_ready` v1 (YES-only) or v2 (YES/NO) event
+(`../contracts/trade_plan_ready.v1.schema.json` and `../contracts/trade_plan_ready.v2.schema.json`).
+V2 `probability` is the selected token's win probability, not always P(YES).
+The public adapter verifies that `outcome` agrees with `instrument_id`; it buys
+and later sells that token's actual book. Settlement pays when the held token
+wins (the quote's `resolution=YES` means that token won).
+Its `event_id` must be
 `turn-` + the first 24 hex chars of SHA-256 over compact JSON
 `[snapshot_id, market_id]`; the script checks this and wraps the event in the
 real Pub/Sub push envelope.

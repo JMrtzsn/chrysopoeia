@@ -127,6 +127,13 @@ flowchart TD
 
 ## Context and evidence
 
+Two-sided paper proposals carry `outcome=YES|NO`, while their probability remains
+P(YES/Up). Production captures load both token books. Python selects the actual
+side for edge, depth, fills, marks, exits and settlement. NO plans and outcomes
+use the v2 contracts; existing v1 YES records remain readable. In a v2
+`trade_plan_ready`, probability is the chosen token's win probability. The
+independent consumer checks token/outcome pairing against public venue metadata.
+
 The model provider is BYOK and applies to every role through the selected ADK
 boundary (`adk-gemini` for Vertex, `adk-registry` for other providers). The
 context/research role selects a research provider from its configured model: a

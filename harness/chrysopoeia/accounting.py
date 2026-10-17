@@ -813,7 +813,8 @@ def settle(directory: Path, book: Book, market_id: str, resolution: str) -> dict
     position = book.positions.get(market_id)
     if position is None:
         raise JournalError(f"no open position for market {market_id}")
-    if resolution == "resolved_yes":
+    outcome = position.trade_plan.outcome if position.trade_plan else "YES"
+    if (resolution == "resolved_yes") == (outcome == "YES"):
         pnl = position.shares * (1.0 - position.fee_rate) - position.total_cost
     else:
         pnl = -position.total_cost

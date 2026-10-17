@@ -32,6 +32,7 @@ from chrysopoeia.trading import (
     OperatingConfig,
     TradePlanReady,
     consume_trade_plan,
+    outcome_snapshot,
     parse_trade_plan,
     quote_exit,
     recheck_trade_plan,
@@ -89,6 +90,7 @@ def consume_paper_event(
         fetch=fetch,
         paper_fee_rate=paper_fee_rate,
         paper_fee_source=paper_fee_source,
+        **({"include_no_book": True} if event.outcome == "NO" else {}),
     )
     limits = OperatingConfig(
         book.bankroll,
@@ -288,7 +290,10 @@ def mark_positions(
             fetch=fetch,
             paper_fee_rate=paper_fee_rate,
             paper_fee_source=paper_fee_source,
+            **({"include_no_book": True} if position.trade_plan and position.trade_plan.outcome == "NO" else {}),
         )
+        if position.trade_plan:
+            fresh = outcome_snapshot(fresh, position.trade_plan.outcome)
         quote = quote_exit(fresh, position.shares)
         record_mark(
             journal,
@@ -338,7 +343,10 @@ def evaluate_exits(
             fetch=fetch,
             paper_fee_rate=paper_fee_rate,
             paper_fee_source=paper_fee_source,
+            **({"include_no_book": True} if position.trade_plan and position.trade_plan.outcome == "NO" else {}),
         )
+        if position.trade_plan:
+            fresh = outcome_snapshot(fresh, position.trade_plan.outcome)
         quote = quote_exit(fresh, position.shares)
         record_mark(
             journal,

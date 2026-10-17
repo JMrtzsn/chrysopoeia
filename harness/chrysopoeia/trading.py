@@ -1,7 +1,7 @@
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -122,6 +122,10 @@ class MarketSnapshot:
     fee_source: str = "paper-assumption:no-fee-v1"
     book_captured_at: str = ""
     bids: tuple[BookLevel, ...] = ()
+    no_token_id: str = ""
+    no_asks: tuple[BookLevel, ...] = ()
+    no_bids: tuple[BookLevel, ...] = ()
+    no_book_captured_at: str = ""
 
     def __post_init__(self) -> None:
         _identifier(self.snapshot_id, "snapshot_id")
@@ -155,6 +159,27 @@ class MarketSnapshot:
         except (TypeError, ValueError):
             raise ValueError("bids must contain valid book levels") from None
         object.__setattr__(self, "bids", bids)
+        if self.no_token_id:
+            if self.no_token_id == self.yes_token_id:
+                raise ValueError("outcome tokens must be distinct")
+            try:
+                no_asks = tuple(level if isinstance(level, BookLevel) else BookLevel(**level) for level in self.no_asks)
+            except (TypeError, ValueError):
+                raise ValueError("NO asks must contain valid book levels") from None
+            if not no_asks:
+                raise ValueError("NO token requires executable asks")
+            no_book = MarketSnapshot(
+                self.snapshot_id, self.market_id,
+                no_asks[0].price,
+                self.bankroll, self.market_exposure, self.total_exposure,
+                self.question, self.resolution_rules, self.end_time, self.captured_at,
+                self.source_url, self.no_token_id, no_asks, self.fee_rate,
+                self.fee_source, self.no_book_captured_at, self.no_bids,
+            )
+            object.__setattr__(self, "no_asks", no_book.asks)
+            object.__setattr__(self, "no_bids", no_book.bids)
+        elif self.no_asks or self.no_bids or self.no_book_captured_at:
+            raise ValueError("NO book requires a NO token")
         if len(bids) > 50:
             raise ValueError("bids cannot exceed 50 levels")
         if any(left.price < right.price for left, right in zip(bids, bids[1:])):
@@ -191,8 +216,7 @@ class MarketSnapshot:
 
 def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
     """Return the canonical market-data identity, excluding capture and account state."""
-    identity = json.dumps(
-        {
+    fields = {
             "market_id": snapshot.market_id,
             "price": float(snapshot.price),
             "question": snapshot.question,
@@ -203,11 +227,32 @@ def market_snapshot_identity(snapshot: MarketSnapshot) -> str:
             "asks": [(float(level.price), float(level.size)) for level in snapshot.asks],
             "fee_rate": float(snapshot.fee_rate),
             "fee_source": snapshot.fee_source,
-        },
+        }
+    if snapshot.no_token_id:
+        fields.update({
+            "no_token_id": snapshot.no_token_id,
+            "no_asks": [(float(level.price), float(level.size)) for level in snapshot.no_asks],
+        })
+    identity = json.dumps(
+        fields,
         sort_keys=True,
         separators=(",", ":"),
     )
     return "polymarket-" + sha256(identity.encode()).hexdigest()[:24]
+
+
+def outcome_snapshot(snapshot: MarketSnapshot, outcome: str) -> MarketSnapshot:
+    """Select the actual token book; never synthesize NO liquidity from YES prices."""
+    if outcome == "YES":
+        return snapshot
+    if outcome != "NO" or not snapshot.no_token_id or not snapshot.no_asks:
+        raise ValueError("requested outcome book is unavailable")
+    return replace(
+        snapshot, price=snapshot.no_asks[0].price,
+        yes_token_id=snapshot.no_token_id, asks=snapshot.no_asks, bids=snapshot.no_bids,
+        book_captured_at=snapshot.no_book_captured_at,
+        no_token_id="", no_asks=(), no_bids=(), no_book_captured_at="",
+    )
 
 
 @dataclass(frozen=True)
@@ -244,8 +289,11 @@ class Proposal:
     max_entry_price: float | None = None
     exit_plan: ExitPlan | None = None
     citations: tuple[str, ...] = ()
+    outcome: str = "YES"
 
     def __post_init__(self) -> None:
+        if self.outcome not in {"YES", "NO"}:
+            raise ValueError("proposal outcome must be YES or NO")
         _identifier(self.snapshot_id, "snapshot_id")
         _identifier(self.market_id, "market_id")
         _finite(self.probability, "probability")
@@ -359,15 +407,15 @@ def _trade_plan_ready(
     ).hexdigest()[:24]
     evidence = tuple(dict.fromkeys((*proposal.citations, *review.citations)))
     return TradePlanReady(
-        1,
+        2 if proposal.outcome == "NO" else 1,
         "trade_plan_ready",
         event_id,
         created.astimezone(timezone.utc).isoformat(),
         snapshot.market_id,
         snapshot.snapshot_id,
-        snapshot.yes_token_id,
-        "YES",
-        proposal.probability,
+        outcome_snapshot(snapshot, proposal.outcome).yes_token_id,
+        proposal.outcome,
+        proposal.probability if proposal.outcome == "YES" else 1 - proposal.probability,
         proposal.amount,
         proposal.max_entry_price,
         proposal.exit_plan,
@@ -384,7 +432,7 @@ def consume_trade_plan(
     event: TradePlanReady, snapshot: MarketSnapshot, operating: OperatingConfig | None = None
 ) -> SimulatedFill:
     """Validate an accepted plan against a snapshot and independently simulate it."""
-    if not isinstance(event, TradePlanReady) or event.schema_version != 1 or event.record_type != "trade_plan_ready":
+    if not isinstance(event, TradePlanReady) or event.schema_version not in {1, 2} or event.record_type != "trade_plan_ready":
         raise ValueError("unsupported trade plan event")
     expected_event_id = "turn-" + sha256(
         json.dumps(
@@ -393,14 +441,16 @@ def consume_trade_plan(
     ).hexdigest()[:24]
     if event.event_id != expected_event_id:
         raise ValueError("trade plan event identity is inconsistent")
+    if event.schema_version == 1 and event.outcome != "YES":
+        raise ValueError("v1 supports only YES trade plans")
     if (event.snapshot_id, event.market_id, event.instrument_id) != (
         snapshot.snapshot_id,
         snapshot.market_id,
-        snapshot.yes_token_id,
+        outcome_snapshot(snapshot, event.outcome).yes_token_id,
     ):
         raise ValueError("trade plan snapshot identity is inconsistent")
-    if event.outcome != "YES":
-        raise ValueError("only YES trade plans are supported")
+    if event.outcome not in ({"YES"} if event.schema_version == 1 else {"YES", "NO"}):
+        raise ValueError("unsupported trade plan outcome")
     if (
         event.created_at != _offset_timestamp(snapshot.captured_at, "captured_at").astimezone(timezone.utc).isoformat()
         or event.expires_at != snapshot.end_time
@@ -414,11 +464,12 @@ def consume_trade_plan(
     proposal = Proposal(
         event.snapshot_id,
         event.market_id,
-        event.probability,
+        event.probability if event.outcome == "YES" else 1 - event.probability,
         event.stake,
         event.max_entry_price,
         event.exit_plan,
         event.evidence_references,
+        event.outcome,
     )
     quote = _quote(snapshot, proposal, event.max_entry_price)
     limits = operating or OperatingConfig(bankroll=snapshot.bankroll)
@@ -448,18 +499,19 @@ def recheck_trade_plan(
     fresh_end = _offset_timestamp(snapshot.end_time, "end_time")
     if snapshot.market_id != event.market_id:
         raise ValueError("fresh market identity does not match the trade plan")
-    if snapshot.yes_token_id != event.instrument_id or event.outcome != "YES":
-        raise ValueError("fresh YES instrument identity does not match the trade plan")
+    if outcome_snapshot(snapshot, event.outcome).yes_token_id != event.instrument_id:
+        raise ValueError("fresh outcome instrument identity does not match the trade plan")
     if fresh_end != market_end:
         raise ValueError("fresh market terms do not match the trade plan")
     proposal = Proposal(
         snapshot.snapshot_id,
         snapshot.market_id,
-        event.probability,
+        event.probability if event.outcome == "YES" else 1 - event.probability,
         event.stake,
         event.max_entry_price,
         event.exit_plan,
         event.evidence_references,
+        event.outcome,
     )
     quote = _quote(snapshot, proposal, event.max_entry_price)
     decision = check_risk(
@@ -486,7 +538,7 @@ def validate_trade_plan(event: TradePlanReady, *, now: datetime) -> None:
     ).hexdigest()[:24]
     if event.event_id != expected_event_id:
         raise ValueError("trade plan event identity is inconsistent")
-    if event.schema_version != 1 or event.record_type != "trade_plan_ready":
+    if event.schema_version not in {1, 2} or event.record_type != "trade_plan_ready":
         raise ValueError("unsupported trade plan event")
     current = now.astimezone(timezone.utc)
     created = _offset_timestamp(event.created_at, "created_at")
@@ -498,7 +550,7 @@ def validate_trade_plan(event: TradePlanReady, *, now: datetime) -> None:
         raise ValueError("trade plan terms are unsupported")
     if (
         not event.reviewer_approved
-        or event.outcome != "YES"
+        or event.outcome not in ({"YES"} if event.schema_version == 1 else {"YES", "NO"})
         or event.policy_references != ("hard-policy-v1",)
         or not event.reviewer_citations
         or not set(event.reviewer_citations) <= set(event.evidence_references)
@@ -540,6 +592,9 @@ def parse_trade_plan(value: Mapping[str, object]) -> TradePlanReady:
         if (
             not isinstance(event.schema_version, int)
             or isinstance(event.schema_version, bool)
+            or event.schema_version not in {1, 2}
+            or event.record_type != "trade_plan_ready"
+            or event.outcome not in ({"YES"} if event.schema_version == 1 else {"YES", "NO"})
             or not isinstance(event.reviewer_approved, bool)
             or any(
                 not isinstance(item, str) or not item.strip()
@@ -565,6 +620,7 @@ def _quote(
     proposal: Proposal,
     max_entry_price: float | None = None,
 ) -> SimulatedFill:
+    snapshot = outcome_snapshot(snapshot, proposal.outcome)
     remaining = Decimal(str(proposal.amount))
     shares = Decimal(0)
     levels_consumed = 0
@@ -582,7 +638,7 @@ def _quote(
         if remaining == 0:
             break
     if remaining:
-        raise ValueError("insufficient executable YES depth")
+        raise ValueError(f"insufficient executable {proposal.outcome} depth")
     gross = Decimal(str(proposal.amount))
     fee = gross * Decimal(str(snapshot.fee_rate))
     return SimulatedFill(
@@ -636,7 +692,9 @@ def check_risk(
         raise ValueError("snapshot and market identity must be consistent")
     if not review.approved:
         return RiskDecision(False, f"review rejected: {review.reason}")
-    if proposal.probability - snapshot.price < MINIMUM_NET_EDGE - 1e-12:
+    selected = outcome_snapshot(snapshot, proposal.outcome)
+    probability = proposal.probability if proposal.outcome == "YES" else 1 - proposal.probability
+    if probability - selected.price < MINIMUM_NET_EDGE - 1e-12:
         return RiskDecision(False, "minimum net edge of 0.05 not met")
     if quote_error is not None:
         return RiskDecision(False, quote_error)
@@ -676,7 +734,9 @@ def run_decision_cycle(
             end = _offset_timestamp(snapshot.end_time, "end_time") if snapshot.end_time else None
             if captured is None or end is None or not captured < exit_by < end:
                 quote_error = "exit_by must be after capture and before market end"
-    if review.approved and proposal.probability - snapshot.price >= MINIMUM_NET_EDGE - 1e-12:
+    selected = outcome_snapshot(snapshot, proposal.outcome)
+    probability = proposal.probability if proposal.outcome == "YES" else 1 - proposal.probability
+    if review.approved and probability - selected.price >= MINIMUM_NET_EDGE - 1e-12:
         try:
             quote = _quote(snapshot, proposal, proposal.max_entry_price)
         except ValueError as exc:

@@ -69,6 +69,7 @@ class Quote:
     asks: tuple[tuple[float, float], ...]
     bids: tuple[tuple[float, float], ...]
     resolution: str | None = None
+    outcome: str = "YES"
 
 
 class Market(Protocol):
@@ -100,7 +101,11 @@ def _schema_path() -> Path:
 
 def load_validator() -> Validator:
     try:
-        schema = json.loads(_schema_path().read_text())
+        path = _schema_path()
+        schema = json.loads(path.read_text())
+        v2_path = path.with_name("trade_plan_ready.v2.schema.json")
+        if v2_path.exists():
+            schema = {"anyOf": [schema, json.loads(v2_path.read_text())]}
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("trade plan schema is unavailable") from exc
     Draft202012Validator.check_schema(schema)
@@ -386,7 +391,7 @@ class Consumer:
     ) -> dict[str, object]:
         if (
             now - _timestamp(quote.captured_at) > timedelta(minutes=5)
-            or _timestamp(quote.captured_at) > now
+            or _timestamp(quote.captured_at) > now + timedelta(seconds=5)
         ):
             raise InvalidEvent("fresh quote is stale or future-dated")
         if (quote.market_id, quote.token_id, _timestamp(quote.market_end)) != (
@@ -395,6 +400,8 @@ class Consumer:
             _timestamp(event["market_end"]),
         ):
             raise InvalidEvent("fresh quote identity does not match the plan")
+        if quote.outcome != event["outcome"]:
+            raise InvalidEvent("fresh quote outcome does not match the plan")
         asks = self._book(quote.asks, required=True)
         bids = self._book(quote.bids, required=False, reverse=True)
         if bids and bids[0][0] >= asks[0][0]:

@@ -148,6 +148,12 @@ def serialize_market_snapshot(snapshot: MarketSnapshot) -> dict[str, object]:
             ],
             "fee_rate": snapshot.fee_rate,
             "fee_source": snapshot.fee_source,
+            **({
+                "no_token_id": snapshot.no_token_id,
+                "no_asks": [{"price": level.price, "size": level.size} for level in snapshot.no_asks],
+                "no_bids": [{"price": level.price, "size": level.size} for level in snapshot.no_bids],
+                "no_book_captured_at": snapshot.no_book_captured_at,
+            } if snapshot.no_token_id else {}),
         },
     }
 
@@ -254,7 +260,10 @@ def load_capture_snapshot(
         or envelope["venue"] != "polymarket"
         or envelope["mode"] != "paper"
         or not isinstance(envelope["snapshot"], dict)
-        or set(envelope["snapshot"]) != _SNAPSHOT_KEYS
+        or set(envelope["snapshot"]) not in (
+            _SNAPSHOT_KEYS,
+            _SNAPSHOT_KEYS | {"no_token_id", "no_asks", "no_bids", "no_book_captured_at"},
+        )
     ):
         raise ValueError("invalid snapshot")
     value = envelope["snapshot"]
@@ -294,6 +303,8 @@ def load_capture_snapshot(
             fee_rate,
             fee_source,
             _capture_text(value["captured_at"]),
+            **({key: value[key] for key in ("no_token_id", "no_asks", "no_bids", "no_book_captured_at")}
+               if "no_token_id" in value else {}),
         )
         if snapshot.snapshot_id != market_snapshot_identity(snapshot):
             raise ValueError
@@ -736,6 +747,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bankroll=1.0,
                 market_exposure=0.0,
                 total_exposure=0.0,
+                include_no_book=True,
                 fetch=polymarket_fetch,
                 paper_fee_rate=config.venue.paper_fee_rate,
                 paper_fee_source=config.venue.paper_fee_source,
@@ -831,6 +843,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     operating.bankroll,
                     args.market_exposure,
                     total_exposure,
+                    include_no_book=True,
                     paper_fee_rate=config.venue.paper_fee_rate,
                     paper_fee_source=config.venue.paper_fee_source,
                 )

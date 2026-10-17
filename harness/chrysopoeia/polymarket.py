@@ -1,7 +1,7 @@
 """Read-only public Polymarket market-data adapter."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
 from math import isfinite
@@ -711,6 +711,7 @@ def load_market_snapshot(
     timeout: float = DEFAULT_TIMEOUT,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     fetch: Fetch = _fetch,
+    include_no_book: bool = False,
     paper_fee_rate: float,
     paper_fee_source: str,
 ) -> MarketSnapshot:
@@ -799,6 +800,25 @@ def load_market_snapshot(
     price = asks[0].price
     # The capture is complete only once the book has been received.
     current_utc = max(current_utc, book_time)
+    no_fields: dict = {}
+    if include_no_book:
+        no_token = tokens[1]
+        no_book = _fetch_json(
+            f"https://{CLOB_HOST}/book?token_id={quote(no_token, safe='')}",
+            float(timeout), max_response_bytes, fetch,
+        )
+        if no_book.get("asset_id") != no_token:
+            raise PolymarketError("Polymarket adapter NO token does not match")
+        no_time = _book_timestamp(no_book.get("timestamp"))
+        if not -MAX_METADATA_FUTURE_SKEW <= current_utc - no_time <= MAX_BOOK_AGE:
+            raise PolymarketError("Polymarket adapter NO book is stale")
+        current_utc = max(current_utc, no_time)
+        no_fields = {
+            "no_token_id": no_token,
+            "no_asks": tuple(sorted(_levels(no_book.get("asks"), "asks", required=True), key=lambda level: level.price)[:MAX_BOOK_LEVELS]),
+            "no_bids": tuple(sorted(_levels(no_book.get("bids", []), "bids", required=False), key=lambda level: level.price, reverse=True)[:MAX_BOOK_LEVELS]),
+            "no_book_captured_at": no_time.isoformat(),
+        }
 
     try:
         snapshot = MarketSnapshot(
@@ -807,14 +827,10 @@ def load_market_snapshot(
             question, rules, end.isoformat(), current_utc.isoformat(), source_url,
             yes_token, asks, paper_fee_rate, paper_fee_source, book_time.isoformat(),
             bids,
+            **no_fields,
         )
         if snapshot_id is None:
-            snapshot = MarketSnapshot(
-                market_snapshot_identity(snapshot), market_id, price, bankroll,
-                market_exposure, total_exposure, question, rules, end.isoformat(),
-                current_utc.isoformat(), source_url, yes_token, asks, paper_fee_rate,
-                paper_fee_source, book_time.isoformat(), bids,
-            )
+            snapshot = replace(snapshot, snapshot_id=market_snapshot_identity(snapshot))
         return snapshot
     except ValueError as exc:
         raise PolymarketError(f"Polymarket adapter cannot create snapshot: {exc}") from exc

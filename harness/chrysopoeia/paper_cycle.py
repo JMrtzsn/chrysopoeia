@@ -247,6 +247,7 @@ class ProposalOutput(StrictOutput):
     market_id: str = Field(min_length=1, max_length=200)
     action: Literal["trade", "abstain"]
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
+    outcome: Literal["YES", "NO"] = Field(default="YES", exclude_if=lambda value: value == "YES")
     amount: float = Field(strict=True)
     citations: list[CitationId] = Field(max_length=10)
     rationale: str = Field(min_length=1, max_length=500)
@@ -425,7 +426,7 @@ def build_turn_outcome(
     if not cost.is_finite() or cost < 0:
         raise ValueError("model cost must be non-negative")
     return {
-        "schema_version": 1,
+        "schema_version": 2 if output.outcome == "NO" or any(check.plan and check.plan.outcome == "NO" for check in checked_plan_checks) else 1,
         "record_type": "turn_outcome",
         "event_id": "outcome-" + turn_id.removeprefix("turn-"),
         "turn_id": turn_id,
@@ -488,7 +489,7 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None
-    if normalized.get("schema_version") != 1 or normalized.get("record_type") != "turn_outcome" or normalized != expected:
+    if normalized.get("schema_version") not in {1, 2} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
         raise ValueError("invalid turn outcome")
     return expected
 
@@ -521,6 +522,7 @@ class ProposalDraft(StrictOutput):
     market_id: str | None = Field(default=None, min_length=1, max_length=200)
     action: Literal["trade", "abstain"] | None = None
     probability: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, strict=True)
+    outcome: Literal["YES", "NO"] = Field(default="YES", exclude_if=lambda value: value == "YES")
     amount: float | None = Field(default=None, allow_inf_nan=False, strict=True)
     citations: list[CitationId] | None = Field(default=None, max_length=10)
     max_entry_price: float | None = Field(default=None, ge=0, le=1, strict=True)
@@ -697,6 +699,7 @@ def finalize_paper_cycle(
         snapshot_id=proposal_output.snapshot_id,
         market_id=proposal_output.market_id,
         probability=proposal_output.probability,
+        outcome=proposal_output.outcome,
         amount=proposal_output.amount,
         max_entry_price=proposal_output.max_entry_price,
         exit_plan=(

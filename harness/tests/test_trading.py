@@ -238,13 +238,13 @@ class DecisionCycleTests(unittest.TestCase):
         for agent in (trader_agent, reviewer_agent):
             self.assertFalse(any("execute" in str(tool).lower() for tool in agent.tools))
 
-    def test_trader_abstains_when_only_no_has_edge(self) -> None:
+    def test_trader_can_choose_no_without_inverting_its_yes_forecast(self) -> None:
         instruction = trader_agent.instruction.lower()
 
-        self.assertIn("only yes positions can be taken", instruction)
-        self.assertIn("probability is below the yes price", instruction)
-        self.assertIn("no yes edge exists", instruction)
-        self.assertIn("abstain and explain in rationale", instruction)
+        self.assertIn("outcome=no to buy no/down", instruction)
+        self.assertIn("no's win probability is 1-probability", instruction)
+        self.assertIn("actual chosen outcome's ask book", instruction)
+        self.assertIn("neither side offers sufficient edge", instruction)
         self.assertIn(
             "cite only evidence_id values returned by get_market or the analysis tools",
             instruction,

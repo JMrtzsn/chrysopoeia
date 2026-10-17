@@ -15,6 +15,12 @@
 
 ## Next
 
+Coordinated operator approval (2026-10-17): consume Harness v2 two-sided paper
+plans while retaining v1 YES compatibility. Check the selected token and outcome
+against public metadata, fill its real book, and settle the held token correctly.
+Harness approval and acceptance are in `../harness/ROADMAP.md`. This does not
+authorize deployment or real orders.
+
 1. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
    through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery
    and replay, and the revision-rollover single-writer ceiling. A model-produced

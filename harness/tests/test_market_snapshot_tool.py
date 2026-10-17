@@ -24,7 +24,7 @@ class MarketSnapshotToolTests(unittest.TestCase):
 
         def load(market: str, bankroll: float, market_exposure: float, total_exposure: float, **fee: object) -> MarketSnapshot:
             calls.append((market, bankroll, market_exposure, total_exposure))
-            self.assertEqual(fee, {"paper_fee_rate": 0.02, "paper_fee_source": "paper-assumption:flat-2pct-v1"})
+            self.assertEqual(fee, {"paper_fee_rate": 0.02, "paper_fee_source": "paper-assumption:flat-2pct-v1", "include_no_book": True})
             return MarketSnapshot("snapshot-1", "12345", 0.42, bankroll, market_exposure, total_exposure)
 
         with patch("chrysopoeia.agent.load_market_snapshot", load):

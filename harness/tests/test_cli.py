@@ -150,6 +150,8 @@ class OperatorCliTests(unittest.TestCase):
             if calls is not None:
                 calls.append(url)
             value = book if "clob.polymarket.com" in url else metadata
+            if "token_id=no-token" in url:
+                value = {**book, "asset_id": "no-token"}
             return json.dumps(value).encode()
 
         return fetch
@@ -451,6 +453,7 @@ class OperatorCliTests(unittest.TestCase):
                     "asks",
                     "fee_rate",
                     "fee_source",
+                    "no_token_id", "no_asks", "no_bids", "no_book_captured_at",
                 },
             )
             self.assertEqual(record["schema_version"], 1)
@@ -468,7 +471,7 @@ class OperatorCliTests(unittest.TestCase):
                 stdout,
                 json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n",
             )
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 3)
 
     def test_capture_serializer_rejects_legacy_empty_metadata(self) -> None:
         snapshot = MarketSnapshot("snapshot", "12345", 0.5, 1, 0, 0)
@@ -490,6 +493,7 @@ class OperatorCliTests(unittest.TestCase):
             bankroll=1.0,
             market_exposure=0.0,
             total_exposure=0.0,
+            include_no_book=True,
             fetch=cli.polymarket_fetch,
             paper_fee_rate=0.02,
             paper_fee_source="paper-assumption:flat-2pct-v1",

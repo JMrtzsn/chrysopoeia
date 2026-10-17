@@ -84,6 +84,12 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Coordinated operator approval (2026-10-17): two-sided paper positions are now in
+scope in Harness and Consumer, ahead of authenticated execution. Acceptance:
+explicit outcome and actual token book, v2 NO plans, independent consumer token
+binding, correct side-aware marks/exits/settlements, and local verification.
+The implementation retains v1 YES compatibility. No platform change is included.
+
 1. **Forward BTC 5m benchmark:** run the trader on at least 20 live BTC Up/Down
    5m windows and score them with `polymarket-eval --series-url ...` against the
    same-time CLOB baseline. Capture of these markets now works; no agent sample
@@ -99,9 +105,9 @@ The recorded commands and evidence for harness milestones are in
    selected and verified.
 4. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-5. **Additional venues and NO-side positions:** separate milestones after the
-   Polymarket YES-only live path in `../consumer/ROADMAP.md` is verified. Any
-   event-contract change is a new schema version.
+5. **Additional venues:** separate milestones after the Polymarket paper path is
+   verified. Two-sided paper positions were separately approved above; no new
+   execution venue is introduced. Event-contract changes use new schema versions.
 6. **Future CCXT crypto-trading integration:** CCXT is now used only for public
    OHLCV data. After the Polymarket YES-only live path is verified, separately
    plan any crypto venue execution, including exchange, spot/derivatives, and

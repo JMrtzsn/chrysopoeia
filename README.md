@@ -54,6 +54,12 @@ execution is not implemented.
 
 ## Start locally
 
+Paper plans can buy either outcome: `YES` = Yes/Up, `NO` = No/Down. The trader's
+`probability` always means P(Yes/Up); the emitted NO v2 trade plan converts it to
+the selected token's win probability. Capture obtains both real order books;
+NO liquidity is never synthesized as `1 - YES price`. Existing v1 YES events
+remain supported. This is buying outcome tokens, not short selling.
+
 Run from `harness/`; requires Python 3.10+ and `uv`.
 
 ```sh

@@ -36,6 +36,7 @@ from chrysopoeia.trading import (
     Proposal,
     Review,
     paper_execute,
+    outcome_snapshot,
     run_decision_cycle,
 )
 
@@ -306,6 +307,7 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
                 market_id, operating.bankroll, market_exposure, total_exposure,
                 paper_fee_rate=config.venue.paper_fee_rate,
                 paper_fee_source=config.venue.paper_fee_source,
+                include_no_book=True,
             )
         except Exception:
             return {"ok": False, "reason": "market snapshot unavailable"}
@@ -348,6 +350,11 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
                 "exclusive_end": snapshot.end_time,
             },
             "current_executable_yes_ask": snapshot.price,
+            "current_executable_no_ask": snapshot.no_asks[0].price if snapshot.no_asks else None,
+            "outcome_books": {
+                "YES": {"token_id": snapshot.yes_token_id, "asks": [asdict(level) for level in snapshot.asks]},
+                "NO": {"token_id": snapshot.no_token_id, "asks": [asdict(level) for level in snapshot.no_asks]},
+            },
             "best_ask": snapshot.price,
             "maximum_amount": maximum_amount,
             "max_entry_price_for_maximum_amount": maximum_entry_price,
@@ -358,6 +365,7 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
                 "snapshot_id": snapshot.snapshot_id,
                 "market_id": snapshot.market_id,
                 "action": "trade",
+                "outcome": "YES",
                 "probability": "REPLACE_WITH_PROBABILITY",
                 "amount": maximum_amount,
                 "citations": citation_ids,
@@ -371,6 +379,18 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
                 },
             },
         }
+        if snapshot.no_asks:
+            no_snapshot = outcome_snapshot(snapshot, "NO")
+            no_depth = sum(Decimal(str(level.price)) * Decimal(str(level.size)) for level in no_snapshot.asks)
+            no_maximum = nextafter(float(max(Decimal(0), min(
+                no_depth, available_exposure / (Decimal(1) + Decimal(str(snapshot.fee_rate)))
+            ))), 0)
+            plan_inputs["no_maximum_amount"] = no_maximum
+            if no_maximum > 0:
+                no_quote = paper_execute(snapshot, Proposal(
+                    snapshot.snapshot_id, snapshot.market_id, 0, no_maximum, outcome="NO"
+                ))
+                plan_inputs["no_max_entry_price_for_maximum_amount"] = snapshot.no_asks[no_quote.levels_consumed - 1].price
         return {
             "ok": True,
             "market_snapshot": asdict(snapshot),
@@ -416,6 +436,7 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
                 output.max_entry_price,
                 ExitPlan(**output.exit_plan.model_dump()) if output.exit_plan else None,
                 tuple(output.citations),
+                output.outcome,
             )
             review = Review(output.snapshot_id, output.market_id, True, "candidate dry-run", tuple(output.citations))
             cycle = run_decision_cycle(snapshot, proposal, review, operating)
@@ -487,6 +508,7 @@ def prepare_reviewer_input(ctx: Context, node_input: paper_cycle.ProposalOutput)
         snapshot_id=node_input.snapshot_id,
         market_id=node_input.market_id,
         probability=node_input.probability,
+        outcome=node_input.outcome,
         amount=node_input.amount,
         max_entry_price=node_input.max_entry_price,
         exit_plan=(
@@ -663,6 +685,7 @@ def _capture_market_snapshot(
         snapshot = load_market_snapshot(
             market, config.bankroll, market_exposure, total_exposure,
             paper_fee_rate=fee_rate, paper_fee_source=fee_source,
+            include_no_book=True,
         )
     except PolymarketError:
         raise
@@ -741,7 +764,7 @@ def build_agents(config: HarnessConfig) -> AgentSet:
             "Build the plan from plan_inputs, using its complete template, and always submit every field. Set amount ≤ maximum_amount; never infer amount from bankroll. Set max_entry_price at or above the required price for that amount (the executable YES ask at the deepest consumed level), set exit_by inside its exclusive window, never equal to either endpoint, or choose hold_to_resolution, and cite only the listed valid citation IDs. Replace the probability and rationale placeholders. "
             "Call check_trade_plan with the exact plan you intend to return. If it fails, read the reasons, revise, and re-check until it passes or the check limit is reached. "
             "After a pass, return exactly the last passed plan unchanged, with the same fields and values including rationale. Abstain if no plan check passes. "
-            "probability is always your genuine estimate that the YES side (Up for Up/Down markets) resolves true, including when you abstain; never use 0 or 1 as a placeholder. For short crypto Up/Down windows, call analyze_crypto_history(exchange_id=\"bitstamp\", symbol=\"BTC/USD\", interval=\"1m\") for the named asset before estimating. Only YES positions can be taken; if your edge is on NO because your probability is below the YES price, or no YES edge exists, abstain and explain in rationale. "
+            "probability is always your genuine estimate that YES (Up for Up/Down markets) resolves true, including when buying NO or abstaining; never use 0 or 1 as a placeholder. For short BTC Up/Down windows, call analyze_crypto_history(exchange_id=\"bitstamp\", symbol=\"BTC/USD\", interval=\"1m\") before estimating. Choose outcome=YES to buy Yes/Up or outcome=NO to buy No/Down. NO's win probability is 1-probability. Use the actual chosen outcome's ask book, not 1 minus the YES ask. For NO use no_maximum_amount and no_max_entry_price_for_maximum_amount. Abstain only when neither side offers sufficient edge. "
             'Return action="abstain" and amount=0 with no trade terms when evidence or edge does not justify a trade; otherwise return '
             'action="trade" with a positive amount, max_entry_price, and a complete exit_plan. The exit plan must set '
             "take_profit_roi, stop_loss_roi or an explicit hold_to_resolution choice, and exit_by or hold_to_resolution. "

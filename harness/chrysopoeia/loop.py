@@ -182,6 +182,7 @@ async def run_loop(
                 book.bankroll,
                 0,
                 book.open_exposure,
+                include_no_book=True,
                 now=now(),
                 fetch=fetch,
                 paper_fee_rate=config.venue.paper_fee_rate,

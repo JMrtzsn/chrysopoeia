@@ -99,6 +99,7 @@ def quote(**changes: object) -> Quote:
         "asks": ((0.4, 100.0),),
         "bids": ((0.39, 100.0),),
         "resolution": None,
+        "outcome": "YES",
     }
     values.update(changes)
     return Quote(**values)
@@ -126,6 +127,36 @@ class LocalSendScriptTests(unittest.TestCase):
 
 
 class ConsumerTests(unittest.TestCase):
+    def test_v2_no_plan_fills_no_token_and_settles_when_no_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Config(Path(directory) / "journal.jsonl")
+            market = FakeMarket([
+                quote(token_id="no-token", outcome="NO"),
+                quote(token_id="no-token", outcome="NO", resolution="YES", asks=(), bids=()),
+            ])
+            app = create_app(config, market, lambda: NOW)
+            client = TestClient(app)
+            plan = event(schema_version=2, outcome="NO", instrument_id="no-token")
+            self.assertEqual(client.post("/push", json=envelope(plan)).status_code, 204)
+            terminal, positions = Journal(config.journal).replay()
+            self.assertEqual(terminal[str(plan["event_id"])]["status"], "filled")
+            self.assertEqual(next(iter(positions.values()))["token_id"], "no-token")
+            self.assertEqual(client.post("/sweep").status_code, 204)
+            terminal, positions = Journal(config.journal).replay()
+            self.assertFalse(positions)
+            pnl = terminal[str(plan["event_id"])]["pnl"]
+            self.assertTrue(isinstance(pnl, (int, float)) and pnl > 0)
+
+    def test_no_plan_cannot_use_yes_quote_even_if_token_id_is_forged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Config(Path(directory) / "journal.jsonl")
+            market = FakeMarket([quote(token_id="no-token", outcome="YES")])
+            client = TestClient(create_app(config, market, lambda: NOW))
+            plan = event(schema_version=2, outcome="NO", instrument_id="no-token")
+            self.assertEqual(client.post("/push", json=envelope(plan)).status_code, 204)
+            terminal, positions = Journal(config.journal).replay()
+            self.assertFalse(positions)
+            self.assertEqual(terminal[str(plan["event_id"])]["status"], "rejected")
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -225,7 +256,7 @@ class ConsumerTests(unittest.TestCase):
 
     def test_invalid_or_expired_event_is_recorded_and_acked_without_market_call(self) -> None:
         for changes in (
-            {"schema_version": 2},
+            {"schema_version": 3},
             {"unknown": True},
             {"reviewer_approved": False},
             {"outcome": "NO"},
@@ -497,6 +528,18 @@ class ConsumerTests(unittest.TestCase):
 
 
 class PublicMarketTests(unittest.TestCase):
+    def test_down_token_resolves_as_winning_position_when_market_resolves_down(self) -> None:
+        metadata = {
+            "id": "12345", "clobTokenIds": ["up-token", "down-token"],
+            "outcomes": ["Up", "Down"], "outcomePrices": ["0", "1"],
+            "endDate": (NOW + timedelta(days=1)).isoformat(),
+            "updatedAt": NOW.isoformat(), "closed": True,
+        }
+        with patch("paper_consumer.market._get", return_value=metadata):
+            result = Polymarket().load("12345", "down-token", NOW)
+        self.assertEqual(result.outcome, "NO")
+        self.assertEqual(result.resolution, "YES")
+
     def test_public_json_rejects_duplicate_keys_and_non_finite_numbers(self) -> None:
         class Response:
             def __init__(self, body: bytes) -> None:
@@ -545,7 +588,7 @@ class PublicMarketTests(unittest.TestCase):
         with patch("paper_consumer.market._get", side_effect=[metadata, fresh_book]):
             self.assertEqual(Polymarket().load("12345", "yes-token", NOW).market_id, "12345")
 
-        for captured in (NOW - timedelta(minutes=6), NOW + timedelta(seconds=1)):
+        for captured in (NOW - timedelta(minutes=6), NOW + timedelta(seconds=6)):
             stale_book = {**fresh_book, "timestamp": str(int(captured.timestamp() * 1_000))}
             with self.subTest(captured=captured), patch(
                 "paper_consumer.market._get", side_effect=[metadata, stale_book]

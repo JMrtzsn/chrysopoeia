@@ -100,8 +100,16 @@ class Polymarket:
             raise InvalidEvent("public market ID does not match")
         tokens = _list(metadata.get("clobTokenIds"))
         outcomes = _list(metadata.get("outcomes"))
-        if outcomes != ["Yes", "No"] or len(tokens) != 2 or tokens[0] != token_id:
-            raise InvalidEvent("public market YES token does not match")
+        if (
+            outcomes not in (["Yes", "No"], ["Up", "Down"])
+            or len(tokens) != 2
+            or not all(isinstance(token, str) and token for token in tokens)
+            or tokens[0] == tokens[1]
+            or token_id not in tokens
+        ):
+            raise InvalidEvent("public market outcome token does not match")
+        token_index = tokens.index(token_id)
+        selected_outcome = "YES" if token_index == 0 else "NO"
         end = _time(metadata.get("endDate", metadata.get("endDateIso")))
         updated = _time(metadata.get("updatedAt"))
         if updated - now.astimezone(timezone.utc) > timedelta(seconds=5):
@@ -117,9 +125,9 @@ class Polymarket:
                 fractions = [float(value) for value in cast(list[str | int | float], prices)]
             except (TypeError, ValueError):
                 raise InvalidEvent("public resolution is ambiguous") from None
-            if len(fractions) != 2 or sum(value >= 0.999 for value in fractions) != 1:
+            if len(fractions) != 2 or any(not 0 <= value <= 1 for value in fractions) or sum(value >= 0.999 for value in fractions) != 1:
                 raise InvalidEvent("public resolution is ambiguous")
-            resolution = "YES" if fractions[0] >= 0.999 else "NO"
+            resolution = "YES" if fractions[token_index] >= 0.999 else "NO"
             return Quote(
                 "resolution-"
                 + sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()[:24],
@@ -130,6 +138,7 @@ class Polymarket:
                 (),
                 (),
                 resolution,
+                selected_outcome,
             )
         if metadata.get("active") is not True or metadata.get("acceptingOrders") is not True:
             raise InvalidEvent("public market is not tradeable")
@@ -141,7 +150,7 @@ class Polymarket:
             raise InvalidEvent("public book timestamp is malformed")
         captured = datetime.fromtimestamp(int(timestamp) / 1_000, timezone.utc)
         book_age = now.astimezone(timezone.utc) - captured
-        if book_age > timedelta(minutes=5) or book_age < timedelta(0):
+        if book_age > timedelta(minutes=5) or book_age < -timedelta(seconds=5):
             raise InvalidEvent("public market book is stale or future-dated")
         asks = _levels(book.get("asks"), reverse=False)
         bids = _levels(book.get("bids", []), reverse=True)
@@ -156,4 +165,5 @@ class Polymarket:
             captured.isoformat(),
             asks,
             bids,
+            outcome=selected_outcome,
         )

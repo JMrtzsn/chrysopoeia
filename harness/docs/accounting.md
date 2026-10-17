@@ -27,16 +27,18 @@ replay treats older v1 outcomes without `plan_checks` as an empty list.
 
 ## Positions and outcomes
 
-- A fill opens one YES position per market. It records the original plan
+- A fill opens one selected-outcome position per market (YES/Up or NO/Down).
+  The journal stores the selected outcome and instrument in the approved plan.
+  V1 plans remain YES-only; NO buys produce v2 plans. It records the original plan
   `snapshot_id`, the separate fresh `quote_snapshot_id`, time, actual fill terms,
   and the entry-approved exit plan. Proposed identity and limits remain intact
   and separate from achieved fill provenance and terms. Older journal fills
   without `quote_snapshot_id` remain valid.
 - Public venue captures supply bid-depth, fee-adjusted liquidation marks for
   unrealized P&L; a failed or insufficient-depth capture adds no mark.
-- Only an unambiguous venue resolution settles a position. YES resolution pays
-  shares less the fee; NO resolution loses total cost. Unresolved or ambiguous
-  markets are not settled.
+- Only an unambiguous venue resolution settles a position. If the held outcome
+  wins, it pays shares less the fee; otherwise total cost is lost. Legacy fills
+  without a plan are YES positions. Unresolved or ambiguous markets are not settled.
 - The paper simulator can close the entire position against fresh executable
   bids when an approved take-profit, stop-loss, or time trigger fires. If depth
   cannot close all shares, it stays open for the next loop iteration. Close P&L

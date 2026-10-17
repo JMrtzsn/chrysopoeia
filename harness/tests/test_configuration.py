@@ -198,6 +198,7 @@ class HarnessConfigurationTests(unittest.TestCase):
             {
                 "paper_fee_rate": 0.03,
                 "paper_fee_source": "paper-assumption:test-v1",
+                "include_no_book": True,
             },
         )
 
@@ -281,6 +282,7 @@ class HarnessConfigurationTests(unittest.TestCase):
             {
                 "paper_fee_rate": 0.03,
                 "paper_fee_source": "paper-assumption:alternate-v1",
+                "include_no_book": True,
             },
         )
         self.assertEqual(root_agent.model.model, default_model)

@@ -55,4 +55,25 @@ Costs are estimated model cost unless noted.
 | 2026-10-16 | Local `load_market_snapshot` on the live `btc-updown-5m-<current window>` market (no model, platform, or keys) | Before the fix every Up/Down market was rejected (`requires YES and NO outcomes`), so BTC 5m forecasts could never be recorded. After accepting Up/Down (Up = YES side) a second defect surfaced: capture time was taken before the network fetch, so a fresh book stamped milliseconds later was rejected as `stale`/after `captured_at`. With a 5 s skew allowance and `captured_at` raised to the book time, market 5727085 ("Bitcoin Up or Down - October 16, 7:05AM-7:10AM ET") captured with Up ask 0.79 and 21 levels. Public reads only. |
 | 2026-10-16 | Local Vertex `gemini-3.5-flash` `chrysopoeia cycle --market https://polymarket.com/event/btc-updown-5m-<live window>` on 9 consecutive BTC 5m windows, temporary local journal, no event sink or platform | Exposed and fixed: (1) every financial/Polymarket-history tool call failed in real runs because ADK passes `State`, not a `MutableMapping`, so the tools returned "cycle context is unavailable" (unit tests used a dict); (2) model-chosen bar counts below 14 were rejected (now clamped); (3) CCXT Coinbase intermittently timed out loading its product catalogue (timeout raised to 20 s, trader pointed at Bitstamp); (4) abstentions recorded placeholder P(Up)=0.0 (trader now gives a genuine estimate; evaluator excludes 0/1 abstention placeholders); (5) checking an abstain plan returned a misleading "does not match" error. After the fixes the trader called `analyze_crypto_history(bitstamp, BTC/USD, 1m)` and produced reasoned estimates: P(Up)=0.45 vs Up ask 0.40 (edge below the 0.05 net minimum, abstained) and P(Up)=0.15 vs Up ask 0.68 (strong edge for Down, but YES-only so abstained). No bet was possible on these windows. One window hit a transient Vertex 503. ~$1.2 model spend; public reads only; no orders. |
 
+## Two-sided paper verification (2026-10-17)
+
+- Local live capture loaded distinct Up and Down token books for a BTC 5m
+  window (Up ask 0.876, Down ask 0.122). These are real independent books, not
+  complemented quotes.
+- Two local Vertex cycle attempts returned no structured proposal and failed
+  closed with no fills. A third local production cycle completed, called the
+  CCXT crypto-history tool, and abstained with P(Up)=0.50. Recorded estimated
+  cost for the completed turn was $0.17163075; the failed attempts' actual model
+  spend was unavailable. No platform operations or real orders were run.
+- Independently verified the external v2 boundary with a deliberately synthetic
+  NO plan (not a model forecast): Harness captured market 5774405 and emitted a
+  v2 NO event; the Consumer subprocess validated it, fetched fresh venue data,
+  and recorded a $1 paper fill at Down price 0.49 for token
+  `110989905685615221413447094250795581003563021459676813405234267222963102655254`.
+  Temporary consumer journal was removed. This is contract/fill verification,
+  not evidence of a profitable strategy or an agent-selected bet.
+- Offline checks cover NO proposal → plan check → independent review → v2
+  event, dual-book capture/reload, real NO depth/edge/exit quotes, token mismatch
+  rejection, NO-winning settlement/replay, and retained v1 YES compatibility.
+
 Deployment checks are recorded in [`../../platform/docs/deployment.md`](../../platform/docs/deployment.md).

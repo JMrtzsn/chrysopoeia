@@ -59,6 +59,21 @@ def fixture_fetch(calls: list[tuple[str, float, int]] | None = None):
 
 
 class PolymarketAdapterTests(unittest.TestCase):
+    def test_two_sided_capture_fetches_each_token_book_and_preserves_actual_no_asks(self):
+        calls = []
+
+        def fetch(url, _timeout, _max_bytes):
+            calls.append(url)
+            if "token_id=no-token" in url:
+                return book(asset_id="no-token", asks=[{"price": "0.63", "size": "25"}], bids=[{"price": "0.61", "size": "10"}])
+            return book() if "clob.polymarket.com" in url else market()
+
+        snap = load_market_snapshot("12345", 1000, 0, 0, include_no_book=True, now=NOW, fetch=fetch, **FEE)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(snap.no_token_id, "no-token")
+        self.assertEqual(snap.no_asks[0].price, 0.63)
+        self.assertNotAlmostEqual(snap.no_asks[0].price, 1 - snap.price)
+
     def test_up_down_market_snapshot_buys_the_up_side(self) -> None:
         snapshot = load_market_snapshot(
             "12345", 1_000, 0, 0, now=NOW,
