@@ -91,6 +91,16 @@ total cost $5.10. This is an actual agent-selected paper fill, not a seeded draf
 The completed cycle's estimated model cost was $0.0807708. The journal books a
 $0.7038528 conservative reservation for the failed first cycle; its actual
 provider spend was unavailable. No event sink, platform operations, or real
-orders were used. Four public resolution checks after the window closed still
-reported unresolved; the paper position remains open pending venue resolution.
+orders were used. Initial public checks reported pending resolution. A later
+Gamma check returned `resolved_yes`; the local journal was settled and replayed
+with zero open positions and one winning trade. Settlement proceeds after the
+paper simulator's settlement fee were $7.65625, yielding realized paper P&L of
+$2.55625 (+50.1% on the $5.10 entry cost), before model costs. The journal books
+$0.78462360 in total model costs, including the conservative failed-turn
+reservation; this is not a confirmed provider bill. This single winning trade
+verifies the local paper lifecycle, not strategy profitability.
 Journal: `/var/folders/z8/cpj4kjks381d6vkbf5wdff5h0000gp/T/opencode/btc-paper-bets-z7m6pw9w`.
+
+Next local task: collect a bounded set of forward BTC 5m forecasts and score
+them with `polymarket-eval`, reporting Brier, market baseline, coverage, model
+failures, and paper P&L separately. Keep platform execution explicit and off.
