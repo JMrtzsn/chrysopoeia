@@ -77,3 +77,20 @@ Costs are estimated model cost unless noted.
   rejection, NO-winning settlement/replay, and retained v1 YES compatibility.
 
 Deployment checks are recorded in [`../../platform/docs/deployment.md`](../../platform/docs/deployment.md).
+
+## Agent-selected BTC paper bet (2026-10-17)
+
+After commit `b5dfb91`, ran at most three local Vertex cycles, stopping at the
+first fill. The first cycle returned no structured proposal and recorded a
+failed turn. The second produced a reviewed YES/Up plan for
+`btc-updown-5m-1792241700` (market `5775008`, 12:55–13:00 UTC): P(Up)=0.75,
+stake $5, maximum entry 0.65. Two oversized attempts were rejected by policy
+before the trader revised to a passing plan. The independent reviewer approved.
+The in-process paper journal recorded 7.8125 Up shares at 0.64, entry fee $0.10,
+total cost $5.10. This is an actual agent-selected paper fill, not a seeded draft.
+The completed cycle's estimated model cost was $0.0807708. The journal books a
+$0.7038528 conservative reservation for the failed first cycle; its actual
+provider spend was unavailable. No event sink, platform operations, or real
+orders were used. Four public resolution checks after the window closed still
+reported unresolved; the paper position remains open pending venue resolution.
+Journal: `/var/folders/z8/cpj4kjks381d6vkbf5wdff5h0000gp/T/opencode/btc-paper-bets-z7m6pw9w`.
