@@ -252,7 +252,7 @@ def build_trader_tools(config: HarnessConfig, *, discover=discover_markets, load
             return {"ok": False, "reason": "market discovery limit reached"}
         state["market_discovery_calls"] = 1
         try:
-            candidates = list(discover(limit=5))
+            candidates = list(discover(limit=5, series=config.venue.series))
         except Exception:
             return {"ok": False, "reason": "market discovery unavailable"}
         terms = query.casefold().split()

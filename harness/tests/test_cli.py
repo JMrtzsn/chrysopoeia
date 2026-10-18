@@ -53,8 +53,7 @@ EXPECTED = {
         "market_data": "public-read-only",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
-        "series": None,
-        "discovery_limit": 10,
+        "series": "btc-updown-5m",
     },
 }
 
@@ -206,7 +205,7 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output), report)
         self.assertEqual(json.loads(error), iterations[0])
-        self.assertEqual(run.call_args.args[0].interval_seconds, 30)
+        self.assertEqual(run.call_args.args[0].interval_seconds, 300)
         self.assertEqual(run.call_args.args[0].max_cycles, 1)
 
     def test_configured_zero_budget_stops_before_market_or_model_calls(self) -> None:
@@ -238,29 +237,6 @@ class OperatorCliTests(unittest.TestCase):
             self.assertEqual((code, output), (2, ""))
             self.assertIn("run uses its journal", error)
             self.assertFalse(journal.exists())
-
-    def test_run_command_allows_zero_interval(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch(
-                "chrysopoeia.loop.run_loop",
-                AsyncMock(return_value=({"stop_reason": "max_cycles"}, [])),
-            ) as run,
-        ):
-            config = Path(directory) / "zero.toml"
-            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
-                "interval_seconds = 30", "interval_seconds = 0"
-            ))
-            code, _, _ = self.invoke(
-                "run",
-                "--journal",
-                directory,
-                "--config",
-                str(config),
-            )
-
-        self.assertEqual(code, 0)
-        self.assertEqual(run.call_args.args[0].interval_seconds, 0)
 
     def test_run_uses_benchmark_config_and_rejects_invalid_cadence(
         self,
@@ -393,35 +369,21 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(console_misuse.returncode, 2)
         self.assertNotIn("Traceback", misuse.stderr)
 
-    def test_discover_uses_configured_limits_and_rejects_the_old_flag(self) -> None:
+    def test_discover_is_bound_to_configured_series_and_rejects_the_old_limit_flag(self) -> None:
         with patch("chrysopoeia.cli.discover_markets", return_value=()) as discover:
             code, stdout, stderr = self.invoke("discover")
 
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(json.loads(stdout)["candidates"], [])
-        discover.assert_called_once_with(limit=10, series=None, fetch=cli.polymarket_fetch)
+        discover.assert_called_once_with(
+            series="btc-updown-5m", fetch=cli.polymarket_fetch
+        )
 
-        for limit in ("1", "20"):
-            with (
-                self.subTest(limit=limit),
-                tempfile.TemporaryDirectory() as directory,
-                patch("chrysopoeia.cli.discover_markets", return_value=()) as discover,
-            ):
-                config = Path(directory) / "limit.toml"
-                config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
-                    "discovery_limit = 10", f"discovery_limit = {limit}"
-                ))
-                code, _, stderr = self.invoke("discover", "--config", str(config))
-                self.assertEqual((code, stderr), (0, ""))
-                discover.assert_called_once_with(
-                    limit=int(limit), series=None, fetch=cli.polymarket_fetch
-                )
-
-        for limit in ("0", "21", "1.0", "true"):
+        for limit in ("1", "20", "0", "21", "1.0", "true"):
             with self.subTest(limit=limit):
                 code, stdout, stderr = self.invoke("discover", "--limit", limit)
                 self.assertEqual((code, stdout), (2, ""))
-                self.assertNotIn("Traceback", stderr)
+                self.assertIn("unrecognized arguments", stderr)
 
     def test_discover_emits_exact_metadata_only_json_and_empty_success(self) -> None:
         from chrysopoeia.polymarket import MarketCandidate

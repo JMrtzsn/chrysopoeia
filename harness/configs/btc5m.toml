@@ -4,7 +4,6 @@ mode = "paper"
 
 [venue]
 adapter = "polymarket"
-discovery_limit = 10
 series = "btc-updown-5m"
 paper_fee_rate = 0.02
 paper_fee_source = "paper-assumption:flat-2pct-v1"

@@ -19,6 +19,18 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn('["run","--journal","/mnt/journal/run"]', stack)
         self.assertNotIn("--max-cycles", stack)
 
+    def test_image_installs_the_locked_dependency_set(self) -> None:
+        root = Path(__file__).parents[1]
+        dockerfile = root.joinpath("Dockerfile").read_text()
+        build = root.joinpath("build.sh").read_text()
+
+        self.assertIn("uv export --frozen", build)
+        self.assertIn("--no-emit-project", build)
+        self.assertIn("COPY .build/requirements.txt", dockerfile)
+        self.assertIn("pip install --no-cache-dir --no-deps -r", dockerfile)
+        self.assertIn("pip install --no-cache-dir --no-deps /tmp/harness/*.whl", dockerfile)
+        self.assertNotIn("pip install --no-cache-dir /tmp/harness/*.whl", dockerfile)
+
     def test_archive_storage_is_protected_and_retained_independently_of_runtime(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
         dataset = source.split("    archive_dataset =", 1)[1].split(

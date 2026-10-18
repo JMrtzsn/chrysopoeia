@@ -1,15 +1,17 @@
 # Local BTC 5m collection
 
 `run --config configs/btc5m.toml` selects the current UTC five-minute window from
-the clock, not the broad volume-ranked discovery list. It starts immediately,
-then waits for each next five-minute boundary (not 300 seconds after model
-completion). The profile sets `[venue].series = "btc-updown-5m"` and
+the clock. BTC 5m Up/Down is the only automated market during development:
+`[venue].series` is required and the volume-ranked fallback is unreachable from
+the CLI. The run starts immediately, then waits for each next five-minute
+boundary (not 300 seconds after model completion). The profile sets
+`[venue].series = "btc-updown-5m"` and
 `[session].interval_seconds = 300`; incompatible cadence fails config validation.
-Missing captures wait until the
-next boundary; admitted markets, including failed turns, are not retried.
+Missing captures wait until the next boundary; admitted markets, including
+failed turns, are not retried.
 Slow cycles can skip windows. `[session].max_cycles` bounds admitted turns, not guaranteed
 forecasts: discovery/capture failures do not count, but the deadline still applies.
-The default non-series loop is unchanged.
+BTC 5m is the only automated market in development; there is no non-series run.
 
 The Platform-owned raw archive is deployed before any forecasting session.
 It stores published outcome/plan events, not every journal record, model failure,

@@ -25,6 +25,10 @@ mkdir -p "$HARNESS_DIR/dist" "$PLATFORM_DIR/.build"
 cp "$HARNESS_DIR"/dist/*.whl "$PLATFORM_DIR/.build/"
 cp "$HARNESS_DIR/chrysopoeia.toml" "$PLATFORM_DIR/.build/chrysopoeia.toml"
 cp "$HARNESS_DIR/configs/platform.toml" "$PLATFORM_DIR/.build/platform.toml"
+# Pin the runtime to the verified lockfile; installing the wheel alone lets
+# transitive dependencies drift and changes agent behavior between rebuilds.
+(cd "$HARNESS_DIR" && uv export --frozen --no-dev --no-emit-project --no-hashes \
+  -o "$PLATFORM_DIR/.build/requirements.txt")
 
 docker build --platform linux/amd64 \
   -t "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest" "$PLATFORM_DIR"

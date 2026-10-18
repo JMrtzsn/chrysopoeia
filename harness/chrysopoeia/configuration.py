@@ -93,8 +93,7 @@ class VenueConfig:
     adapter: str
     paper_fee_rate: float
     paper_fee_source: str
-    discovery_limit: int
-    series: str | None = None
+    series: str
 
 
 @dataclass(frozen=True)
@@ -158,14 +157,8 @@ class HarnessConfig:
     def from_mapping(cls, value: object) -> "HarnessConfig":
         root = _table(value, {"runtime", "venue", "models", "cost", "session", "risk"}, "harness")
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
-        venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "discovery_limit"}
-        if isinstance(root["venue"], Mapping) and "series" in root["venue"]:
-            venue_keys.add("series")
-        venue = _table(
-            root["venue"],
-            venue_keys,
-            "venue",
-        )
+        venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "series"}
+        venue = _table(root["venue"], venue_keys, "venue")
         session = _table(root["session"], {
             "bankroll", "maximum_loss", "target_win_rate", "window_minutes",
             "max_cycles", "cost_budget", "interval_seconds", "daily_cloud_cost_budget",
@@ -242,15 +235,12 @@ class HarnessConfig:
         fee_source = _text(venue["paper_fee_source"], "paper fee source")
         if fee and fee_source == "paper-assumption:no-fee-v1":
             raise ConfigurationError("positive paper fee requires explicit provenance")
-        series = venue.get("series")
-        if "series" in venue and series != "btc-updown-5m":
+        series = _text(venue["series"], "venue series")
+        if series != "btc-updown-5m":
             raise ConfigurationError("venue series is unsupported")
-        if series is not None and session_config.interval_seconds != 300:
+        if session_config.interval_seconds != 300:
             raise ConfigurationError("BTC 5m series requires a 300-second interval")
-        discovery_limit = _positive_int(venue["discovery_limit"], "discovery limit")
-        if discovery_limit > 20:
-            raise ConfigurationError("discovery limit must be between 1 and 20")
-        venue_config = VenueConfig(adapter, float(fee), fee_source, discovery_limit, series)
+        venue_config = VenueConfig(adapter, float(fee), fee_source, series)
 
         model_adapter = _text(
             models.get("adapter", "adk-gemini")

@@ -79,20 +79,25 @@ the paper journal. No cycle guarantees a trade.
 
 Operating settings are config-only: `[session]` sets capital, loss, cycle/time,
 cost, and cadence limits; `[risk]` sets exposure limits and optional existing
-exposures for standalone `cycle`; `[venue]` sets `discovery_limit` and optional
-`series`. Unknown/missing settings fail validation. Old operating flags such as
-`--max-cycles`, `--bankroll`, `--interval-seconds`, `--series`, and discovery
-`--limit` are rejected. Invocation inputs (`--config`, `--journal`, targets,
-input/output files, `--stop-file`, `--json`) remain flags. The default profile
-allows one `run` cycle; `configs/platform.toml` allows two with a $1.50 session
-cost ceiling. `[session].cost_budget` limits the journal-backed `run` session;
-`cycle` uses the configured operating/daily cost limits, not run's cycle/deadline
-controls. Existing journals still enforce persisted capital/target/window
-compatibility on resume. Use a new journal for a new session.
+exposures for standalone `cycle`; `[venue]` must set
+`series = "btc-updown-5m"`. Unknown/missing settings fail validation. Old
+operating flags such as `--max-cycles`, `--bankroll`, `--interval-seconds`, and
+discovery `--limit` are rejected. Invocation inputs (`--config`, `--journal`,
+targets, input/output files, `--stop-file`, `--json`) remain flags. The default
+profile allows one `run` cycle; `configs/platform.toml` allows two with a $1.50
+session cost ceiling. `[session].cost_budget` limits the journal-backed `run`
+session; `cycle` uses the configured operating/daily cost limits, not run's
+cycle/deadline controls. Existing journals still enforce persisted
+capital/target/window compatibility on resume. Use a new journal for a new
+session.
 
-The optional `configs/btc5m.toml` profile configures BTC 5m evaluation without
-making it the default. See [collection instructions](harness/docs/collection.md);
-do not start paid sessions without approved bounds.
+BTC 5m Up/Down is the only automated venue market during development. Every
+bundled profile binds `[venue].series`, and the trader's discovery tool uses the
+same series, so `discover` and `run` cannot select other markets. Explicit
+`capture`/`cycle` targets remain available for verification. The benchmark
+`configs/btc5m.toml` sets 20 cycles and a $15 ceiling; see
+[collection instructions](harness/docs/collection.md). Do not start paid
+sessions without approved bounds.
 
 To score forecasts after their markets resolve (any binary Yes/No or Up/Down
 Polymarket market; Up is treated as the YES side):

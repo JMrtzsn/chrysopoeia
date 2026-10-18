@@ -60,6 +60,20 @@ events reached BigQuery; archive data/protections stayed intact. Ten offline
 Platform tests passed and final preview showed 19 unchanged. See
 `docs/deployment.md`; no benchmark, Consumer rollout, or scheduler was run.
 
+Operator hard requirement (2026-10-18): during development the deployed profile
+must forecast only BTC 5m Up/Down. `configs/platform.toml` now requires
+`series = "btc-updown-5m"` with a 300-second cadence; rebuild, pin, deploy, and
+verify one bounded execution. The earlier two-cycle verification filled a
+non-BTC soccer market and must not be repeated under the new requirement.
+
+Implementation evidence: the image now installs the frozen `uv.lock` export
+(ADK 2.8.0/pydantic 2.13.4), validates both bundled profiles, was pinned as
+`sha256:3ae64def…`, and the job was updated; `validate --json` execution
+`chrysopoeia-cycle-local-7jccr` succeeded with the BTC series. The two-window
+BTC smoke (`chrysopoeia-cycle-local-jj49n`) admitted two BTC windows but both
+turns failed without a structured proposal, so the model path is not verified
+under the new profile. See `docs/deployment.md`.
+
 Operator approval (2026-10-18): add and deploy a raw-event BigQuery archive
 subscribed to `chrysopoeia-events`, then verify one labeled synthetic event.
 Retain payload and Pub/Sub metadata without filtering event types; this is an

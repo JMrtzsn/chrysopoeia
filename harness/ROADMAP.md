@@ -96,6 +96,20 @@ configured two-cycle cap (one paper fill, one failed turn). Booked cost
 $0.87996215 includes a conservative failure reservation. Emitted events were
 confirmed in BigQuery; no BTC benchmark ran. See `docs/verification.md`.
 
+Operator hard requirement (2026-10-18): during development, BTC 5m Up/Down is
+the only automated venue market. `[venue].series` is required and restricted to
+`btc-updown-5m`; CLI discovery, `run`, and the trader discovery tool are bound
+to it, making the volume-ranked fallback unreachable. Explicit `capture`/`cycle`
+targets remain verification inputs. The Platform profile moves to the BTC series
+and must be rebuilt, redeployed, and verified with one bounded execution.
+
+Implementation evidence: enforcement, image pinning, and one `validate`
+execution are verified. The benchmark is blocked because three consecutive BTC
+turns ended without a structured trader proposal (deployed 0/2, local 0/1),
+each booking its full reservation ($0.7038528) and publishing no outcome.
+Fix the missing-output path and verify two windows before spending the 20-window
+budget. See `docs/verification.md`.
+
 Earlier coordinated operator approval (2026-10-18): add clock-selected BTC 5m
 windows at five-minute boundaries. The original `--series` flag is superseded
 by `[venue].series` in the config-only contract above. Platform first

@@ -192,3 +192,40 @@ No real orders, Consumer deployment, scheduler, or BTC benchmark were run.
 This verifies deployed config loading, caps, paper behavior, and event archival;
 it does not verify consistent model success or the separate BTC profile's live
 forecast quality.
+
+## BTC-only enforcement and blocked benchmark (2026-10-18)
+
+Operator hard requirement: during development BTC 5m Up/Down is the only
+automated venue market. `[venue].series` is now required and restricted to
+`btc-updown-5m`; the CLI discovery/run path and the trader's discovery tool are
+bound to it. `uv run chrysopoeia discover` returned exactly the current window
+(market `5818403`, `Bitcoin Up or Down - October 18, 9:50AM-9:55AM ET`), one
+public GET, no model calls.
+
+Attempts under the required binding exposed a pre-existing trader failure:
+
+| Run | Windows | Outcome | Booked cost |
+| --- | --- | --- | --- |
+| Deployed job `chrysopoeia-cycle-local-jj49n` (2-cycle smoke) | `5818529`, `5818549` | both turns failed, no proposal | $1.4077056 (2 × reservation) |
+| Local `btc5m` run `~/chrysopoeia-journals/btc5m-20261018T1405` | `5818582` | one turn failed, no proposal; stopped cleanly (`stop_reason=stopped`) | $0.7038528 |
+
+All three failed with `pydantic ValidationError ... ProposalOutput ... input_value=None`
+raised at the downstream workflow node, i.e. the trader agent ended without a
+structured proposal. No `turn_outcome` or `trade_plan_ready` events were
+produced, so nothing from these turns reached the archive. Actual provider spend
+is unknown because a failed turn books its full conservative reservation.
+
+A contributing deployment defect was found and fixed: the image installed the
+wheel without the lockfile, resolving ADK 2.12.0/pydantic 2.14.1 versus the
+verified lock at ADK 2.8.0/pydantic 2.13.4. `platform/build.sh` now exports the
+frozen lock and installs it with `--no-deps`; the rebuilt image reports the
+locked versions and validates both profiles. The job was repinned and one
+`validate --json` execution (`chrysopoeia-cycle-local-7jccr`) succeeded. The
+local failure above used the verified lock, so drift is not the sole cause.
+
+The 20-window forward benchmark is therefore **blocked**: further windows would
+spend the ceiling without producing forecasts. Fix the trader's missing-output
+path (for example, drop redundant discovery/capture tools from the
+already-captured cycle or add one bounded retry), verify with two windows, then
+rerun the benchmark with a fresh journal. No Brier/coverage/P&L evidence exists
+for this sample.

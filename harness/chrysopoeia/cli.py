@@ -82,7 +82,6 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "paper_fee_rate": config.venue.paper_fee_rate,
             "paper_fee_source": config.venue.paper_fee_source,
             "series": config.venue.series,
-            "discovery_limit": config.venue.discovery_limit,
         },
         "models": {
             "location": config.models.location,
@@ -703,7 +702,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "discover":
         try:
             candidates = discover_markets(
-                limit=config.venue.discovery_limit,
                 series=config.venue.series,
                 fetch=polymarket_fetch,
             )

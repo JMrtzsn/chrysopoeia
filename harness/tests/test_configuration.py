@@ -33,7 +33,7 @@ VALID = {
         "window_minutes": 60,
         "max_cycles": 1,
         "cost_budget": "5",
-        "interval_seconds": 30,
+        "interval_seconds": 300,
         "daily_cloud_cost_budget": 5,
     },
     "risk": {
@@ -47,7 +47,7 @@ VALID = {
         "adapter": "polymarket",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
-        "discovery_limit": 10,
+        "series": "btc-updown-5m",
     },
     "models": {
         "location": "us",
@@ -84,13 +84,13 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("session", "cost_budget", "NaN"),
             ("session", "cost_budget", "-1"),
             ("session", "interval_seconds", -1),
+            ("session", "interval_seconds", 30),
             ("session", "daily_cloud_cost_budget", 0),
             ("risk", "maximum_market_exposure", 0.2),
             ("risk", "maximum_total_exposure", 2),
             ("risk", "market_exposure", 1),
             ("risk", "total_exposure", 1001),
             ("venue", "series", "unsupported"),
-            ("venue", "discovery_limit", 21),
         ):
             value = {name: fields.copy() for name, fields in VALID.items()}
             value[table][key] = invalid
@@ -107,7 +107,13 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(btc.session.max_cycles, 20)
         platform = load_harness_config(base / "platform.toml")
         self.assertEqual(platform.session.max_cycles, 2)
-        self.assertIsNone(platform.venue.series)
+        self.assertEqual(platform.venue.series, "btc-updown-5m")
+        with self.assertRaises(ConfigurationError):
+            HarnessConfig.from_mapping({
+                **{name: fields.copy() for name, fields in VALID.items()},
+                "venue": {"adapter": "polymarket", "paper_fee_rate": 0.02,
+                          "paper_fee_source": "paper-assumption:flat-2pct-v1"},
+            })
 
     def test_valid_mapping_is_exact_immutable_configuration(self) -> None:
         config = HarnessConfig.from_mapping(VALID)
