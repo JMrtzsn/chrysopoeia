@@ -120,8 +120,10 @@ flowchart TD
   consumer/venue exit monitoring and protection guarantees
   must be specified before live activation.
 - In event-driven terms: the journal outbox is a transactional outbox, delivery
-  is at-least-once, and consumers are idempotent by `event_id`. BigQuery read
-  models remain future work.
+  is at-least-once, and consumers are idempotent by `event_id`. Platform archives
+  raw topic payloads and metadata through a BigQuery subscription. The archive
+  is an analytics copy, not a ledger; deduplicate by payload `event_id` before
+  analysis. Derived read models and a Harness history tool remain future work.
 - Venue adapters provide normalized public market data. Market-data access never
   grants execution authority.
 

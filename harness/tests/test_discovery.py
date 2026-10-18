@@ -1,6 +1,6 @@
 import json
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 from chrysopoeia.polymarket import (
@@ -31,6 +31,36 @@ def record(identifier: int = 1, **changes: object) -> dict[str, object]:
 
 
 class MarketDiscoveryTests(unittest.TestCase):
+    def test_series_selects_only_the_current_updown_window_with_one_bounded_read(
+        self,
+    ) -> None:
+        current = NOW + timedelta(seconds=75)
+        slug = f"btc-updown-5m-{int(NOW.timestamp())}"
+        calls = []
+        page = [
+            record(2),
+            record(3, eventSlug=slug),
+            record(
+                1,
+                eventSlug=slug,
+                outcomes=["Up", "Down"],
+                endDate=(NOW + timedelta(seconds=300)).isoformat(),
+            ),
+        ]
+
+        def fetch(url: str, timeout: float, max_bytes: int) -> bytes:
+            calls.append((url, timeout, max_bytes))
+            return json.dumps(page).encode()
+
+        candidates = discover_markets(series="btc-updown-5m", now=current, fetch=fetch)
+
+        self.assertEqual([item.market_id for item in candidates], ["1"])
+        self.assertEqual(parse_qs(urlparse(calls[0][0]).query), {"slug": [slug]})
+        self.assertEqual([(t, size) for _, t, size in calls], [(5.0, 256 * 1024)])
+        with self.assertRaises(PolymarketError):
+            discover_markets(series="unknown", now=current, fetch=fetch)
+        self.assertEqual(len(calls), 1)
+
     def test_paginates_ordered_near_term_gamma_markets_and_preserves_volume_order(
         self,
     ) -> None:

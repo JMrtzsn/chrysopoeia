@@ -43,8 +43,8 @@ Harness drains old pending events before `cycle`/`run` and between run cycles,
 publishes all canonical event types to one topic with `event_id`, `record_type`,
 and `schema_version` attributes, and acknowledges
 only after confirmation. Failures leave events pending and may duplicate
-delivery, so consumers deduplicate by `event_id`. Platform retains topic and IAM
-only; it has no publisher wrapper. No authenticated trading is part of this
+delivery, so consumers deduplicate by `event_id`. Platform retains topic, IAM,
+and the raw-event archive; it has no publisher wrapper. No authenticated trading is part of this
 milestone.
 
 With neither consumer setting, no consumer resources exist. Setting
@@ -56,6 +56,101 @@ message data unchanged; stable `event_id` deduplication makes replay safe.
 
 The single-operator deployment is Level 2. Multi-tenant or public use requires
 separate design and approval.
+
+## Event archive
+
+When `pubsub_topic` is configured, Pulumi also creates a protected BigQuery
+dataset `chrysopoeia_events_<operator>` in the compute region, table `raw_events`,
+and an unfiltered subscription `<topic>-bigquery`. The current destination is
+`PROJECT_ID.chrysopoeia_events_local.raw_events` in `us-central1`.
+The Pub/Sub service agent has `roles/bigquery.dataEditor` on this table only;
+producers still need only topic publishing permission. The BigQuery API stays
+enabled if the integration is removed.
+
+`data` preserves the raw UTF-8 event JSON as STRING. `attributes` preserves the
+Pub/Sub attributes as a JSON-encoded STRING. Metadata columns are `message_id`,
+`publish_time`, and `subscription_name`. Topic/table schema mapping is disabled,
+so event-version changes do not drop fields or require table migrations. All
+event types are archived, including abstentions; no worker or Dataflow job runs.
+
+Rows have no configured expiration. Both dataset and table have Pulumi
+`protect=True` and `retain_on_delete=True`; the table also has provider deletion
+protection, and dataset destruction cannot delete its contents.
+The table is partitioned daily by `publish_time`, with a required partition
+filter to bound scans. For example:
+
+```sql
+SELECT publish_time, JSON_VALUE(data, '$.record_type') AS record_type,
+       JSON_VALUE(data, '$.event_id') AS event_id, data, attributes
+FROM `PROJECT_ID.chrysopoeia_events_local.raw_events`
+WHERE publish_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+LIMIT 100;
+```
+
+This is an at-least-once analytics copy, never the financial ledger. Deduplicate
+by payload `event_id`, not Pub/Sub `message_id`: an outbox retry can publish the
+same event with a new message ID. Synthetic verification rows use
+`record_type=archive_verification` and must be excluded from strategy metrics.
+Existing journals and events published before subscription creation are not
+backfilled. Only published events are captured; local simulator fills,
+settlements, and failed turns without outcome events still require the journal.
+
+The subscription never expires from inactivity. Undelivered messages retain
+for 31 days, not forever. If export fails, inspect `bigqueryConfig.state` with
+`gcloud pubsub subscriptions describe chrysopoeia-events-bigquery --project PROJECT_ID`
+and monitor backlog/oldest unacknowledged age in Cloud Monitoring. Repair IAM,
+table, or export failures before retention expires; otherwise backlog is lost.
+Automatic alerting and dead-letter routing are not included. Storage, export,
+and queries incur usage charges; smoke-test cost is expected to be negligible,
+not guaranteed free.
+
+Local producer usage and bounded scoring are documented in
+[`../../harness/docs/collection.md`](../../harness/docs/collection.md). No
+forecasting process or schedule starts when the archive is deployed.
+
+### Permanent storage and infrastructure recreation
+
+The dataset and table are permanent fixtures, not disposable runtime resources.
+Keep their existing project, dataset ID, table ID, location, and Pulumi logical
+names. Normal runtime updates reuse them. Protection blocks accidental deletion
+or replacement, including removal of `pubsub_topic`; retention additionally
+instructs Pulumi to leave the cloud resources intact if they are deliberately
+unprotected and removed from management later. Do not disable these safeguards
+to get past a deployment error.
+
+Recreate only the intended runtime resources, not storage. Keep the current
+Pulumi state and back it up securely before infrastructure maintenance; the
+current backend is local under `platform/infra/state/`. Do not erase that state
+as a way of resetting infrastructure. A normal full-stack destroy is blocked
+by protected resources, rather than silently deleting history. Other storage,
+including the paper journals bucket, still needs its own preservation review.
+
+If stack/state must be recreated, restore its backup first. If that is not
+possible, import the existing storage before `pulumi up`; never create an empty
+replacement archive. With the original project/configuration restored and the
+Platform Python environment active, run from the repository root:
+
+```sh
+PULUMI_CONFIG_PASSPHRASE='' pulumi -C platform/infra import --stack local-dev \
+  --generate-code=false 'gcp:bigquery/dataset:Dataset' event-archive \
+  projects/PROJECT_ID/datasets/chrysopoeia_events_local
+PULUMI_CONFIG_PASSPHRASE='' pulumi -C platform/infra import --stack local-dev \
+  --generate-code=false 'gcp:bigquery/table:Table' raw-events \
+  projects/PROJECT_ID/datasets/chrysopoeia_events_local/tables/raw_events
+```
+
+Import only into state that is missing these resources. Recover/import other
+still-existing infrastructure too, then preview and require no storage
+replacement or deletion before the separately approved apply. Use the existing
+source, not generated replacement code. The next apply persists both protection
+and retention settings. Recreating a subscription does not delete archived
+rows, but its backlog and events published during a subscription gap are not
+preserved automatically.
+
+These controls prevent Pulumi lifecycle deletion; they are not immutable/WORM
+storage or a backup. Privileged SQL deletion, external table/project deletion,
+and destructive in-place schema changes require separate access/backup controls.
+No storage teardown is part of verification.
 
 ## Change and verification boundary
 
@@ -90,6 +185,8 @@ can desynchronize state.
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
+| 2026-10-18 | Protection/retention update via `platform/run.sh deploy --skip-preview`; sanitized `pulumi stack export`; two date-filtered `bq query` checks, each capped at 100 MiB | Metadata-only apply, 19 resources unchanged. State confirms `protect=true` and `retainOnDelete=true` for dataset and table. Original message `21723946407689006`, raw payload, and attributes unchanged before/after. Nine Platform contract tests passed. No teardown, replacement, new publish, model, or forecast run. Estimated query cost ~$0, billing not measured; no temporary resources. |
+| 2026-10-18 | `CHRYSOPOEIA_RUN_PLATFORM=1 PULUMI_CONFIG_PASSPHRASE='' platform/run.sh deploy --skip-preview`; one `gcloud pubsub topics publish chrysopoeia-events`; one date-filtered `bq query --maximum_bytes_billed=104857600` | Six archive resources created; existing 13 resources unchanged. First apply enabled the API but failed on transient DNS during identity creation; one retry completed. Subscription `chrysopoeia-events-bigquery` is ACTIVE. Synthetic event `archive-verification-20261018-01`, message `21723946407689006`, arrived in `PROJECT_ID.chrysopoeia_events_local.raw_events` with exact payload and all three attributes plus message/publish/subscription metadata. Exactly one publish and one query, query scan ceiling 100 MiB; ambient auth, no models, forecasts, orders, image rollout, consumer deployment, or job execution. Labeled synthetic row retained as verification evidence; no temporary cloud resources. Estimated incremental cost ~$0, billing not measured. Final preview: 19 unchanged, zero pending changes. |
 | 2026-09-18 | Wheel-built image and Pulumi Cloud Run job; bounded `cycle` and `book` executions | Deployed harness accessed Vertex with the runner identity and journal bucket; succeeded after selecting Vertex-compatible model config. Operator-approved; under $0.02 Cloud Run cost. |
 | 2026-09-27 | `pulumi refresh`; `pulumi up`; rebuild/pin image; three `gcloud beta run jobs execute chrysopoeia-cycle-<operator> --region <region> --wait` executions | Restored container deployment after discarding a VM experiment. Cached `cycle` was an idempotent no-op, `book` succeeded, fresh-capture `cycle` appended a turn. Journal bucket intentionally retained. |
 | 2026-10-08 | Inline Python with `platform/infra/.venv/bin/python` called `drain()` against one temporary Pub/Sub topic and active subscription using ambient ADC; Harness CLI `outbox-pending`/`outbox-ack` | One synthetic valid trade-plan event was published once with confirmation; one matching message was pulled and acknowledged. The temporary subscription and topic were deleted after the check. Total duration was 22.87 s. Estimated incremental Pub/Sub cost was ~$0 within monthly free usage; billing was not measured. No model, market, Cloud Run, order, IAM, API-enablement, or `pulumi up` operation occurred. |

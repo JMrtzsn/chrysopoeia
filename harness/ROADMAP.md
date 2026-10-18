@@ -84,6 +84,17 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Coordinated operator approval (2026-10-18): add `run --series btc-updown-5m`
+for clock-selected current windows at five-minute boundaries. Platform first
+adds a raw-event BigQuery subscription to the existing topic for long-term
+analytics. The local journal remains authoritative. Implement and verify the
+capability only; do not start the 20-window benchmark or another forecast run.
+
+Implementation evidence: series selection/cadence have offline
+behavior tests; one bounded public Gamma read selected the current BTC window
+on 2026-10-18. No models or forecasts ran. Operator commands and limitations
+are in `docs/collection.md`; end-to-end model collection remains unverified.
+
 Coordinated operator approval (2026-10-17): two-sided paper positions are now in
 scope in Harness and Consumer, ahead of authenticated execution. Acceptance:
 explicit outcome and actual token book, v2 NO plans, independent consumer token

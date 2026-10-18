@@ -225,6 +225,30 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(run.call_args.args[0].interval_seconds, 0)
 
+    def test_run_series_uses_five_minute_cadence_and_rejects_other_intervals(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("chrysopoeia.loop.run_loop", AsyncMock(return_value=({}, []))) as run,
+        ):
+            args = (
+                "run",
+                "--journal",
+                directory,
+                "--max-cycles",
+                "1",
+                "--series",
+                "btc-updown-5m",
+            )
+            code, _, _ = self.invoke(*args)
+            self.assertEqual(code, 0)
+            self.assertEqual(run.call_args.args[0].series, "btc-updown-5m")
+            self.assertEqual(run.call_args.args[0].interval_seconds, 300)
+            code, _, _ = self.invoke(*args, "--interval-seconds", "30")
+            self.assertEqual(code, 2)
+            self.assertEqual(run.await_count, 1)
+
     def run_cli(
         self, *arguments: str, cwd: str | Path | None = None, console: bool = False
     ) -> subprocess.CompletedProcess[str]:

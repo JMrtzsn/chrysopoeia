@@ -46,6 +46,29 @@ coordination decision, not a new platform work item.
 
 ## Next
 
+Operator approval (2026-10-18): add and deploy a raw-event BigQuery archive
+subscribed to `chrysopoeia-events`, then verify one labeled synthetic event.
+Retain payload and Pub/Sub metadata without filtering event types; this is an
+analytics copy, never a financial ledger. Coordinated Harness work adds local
+BTC 5m series selection, but no forecasting session is authorized by this work.
+No consumer deployment, image rollout, or scheduler is included.
+
+Implementation evidence: archive deployed and verified with one
+synthetic publish/query on 2026-10-18; preview reports 19 unchanged. See
+`docs/deployment.md#event-archive`. No collection session was started.
+
+Operator approval (2026-10-18): treat the archive dataset and table as permanent
+fixtures across runtime recreation. Keep both Pulumi-protected and retained on
+delete, preserve their existing IDs, and document state recovery by import.
+Do not destroy/recreate storage to test this; use offline contracts and a
+non-destructive protection update with an existing-row check.
+
+Implementation evidence: applied metadata-only protections;
+exported state confirms `protect` and `retainOnDelete` on both resources.
+The original synthetic row remained unchanged before/after. No storage or
+runtime resources were replaced or deleted. Recovery steps are in
+`docs/deployment.md#permanent-storage-and-infrastructure-recreation`.
+
 1. Deploy the Pulumi-managed consumer subscription and verify its
    `trade_plan_ready` filter replacement. The rebuilt image and a bounded job
    execution with `CHRYSOPOEIA_EVENT_SINK=pubsub:...` were live-verified

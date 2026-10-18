@@ -433,7 +433,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--max-cycles", type=_cycles_arg, required=True)
     run.add_argument("--cost-budget", type=_cost_arg, default=Decimal("5"))
     run.add_argument("--stop-file", type=Path)
-    run.add_argument("--interval-seconds", type=_finite_float, default=30)
+    run.add_argument("--interval-seconds", type=_finite_float)
+    run.add_argument(
+        "--series",
+        choices=("btc-updown-5m",),
+        help="forecast the current BTC 5m window at each five-minute boundary",
+    )
     run.add_argument("--maximum-market-exposure", type=_exposure_arg, default=0.01)
     run.add_argument("--maximum-total-exposure", type=_exposure_arg, default=0.10)
     run.add_argument("--daily-cloud-cost-budget", type=_positive_float, default=5)
@@ -695,8 +700,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from chrysopoeia.accounting import JournalError
         from chrysopoeia.loop import LoopParams, StopFlag, run_loop
 
+        if args.interval_seconds is None:
+            args.interval_seconds = 300 if args.series else 30
         if (
             args.interval_seconds < 0
+            or (args.series is not None and args.interval_seconds != 300)
             or args.maximum_loss > args.bankroll
             or args.maximum_market_exposure > args.maximum_total_exposure
         ):
@@ -722,6 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.daily_cloud_cost_budget,
                         args.stop_file,
                         flag,
+                        args.series,
                     ),
                     config,
                     sleep=asyncio.sleep,

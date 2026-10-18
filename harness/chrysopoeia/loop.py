@@ -39,6 +39,15 @@ class LoopParams:
     daily_cloud_cost_budget: float = 5.0
     stop_file: Path | None = None
     stop_flag: StopFlag | None = None
+    series: str | None = None
+
+
+def _sleep_seconds(params: LoopParams, current: datetime, end: datetime) -> float:
+    if params.series is None:
+        return params.interval_seconds
+    return max(
+        0.0, min(300 - current.timestamp() % 300, (end - current).total_seconds())
+    )
 
 
 def _stop_reason(
@@ -90,6 +99,10 @@ async def run_loop(
     fetch: Fetch = _fetch,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     """Run a bounded session and return its final report and iteration records."""
+    if params.series not in (None, "btc-updown-5m") or (
+        params.series is not None and params.interval_seconds != 300
+    ):
+        raise ValueError("series requires btc-updown-5m and a 300-second interval")
     requested_end = now().astimezone(timezone.utc) + timedelta(
         minutes=params.window_minutes
     )
@@ -155,7 +168,9 @@ async def run_loop(
                 errors.append(f"exit quote unavailable: {market_id}")
         book = replay(params.journal)
         try:
-            candidates = discover_markets(limit=20, now=now(), fetch=fetch)
+            candidates = discover_markets(
+                limit=20, series=params.series, now=now(), fetch=fetch
+            )
         except Exception:
             errors.append("discovery unavailable")
             candidates = ()
@@ -174,7 +189,7 @@ async def run_loop(
         if selected is None:
             iteration["status"] = "idle"
             iterations.append(iteration)
-            await sleep(params.interval_seconds)
+            await sleep(_sleep_seconds(params, now(), window_end))
             continue
         try:
             snapshot = load_market_snapshot(
@@ -192,7 +207,7 @@ async def run_loop(
             errors.append(f"capture unavailable: {selected.market_id}")
             iteration["status"] = "failed"
             iterations.append(iteration)
-            await sleep(params.interval_seconds)
+            await sleep(_sleep_seconds(params, now(), window_end))
             continue
         try:
             result = await run_journal_turn(params.journal, config, snapshot, operating)
@@ -201,4 +216,5 @@ async def run_loop(
             iteration["status"] = "failed"
         cycles = len(replay(params.journal).admitted_turns)
         iterations.append(iteration)
-        await sleep(params.interval_seconds)
+        if params.series is None or cycles < params.max_cycles:
+            await sleep(_sleep_seconds(params, now(), window_end))

@@ -309,16 +309,38 @@ def _candidate(data: object, current: datetime) -> tuple[MarketCandidate, dateti
 def discover_markets(
     *,
     limit: int = 10,
+    series: str | None = None,
     now: datetime | None = None,
     fetch: Fetch = _fetch,
 ) -> tuple[MarketCandidate, ...]:
-    """Discover at most 20 eligible markets from a bounded public Gamma scan."""
+    """Discover eligible markets, or only the current supported series window."""
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
         raise PolymarketError("Polymarket discovery limit must be between 1 and 20")
+    if series not in (None, "btc-updown-5m"):
+        raise PolymarketError("Polymarket discovery series is unsupported")
     current = now or datetime.now(timezone.utc)
     if not isinstance(current, datetime) or current.tzinfo is None:
         raise PolymarketError("Polymarket adapter current time must include a UTC offset")
     current = current.astimezone(timezone.utc)
+    if series is not None:
+        start = int(current.timestamp()) // 300 * 300
+        slug = f"{series}-{start}"
+        page = _fetch_json_list(
+            f"https://{API_HOST}/markets?{urlencode({'slug': slug})}",
+            DEFAULT_TIMEOUT,
+            DEFAULT_MAX_RESPONSE_BYTES,
+            fetch,
+        )
+        for item in page[:25]:
+            parsed = _candidate(item, current)
+            if parsed is not None:
+                candidate, end = parsed
+                if (
+                    candidate.source_url == f"https://polymarket.com/event/{slug}"
+                    and end.timestamp() == start + 300
+                ):
+                    return (candidate,)
+        return ()
     found: dict[str, tuple[MarketCandidate, datetime]] = {}
     for offset in (0, 25, 50):
         query = urlencode(

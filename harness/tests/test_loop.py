@@ -77,6 +77,47 @@ def abstained(cost: str = "0.01") -> dict[str, object]:
 
 
 class LoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_series_waits_for_next_boundary_without_retrying_failed_window(
+        self,
+    ) -> None:
+        current = NOW + timedelta(seconds=75)
+        captures = []
+
+        def capture(*_: object, **__: object):
+            captures.append(current)
+            if len(captures) == 1:
+                raise PolymarketError("unavailable")
+            return snapshot("2")
+
+        async def sleep(seconds: float) -> None:
+            nonlocal current
+            self.assertEqual(seconds, 225)
+            current += timedelta(seconds=seconds)
+
+        with (
+            patch(
+                "chrysopoeia.loop.discover_markets", return_value=(candidate("2"),)
+            ) as discover,
+            patch("chrysopoeia.loop.load_market_snapshot", side_effect=capture),
+            patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value=abstained()),
+            ),
+        ):
+            report, iterations = await run_loop(
+                self.params(series="btc-updown-5m", interval_seconds=300),
+                self.config,
+                now=lambda: current,
+                sleep=sleep,
+            )
+
+        self.assertEqual(
+            captures, [NOW + timedelta(seconds=75), NOW + timedelta(seconds=300)]
+        )
+        self.assertEqual(report["cycles_run"], 1)
+        self.assertEqual(iterations[0]["status"], "failed")
+        self.assertEqual(discover.call_args.kwargs["series"], "btc-updown-5m")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.journal = Path(self.temporary.name)

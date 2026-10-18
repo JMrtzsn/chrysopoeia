@@ -104,3 +104,27 @@ Journal: `/var/folders/z8/cpj4kjks381d6vkbf5wdff5h0000gp/T/opencode/btc-paper-be
 Next local task: collect a bounded set of forward BTC 5m forecasts and score
 them with `polymarket-eval`, reporting Brier, market baseline, coverage, model
 failures, and paper P&L separately. Keep platform execution explicit and off.
+
+## Collection preparation (2026-10-18)
+
+Operator approved the raw-event Platform archive and local series-selection
+capability, explicitly excluding the 20-window run or any forecasting session.
+Platform deployment and one synthetic publish/query passed; evidence and
+retention/IAM boundaries are in
+[`../../platform/docs/deployment.md#event-archive`](../../platform/docs/deployment.md#event-archive).
+
+`uv run python -` called `discover_markets(series="btc-updown-5m", now=<UTC>)`
+once and asserted the result matched the current 300-second clock window.
+At `2026-10-18T06:58:37.265645+00:00`, one public Gamma GET returned market
+`5798498`, URL `https://polymarket.com/event/btc-updown-5m-1792306500`, closing
+at 07:00 UTC. One GET bounded to 5 s / 256 KiB, zero model calls, estimated
+cost $0, no journal, paper fill, order, or temporary artifact.
+
+Offline checks: `uv sync --all-groups --all-extras`, all 338 Harness unit tests,
+`uv run ruff check .`, `uv run ty check .`,
+`uv run chrysopoeia validate --json`, and agent import passed. Eight Platform
+contract tests passed. Cadence tests advance a fake clock and verify that a
+failed capture waits for the next boundary. CLI tests cover the default 300 s
+series cadence and rejection of incompatible intervals. A real-model
+`run --series` session remains unverified by explicit operator choice; do not
+claim the forward benchmark is complete. See [collection usage](collection.md).

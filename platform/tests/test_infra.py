@@ -4,6 +4,54 @@ from pathlib import Path
 
 
 class InfraContractTests(unittest.TestCase):
+    def test_archive_storage_is_protected_and_retained_independently_of_runtime(self) -> None:
+        source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
+        dataset = source.split("    archive_dataset =", 1)[1].split(
+            "    archive_table =", 1
+        )[0]
+        table = source.split("    archive_table =", 1)[1].split(
+            "    archive_writer =", 1
+        )[0]
+
+        for storage in (dataset, table):
+            self.assertIn("protect=True", storage)
+            self.assertIn("retain_on_delete=True", storage)
+        self.assertIn("delete_contents_on_destroy=False", dataset)
+        self.assertIn("deletion_protection=True", table)
+
+    def test_event_archive_preserves_raw_data_and_metadata_without_filtering(
+        self,
+    ) -> None:
+        source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
+        archive = source.split("    archive_api =", 1)[1].split(
+            "\ngcp.projects.IAMMember(", 1
+        )[0]
+
+        self.assertIn("gcp.bigquery.Dataset(", archive)
+        self.assertIn("gcp.bigquery.Table(", archive)
+        self.assertIn("deletion_protection=True", archive)
+        self.assertIn("delete_contents_on_destroy=False", archive)
+        for field in (
+            "data",
+            "attributes",
+            "message_id",
+            "publish_time",
+            "subscription_name",
+        ):
+            self.assertIn(f'"name": "{field}"', archive)
+        self.assertIn('field="publish_time"', archive)
+        self.assertIn("require_partition_filter=True", archive)
+        self.assertIn("gcp.bigquery.IamMember(", archive)
+        self.assertIn('role="roles/bigquery.dataEditor"', archive)
+        self.assertIn("write_metadata=True", archive)
+        self.assertIn("use_topic_schema=False", archive)
+        self.assertIn("use_table_schema=False", archive)
+        self.assertIn('SubscriptionExpirationPolicyArgs(ttl="")', archive)
+        self.assertIn('message_retention_duration="2678400s"', archive)
+        self.assertIn("depends_on=[archive_writer]", archive)
+        self.assertNotRegex(archive, r"(?m)^\s+filter=")
+        self.assertNotIn("expiration_ms", archive)
+
     def test_cloud_run_job_uses_observed_ga_launch_stage(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
 
@@ -80,7 +128,7 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn("retry_policy=", resources)
         self.assertIn("pulumi-gcp>=8.41,<9", requirements)
         self.assertNotIn("consumer_image_digest", local_config)
-        self.assertNotIn("pubsub_topic", local_config)
+        self.assertIn("chrysopoeia-infra:pubsub_topic: chrysopoeia-events", local_config)
 
     def test_push_subscription_waits_for_apis_identities_service_and_grants(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()

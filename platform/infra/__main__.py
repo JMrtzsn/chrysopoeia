@@ -15,6 +15,7 @@ database. Multi-tenant or public deployment remains out of scope pending an
 explicit Level 3 design.
 """
 
+import json
 import os
 
 import pulumi
@@ -95,6 +96,95 @@ if pubsub_topic:
             member=serviceaccount_member,
         ),
     )
+    pubsub_agent = gcp.projects.ServiceIdentity(
+        "pubsub-agent",
+        gcp.projects.ServiceIdentityArgs(
+            project=project_id,
+            service="pubsub.googleapis.com",
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[pubsub_service]),
+    )
+    pubsub_agent_member = pulumi.Output.concat("serviceAccount:", pubsub_agent.email)
+    archive_api = gcp.projects.Service(
+        "archive-api",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="bigquery.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=False,
+        ),
+    )
+    archive_dataset = gcp.bigquery.Dataset(
+        "event-archive",
+        gcp.bigquery.DatasetArgs(
+            project=project_id,
+            dataset_id=f"chrysopoeia_events_{operator.replace('-', '_')}",
+            location=region,
+            description="Raw event analytics archive; not an authoritative financial ledger.",
+            delete_contents_on_destroy=False,
+        ),
+        opts=pulumi.ResourceOptions(
+            depends_on=[archive_api], protect=True, retain_on_delete=True
+        ),
+    )
+    archive_table = gcp.bigquery.Table(
+        "raw-events",
+        gcp.bigquery.TableArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            table_id="raw_events",
+            deletion_protection=True,
+            schema=json.dumps(
+                [
+                    {"name": "data", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "attributes", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "message_id", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "publish_time", "type": "TIMESTAMP", "mode": "NULLABLE"},
+                    {"name": "subscription_name", "type": "STRING", "mode": "NULLABLE"},
+                ]
+            ),
+            time_partitioning=gcp.bigquery.TableTimePartitioningArgs(
+                type="DAY", field="publish_time"
+            ),
+            require_partition_filter=True,
+        ),
+        opts=pulumi.ResourceOptions(protect=True, retain_on_delete=True),
+    )
+    archive_writer = gcp.bigquery.IamMember(
+        "archive-writer",
+        gcp.bigquery.IamMemberArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            table_id=archive_table.table_id,
+            role="roles/bigquery.dataEditor",
+            member=pubsub_agent_member,
+        ),
+    )
+    archive_subscription = gcp.pubsub.Subscription(
+        "event-archive",
+        gcp.pubsub.SubscriptionArgs(
+            project=project_id,
+            name=f"{pubsub_topic}-bigquery",
+            topic=topic.id,
+            message_retention_duration="2678400s",
+            expiration_policy=gcp.pubsub.SubscriptionExpirationPolicyArgs(ttl=""),
+            bigquery_config=gcp.pubsub.SubscriptionBigqueryConfigArgs(
+                table=pulumi.Output.concat(
+                    project_id,
+                    ".",
+                    archive_dataset.dataset_id,
+                    ".",
+                    archive_table.table_id,
+                ),
+                write_metadata=True,
+                use_topic_schema=False,
+                use_table_schema=False,
+            ),
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_writer]),
+    )
+    pulumi.export("event_archive_table", archive_subscription.bigquery_config.table)
+    pulumi.export("event_archive_subscription", archive_subscription.name)
 
 gcp.projects.IAMMember(
     "runner-vertex-user",
@@ -328,17 +418,6 @@ if consumer_image_digest and pubsub_topic:
             account_id=f"chrysopoeia-invoker-{operator}"[:30],
             display_name=f"Chrysopoeia consumer invoker ({operator})",
         ),
-    )
-    pubsub_agent = gcp.projects.ServiceIdentity(
-        "pubsub-agent",
-        gcp.projects.ServiceIdentityArgs(
-            project=project_id,
-            service="pubsub.googleapis.com",
-        ),
-        opts=pulumi.ResourceOptions(depends_on=[pubsub_service]),
-    )
-    pubsub_agent_member = pulumi.Output.concat(
-        "serviceAccount:", pubsub_agent.email
     )
     invoker_member = pulumi.Output.concat("serviceAccount:", invoker.email)
     token_creator = gcp.serviceaccount.IAMMember(
