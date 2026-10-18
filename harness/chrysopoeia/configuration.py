@@ -4,6 +4,8 @@ from decimal import Decimal, InvalidOperation
 from math import isfinite
 from pathlib import Path
 
+from chrysopoeia.trading import OperatingConfig
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
@@ -69,6 +71,17 @@ def _positive_int(value: object, name: str) -> int:
     return value
 
 
+def _number(value: object, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not 0 <= value <= MAX_COST_LIMIT
+        or not isfinite(value)
+    ):
+        raise ConfigurationError(f"{name} must be a finite non-negative number")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     adapter: str
@@ -80,6 +93,28 @@ class VenueConfig:
     adapter: str
     paper_fee_rate: float
     paper_fee_source: str
+    discovery_limit: int
+    series: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    bankroll: float
+    maximum_loss: float
+    target_win_rate: float
+    window_minutes: float
+    max_cycles: int
+    cost_budget: Decimal
+    interval_seconds: float
+    daily_cloud_cost_budget: float
+
+
+@dataclass(frozen=True)
+class RiskConfig:
+    maximum_market_exposure: float
+    maximum_total_exposure: float
+    market_exposure: float
+    total_exposure: float
 
 
 @dataclass(frozen=True)
@@ -116,16 +151,54 @@ class HarnessConfig:
     venue: VenueConfig
     models: ModelConfig
     cost: CostConfig
+    session: SessionConfig
+    risk: RiskConfig
 
     @classmethod
     def from_mapping(cls, value: object) -> "HarnessConfig":
-        root = _table(value, {"runtime", "venue", "models", "cost"}, "harness")
+        root = _table(value, {"runtime", "venue", "models", "cost", "session", "risk"}, "harness")
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
+        venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "discovery_limit"}
+        if isinstance(root["venue"], Mapping) and "series" in root["venue"]:
+            venue_keys.add("series")
         venue = _table(
             root["venue"],
-            {"adapter", "paper_fee_rate", "paper_fee_source"},
+            venue_keys,
             "venue",
         )
+        session = _table(root["session"], {
+            "bankroll", "maximum_loss", "target_win_rate", "window_minutes",
+            "max_cycles", "cost_budget", "interval_seconds", "daily_cloud_cost_budget",
+        }, "session")
+        risk = _table(root["risk"], {
+            "maximum_market_exposure", "maximum_total_exposure",
+            "market_exposure", "total_exposure",
+        }, "risk")
+        session_config = SessionConfig(
+            _number(session["bankroll"], "bankroll"),
+            _number(session["maximum_loss"], "maximum loss"),
+            _number(session["target_win_rate"], "target win rate"),
+            _number(session["window_minutes"], "window minutes"),
+            _positive_int(session["max_cycles"], "max cycles"),
+            _price(session["cost_budget"], "cost budget"),
+            _number(session["interval_seconds"], "interval seconds"),
+            _number(session["daily_cloud_cost_budget"], "daily cloud cost budget"),
+        )
+        if (
+            session_config.target_win_rate > 1
+            or session_config.window_minutes <= 0
+            or session_config.max_cycles > 1000
+            or session_config.daily_cloud_cost_budget <= 0
+        ):
+            raise ConfigurationError("session operating limits are invalid")
+        risk_config = RiskConfig(*(
+            _number(risk[key], key) for key in (
+                "maximum_market_exposure", "maximum_total_exposure",
+                "market_exposure", "total_exposure",
+            )
+        ))
+        if not 0 <= risk_config.market_exposure <= risk_config.total_exposure <= session_config.bankroll:
+            raise ConfigurationError("existing exposures are inconsistent")
         cost_keys = {
             "model",
             "input_usd_per_million_tokens",
@@ -169,7 +242,15 @@ class HarnessConfig:
         fee_source = _text(venue["paper_fee_source"], "paper fee source")
         if fee and fee_source == "paper-assumption:no-fee-v1":
             raise ConfigurationError("positive paper fee requires explicit provenance")
-        venue_config = VenueConfig(adapter, float(fee), fee_source)
+        series = venue.get("series")
+        if "series" in venue and series != "btc-updown-5m":
+            raise ConfigurationError("venue series is unsupported")
+        if series is not None and session_config.interval_seconds != 300:
+            raise ConfigurationError("BTC 5m series requires a 300-second interval")
+        discovery_limit = _positive_int(venue["discovery_limit"], "discovery limit")
+        if discovery_limit > 20:
+            raise ConfigurationError("discovery limit must be between 1 and 20")
+        venue_config = VenueConfig(adapter, float(fee), fee_source, discovery_limit, series)
 
         model_adapter = _text(
             models.get("adapter", "adk-gemini")
@@ -251,7 +332,20 @@ class HarnessConfig:
             ),
             _positive_int(cost["maximum_model_calls_per_cycle"], "maximum model calls"),
         )
-        return cls(runtime_config, venue_config, model_config, cost_config)
+        result = cls(runtime_config, venue_config, model_config, cost_config, session_config, risk_config)
+        try:
+            _ = result.operating
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from None
+        return result
+
+    @property
+    def operating(self) -> OperatingConfig:
+        return OperatingConfig(
+            self.session.bankroll, 1,
+            self.risk.maximum_market_exposure, self.risk.maximum_total_exposure,
+            self.session.maximum_loss, self.session.daily_cloud_cost_budget,
+        )
 
     @property
     def cost_policy(self) -> dict[str, object]:

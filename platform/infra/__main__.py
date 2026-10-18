@@ -33,11 +33,9 @@ project_id = config.require("project_id")
 region = config.get("region") or "us-central1"
 operator = config.get("operator") or "local"
 job_args = config.get_object("job_args") or [
-    "cycle",
-    "--snapshot",
-    "/mnt/journal/snapshot.json",
+    "run",
     "--journal",
-    "/mnt/journal",
+    "/mnt/journal/run",
 ]
 pubsub_topic = config.get("pubsub_topic")
 consumer_image_digest = config.get("consumer_image_digest")
@@ -279,6 +277,10 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                         image=image,
                         args=job_args,
                         envs=[
+                            gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                name="CHRYSOPOEIA_CONFIG",
+                                value="/etc/chrysopoeia-platform.toml",
+                            ),
                             gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
                                 name="GOOGLE_GENAI_USE_VERTEXAI",
                                 value="TRUE",

@@ -15,6 +15,7 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
 - `chrysopoeia/` (runtime-neutral core + ADK adapter)
 - `tests/`
 - `chrysopoeia.toml` (checked-in operator configuration authority)
+- `configs/` (complete, validated operator profiles; no setting-flag overrides)
 - `pyproject.toml`, `uv.lock`
 - `.githooks/` (offline gates)
 - `agents-cli-manifest.yaml` (Agents CLI prototype surface; spec-rooted)
@@ -32,6 +33,12 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   change; the platform consumes the resulting image digest pin via Pulumi.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
+- Session capital/limits/cadence and risk limits come only from required
+  `[session]`/`[risk]` config sections. Venue selection and public discovery
+  limits come from `[venue]`; CLI setting overrides are not supported. Keep
+  `--config`, `--journal`, target/input/output flags, JSON formatting, and
+  `--stop-file` as invocation controls. The Platform profile is bundled beside
+  the wheel and selected as `/etc/chrysopoeia-platform.toml`.
 - The checked-in model is `gemini-3.5-flash`. Vertex calls use the `us` model
   endpoint; this is independent of the platform's Cloud Run resource region.
 - The paper journal path/record format, optional outbox, and direct event

@@ -46,6 +46,20 @@ coordination decision, not a new platform work item.
 
 ## Next
 
+Coordinated operator approval (2026-10-18): consume the Harness config-only
+operating-settings contract. Bundle its platform profile, pin the rebuilt
+image, and replace setting flags with `CHRYSOPOEIA_CONFIG`. Verify exactly one
+execution with at most two cycles, then retain the journal. No BTC benchmark,
+consumer rollout, scheduler, or archive lifecycle change is included.
+
+Implementation evidence: published/pinned image `sha256:d6c13fc6…`, updated only
+the existing job, and verified execution `chrysopoeia-cycle-local-nr6tj` stopped
+at the profile's two-cycle cap. One turn filled in paper and one failed;
+$0.87996215 booked model cost stayed within the $1.50 ceiling. Both emitted
+events reached BigQuery; archive data/protections stayed intact. Ten offline
+Platform tests passed and final preview showed 19 unchanged. See
+`docs/deployment.md`; no benchmark, Consumer rollout, or scheduler was run.
+
 Operator approval (2026-10-18): add and deploy a raw-event BigQuery archive
 subscribed to `chrysopoeia-events`, then verify one labeled synthetic event.
 Retain payload and Pub/Sub metadata without filtering event types; this is an
@@ -75,8 +89,9 @@ runtime resources were replaced or deleted. Recovery steps are in
    2026-10-14 (see `docs/deployment.md`): the deployed direct-publishing path is
    confirmed, so only the undeployed subscription remains.
 2. Launch bounded paper `run` sessions from the Cloud Run Job. Live-verified
-   2026-10-14: the job now runs `run --journal /mnt/journal/run --max-cycles 2`,
-   and one execution completed two bounded cycles. The job remains
+   2026-10-14: one execution completed two bounded cycles using CLI settings.
+   The config-only contract above replaces those settings with the bundled
+   platform profile and `run --journal /mnt/journal/run`. The job remains
    request-triggered; no always-on harness process is required. Repeat
    executions should pass a fresh `--journal` via `execute --args`, since
    resuming a session immediately hits its cycle cap.

@@ -84,8 +84,21 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-Coordinated operator approval (2026-10-18): add `run --series btc-updown-5m`
-for clock-selected current windows at five-minute boundaries. Platform first
+Coordinated operator approval (2026-10-18): move CLI operating settings to
+required validated TOML session/risk sections and venue selection; remove
+setting flags rather than retain overrides. Keep invocation inputs as flags.
+Update the Platform image/job to use a bundled two-cycle config and verify
+one bounded two-cycle paper execution. Do not start the BTC benchmark.
+
+Implementation evidence: 341 offline tests passed; the pinned config-only
+Platform image completed execution `chrysopoeia-cycle-local-nr6tj` at its
+configured two-cycle cap (one paper fill, one failed turn). Booked cost
+$0.87996215 includes a conservative failure reservation. Emitted events were
+confirmed in BigQuery; no BTC benchmark ran. See `docs/verification.md`.
+
+Earlier coordinated operator approval (2026-10-18): add clock-selected BTC 5m
+windows at five-minute boundaries. The original `--series` flag is superseded
+by `[venue].series` in the config-only contract above. Platform first
 adds a raw-event BigQuery subscription to the existing topic for long-term
 analytics. The local journal remains authoritative. Implement and verify the
 capability only; do not start the 20-window benchmark or another forecast run.

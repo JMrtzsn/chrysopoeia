@@ -12,13 +12,20 @@ Cloud.
   never a floating tag.
 - The job runs the selected `chrysopoeia` CLI entrypoint on demand. The bucket is
   mounted at `/mnt/journal`; journal semantics belong to the harness.
+- Operating settings come from the bundled Harness-owned
+  `configs/platform.toml`, selected by `CHRYSOPOEIA_CONFIG=/etc/chrysopoeia-platform.toml`.
+  The profile sets two cycles, a 60-minute session deadline (also bounded by the
+  job's 900-second task timeout), and a $1.50 session model-cost ceiling. Cost is
+  reserved before model work; expected actual spend for two completed cycles is
+  about $0.35, not a guaranteed bill. Changing the profile requires an image
+  rebuild and digest update, not extra CLI setting flags.
 - The harness owns market selection, cadence, recovery, and stopping. The
   platform launches the process but does not drive cycles.
 - Re-running the job starts a fresh bounded session only when given a new
   journal. The stored args reuse `/mnt/journal/run`, so a second execution
   resumes the finished session and stops at once at its cycle cap. Override per
   execution, for example
-  `gcloud beta run jobs execute chrysopoeia-cycle-local --region us-central1 --args=run,--journal=/mnt/journal/run-$(date +%s),--max-cycles=2`.
+  `gcloud beta run jobs execute chrysopoeia-cycle-local --region us-central1 --args=run,--journal=/mnt/journal/run-$(date +%s)`.
 - This job is not an HTTP server. Paper fills and exits are simulated in-process
   only while the paper loop runs. Optional `pubsub_topic` Pulumi configuration
   creates a topic and only a topic-scoped `roles/pubsub.publisher` grant for the
@@ -185,6 +192,7 @@ can desynchronize state.
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
+| 2026-10-18 | Wheel/image build; Pulumi image pin and config-only job update; one `platform/run.sh job --args=run,--journal=/mnt/journal/config-only-20261018-01 --wait` | Image `sha256:d6c13fc6fcababcae0c62066513b0d55c447af0fb86f460c5176d6589a286840` validated both bundled profiles before upload. Upload required longer timeouts and a final manifest retry after EOF; no rebuild or extra job execution. Pulumi updated only the job; final preview 19 unchanged. Execution `chrysopoeia-cycle-local-nr6tj` exited 0, stopped at configured `max_cycles=2`: one paper fill and one failed turn. Booked model cost $0.87996215 ($0.17610935 completed + $0.7038528 conservative failed-turn reservation; actual failed-turn billing unknown), below $1.50 session cap. Both emitted events reached BigQuery with metadata; original synthetic row retained. One 100 MiB-capped query, no new cloud resources or real orders. Journal retained at `gs://PROJECT_ID-chrs-journals-local/config-only-20261018-01/chrysopoeia.jsonl`, with one unmonitored open paper position. Full bounds/results in Harness verification. No Consumer rollout, scheduler, or BTC benchmark. |
 | 2026-10-18 | Protection/retention update via `platform/run.sh deploy --skip-preview`; sanitized `pulumi stack export`; two date-filtered `bq query` checks, each capped at 100 MiB | Metadata-only apply, 19 resources unchanged. State confirms `protect=true` and `retainOnDelete=true` for dataset and table. Original message `21723946407689006`, raw payload, and attributes unchanged before/after. Nine Platform contract tests passed. No teardown, replacement, new publish, model, or forecast run. Estimated query cost ~$0, billing not measured; no temporary resources. |
 | 2026-10-18 | `CHRYSOPOEIA_RUN_PLATFORM=1 PULUMI_CONFIG_PASSPHRASE='' platform/run.sh deploy --skip-preview`; one `gcloud pubsub topics publish chrysopoeia-events`; one date-filtered `bq query --maximum_bytes_billed=104857600` | Six archive resources created; existing 13 resources unchanged. First apply enabled the API but failed on transient DNS during identity creation; one retry completed. Subscription `chrysopoeia-events-bigquery` is ACTIVE. Synthetic event `archive-verification-20261018-01`, message `21723946407689006`, arrived in `PROJECT_ID.chrysopoeia_events_local.raw_events` with exact payload and all three attributes plus message/publish/subscription metadata. Exactly one publish and one query, query scan ceiling 100 MiB; ambient auth, no models, forecasts, orders, image rollout, consumer deployment, or job execution. Labeled synthetic row retained as verification evidence; no temporary cloud resources. Estimated incremental cost ~$0, billing not measured. Final preview: 19 unchanged, zero pending changes. |
 | 2026-09-18 | Wheel-built image and Pulumi Cloud Run job; bounded `cycle` and `book` executions | Deployed harness accessed Vertex with the runner identity and journal bucket; succeeded after selecting Vertex-compatible model config. Operator-approved; under $0.02 Cloud Run cost. |

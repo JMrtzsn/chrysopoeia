@@ -26,11 +26,28 @@ from chrysopoeia.configuration import (
 )
 
 VALID = {
+    "session": {
+        "bankroll": 1000,
+        "maximum_loss": 100,
+        "target_win_rate": 0.5,
+        "window_minutes": 60,
+        "max_cycles": 1,
+        "cost_budget": "5",
+        "interval_seconds": 30,
+        "daily_cloud_cost_budget": 5,
+    },
+    "risk": {
+        "maximum_market_exposure": 0.01,
+        "maximum_total_exposure": 0.10,
+        "market_exposure": 0,
+        "total_exposure": 0,
+    },
     "runtime": {"adapter": "adk", "mode": "paper"},
     "venue": {
         "adapter": "polymarket",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
+        "discovery_limit": 10,
     },
     "models": {
         "location": "us",
@@ -51,6 +68,47 @@ VALID = {
 
 
 class HarnessConfigurationTests(unittest.TestCase):
+    def test_operating_settings_and_profiles_are_validated_before_runtime(self) -> None:
+        config = HarnessConfig.from_mapping(VALID)
+        self.assertEqual(config.session.cost_budget, Decimal("5"))
+        self.assertEqual(config.operating.bankroll, 1000)
+        self.assertEqual(config.risk.total_exposure, 0)
+        for table, key, invalid in (
+            ("session", "bankroll", True),
+            ("session", "bankroll", 0),
+            ("session", "maximum_loss", 1001),
+            ("session", "target_win_rate", 1.1),
+            ("session", "window_minutes", math.inf),
+            ("session", "max_cycles", 1001),
+            ("session", "max_cycles", 1.5),
+            ("session", "cost_budget", "NaN"),
+            ("session", "cost_budget", "-1"),
+            ("session", "interval_seconds", -1),
+            ("session", "daily_cloud_cost_budget", 0),
+            ("risk", "maximum_market_exposure", 0.2),
+            ("risk", "maximum_total_exposure", 2),
+            ("risk", "market_exposure", 1),
+            ("risk", "total_exposure", 1001),
+            ("venue", "series", "unsupported"),
+            ("venue", "discovery_limit", 21),
+        ):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            value[table][key] = invalid
+            with self.subTest(table=table, key=key), self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
+        for table in ("session", "risk"):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            del value[table]
+            with self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
+        base = Path(__file__).parents[1] / "configs"
+        btc = load_harness_config(base / "btc5m.toml")
+        self.assertEqual((btc.venue.series, btc.session.interval_seconds), ("btc-updown-5m", 300))
+        self.assertEqual(btc.session.max_cycles, 20)
+        platform = load_harness_config(base / "platform.toml")
+        self.assertEqual(platform.session.max_cycles, 2)
+        self.assertIsNone(platform.venue.series)
+
     def test_valid_mapping_is_exact_immutable_configuration(self) -> None:
         config = HarnessConfig.from_mapping(VALID)
 
@@ -104,6 +162,8 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("venue", "adapter"),
             ("models", "root"),
             ("cost", "model"),
+            ("session", "bankroll"),
+            ("risk", "market_exposure"),
         ):
             value = {name: fields.copy() for name, fields in VALID.items()}
             del value[table][key]
@@ -114,6 +174,8 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("venue", "wallet", "secret-wallet"),
             ("models", "project", "secret-project"),
             ("cost", "daily_budget", "1"),
+            ("session", "unknown", 1),
+            ("risk", "unknown", 1),
         ):
             candidate = {name: fields.copy() for name, fields in VALID.items()}
             (candidate if table == "top" else candidate[table])[key] = value

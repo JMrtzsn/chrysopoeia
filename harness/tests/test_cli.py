@@ -20,6 +20,7 @@ from chrysopoeia.trading import (
     MarketSnapshot,
     market_snapshot_identity,
 )
+from tests.test_configuration import VALID
 
 ROOT = Path(__file__).parents[1]
 EXPECTED = {
@@ -42,6 +43,8 @@ EXPECTED = {
         "trader": "gemini-3.5-flash",
     },
     "runtime": {"adapter": "adk", "mode": "paper"},
+    "session": VALID["session"],
+    "risk": VALID["risk"],
     "schema_version": 1,
     "valid": True,
     "venue": {
@@ -50,6 +53,8 @@ EXPECTED = {
         "market_data": "public-read-only",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
+        "series": None,
+        "discovery_limit": 10,
     },
 }
 
@@ -156,7 +161,7 @@ class OperatorCliTests(unittest.TestCase):
 
         return fetch
 
-    def test_run_command_validates_all_session_arguments(self) -> None:
+    def test_operating_flags_are_rejected_without_running_models(self) -> None:
         invalid = (
             ("--bankroll", "0"),
             ("--maximum-loss", "nan"),
@@ -169,6 +174,7 @@ class OperatorCliTests(unittest.TestCase):
             ("--maximum-market-exposure", "0"),
             ("--maximum-total-exposure", "2"),
             ("--daily-cloud-cost-budget", "0"),
+            ("--series", "btc-updown-5m"),
         )
         with tempfile.TemporaryDirectory() as directory:
             for flag, value in invalid:
@@ -177,13 +183,11 @@ class OperatorCliTests(unittest.TestCase):
                         "run",
                         "--journal",
                         directory,
-                        "--max-cycles",
-                        "1",
                         flag,
                         value,
                     )
                     self.assertEqual((code, output), (2, ""))
-                    self.assertIn("invalid", error)
+                    self.assertIn("unrecognized arguments", error)
 
     def test_run_command_prints_iteration_lines_and_session_report(self) -> None:
         report = {"stop_reason": "max_cycles", "cycles_run": 1}
@@ -196,13 +200,44 @@ class OperatorCliTests(unittest.TestCase):
             ) as run,
         ):
             code, output, error = self.invoke(
-                "run", "--journal", directory, "--max-cycles", "1"
+                "run", "--journal", directory
             )
 
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output), report)
         self.assertEqual(json.loads(error), iterations[0])
         self.assertEqual(run.call_args.args[0].interval_seconds, 30)
+        self.assertEqual(run.call_args.args[0].max_cycles, 1)
+
+    def test_configured_zero_budget_stops_before_market_or_model_calls(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("chrysopoeia.loop.discover_markets") as discover,
+            patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock()) as model,
+        ):
+            config = Path(directory) / "no-spend.toml"
+            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
+                'cost_budget = "5"', 'cost_budget = "0"'
+            ))
+            code, output, error = self.invoke(
+                "run", "--config", str(config), "--journal", str(Path(directory) / "journal")
+            )
+            self.assertEqual((code, error), (0, ""))
+            self.assertEqual(json.loads(output)["stop_reason"], "cost_budget")
+            discover.assert_not_called()
+            model.assert_not_awaited()
+
+    def test_run_rejects_configured_external_exposure_before_opening_a_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "exposed.toml"
+            journal = Path(directory) / "journal"
+            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
+                "\ntotal_exposure = 0", "\ntotal_exposure = 1"
+            ))
+            code, output, error = self.invoke("run", "--config", str(config), "--journal", str(journal))
+            self.assertEqual((code, output), (2, ""))
+            self.assertIn("run uses its journal", error)
+            self.assertFalse(journal.exists())
 
     def test_run_command_allows_zero_interval(self) -> None:
         with (
@@ -212,20 +247,22 @@ class OperatorCliTests(unittest.TestCase):
                 AsyncMock(return_value=({"stop_reason": "max_cycles"}, [])),
             ) as run,
         ):
+            config = Path(directory) / "zero.toml"
+            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
+                "interval_seconds = 30", "interval_seconds = 0"
+            ))
             code, _, _ = self.invoke(
                 "run",
                 "--journal",
                 directory,
-                "--max-cycles",
-                "1",
-                "--interval-seconds",
-                "0",
+                "--config",
+                str(config),
             )
 
         self.assertEqual(code, 0)
         self.assertEqual(run.call_args.args[0].interval_seconds, 0)
 
-    def test_run_series_uses_five_minute_cadence_and_rejects_other_intervals(
+    def test_run_uses_benchmark_config_and_rejects_invalid_cadence(
         self,
     ) -> None:
         with (
@@ -236,16 +273,19 @@ class OperatorCliTests(unittest.TestCase):
                 "run",
                 "--journal",
                 directory,
-                "--max-cycles",
-                "1",
-                "--series",
-                "btc-updown-5m",
+                "--config",
+                str(ROOT / "configs" / "btc5m.toml"),
             )
             code, _, _ = self.invoke(*args)
             self.assertEqual(code, 0)
             self.assertEqual(run.call_args.args[0].series, "btc-updown-5m")
             self.assertEqual(run.call_args.args[0].interval_seconds, 300)
-            code, _, _ = self.invoke(*args, "--interval-seconds", "30")
+            self.assertEqual(run.call_args.args[0].max_cycles, 20)
+            invalid = Path(directory) / "bad.toml"
+            invalid.write_text((ROOT / "configs" / "btc5m.toml").read_text().replace(
+                "interval_seconds = 300", "interval_seconds = 30"
+            ))
+            code, _, _ = self.invoke("run", "--journal", directory, "--config", str(invalid))
             self.assertEqual(code, 2)
             self.assertEqual(run.await_count, 1)
 
@@ -275,7 +315,7 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(json.loads(first.stdout), EXPECTED)
         self.assertEqual(first.stdout, second.stdout)
-        self.assertNotIn("daily", first.stdout)
+        self.assertEqual(json.loads(first.stdout)["session"]["daily_cloud_cost_budget"], 5)
 
     def test_default_is_cwd_independent_and_entry_points_are_equivalent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -353,23 +393,28 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(console_misuse.returncode, 2)
         self.assertNotIn("Traceback", misuse.stderr)
 
-    def test_discover_accepts_default_and_bounded_limits(self) -> None:
+    def test_discover_uses_configured_limits_and_rejects_the_old_flag(self) -> None:
         with patch("chrysopoeia.cli.discover_markets", return_value=()) as discover:
             code, stdout, stderr = self.invoke("discover")
 
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(json.loads(stdout)["candidates"], [])
-        discover.assert_called_once_with(limit=10, fetch=cli.polymarket_fetch)
+        discover.assert_called_once_with(limit=10, series=None, fetch=cli.polymarket_fetch)
 
         for limit in ("1", "20"):
             with (
                 self.subTest(limit=limit),
+                tempfile.TemporaryDirectory() as directory,
                 patch("chrysopoeia.cli.discover_markets", return_value=()) as discover,
             ):
-                code, _, stderr = self.invoke("discover", "--limit", limit)
+                config = Path(directory) / "limit.toml"
+                config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
+                    "discovery_limit = 10", f"discovery_limit = {limit}"
+                ))
+                code, _, stderr = self.invoke("discover", "--config", str(config))
                 self.assertEqual((code, stderr), (0, ""))
                 discover.assert_called_once_with(
-                    limit=int(limit), fetch=cli.polymarket_fetch
+                    limit=int(limit), series=None, fetch=cli.polymarket_fetch
                 )
 
         for limit in ("0", "21", "1.0", "true"):
@@ -391,7 +436,7 @@ class OperatorCliTests(unittest.TestCase):
             ),
         )
         with patch("chrysopoeia.cli.discover_markets", return_value=candidates):
-            code, stdout, stderr = self.invoke("discover", "--limit", "1")
+            code, stdout, stderr = self.invoke("discover")
 
         expected = {
             "schema_version": 1,
@@ -753,6 +798,10 @@ class OperatorCliTests(unittest.TestCase):
             source = Path(directory) / "snapshot.json"
             source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
             output = Path(directory) / "result.json"
+            config = Path(directory) / "exposure.toml"
+            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
+                "\nmarket_exposure = 0", "\nmarket_exposure = 2"
+            ).replace("\ntotal_exposure = 0", "\ntotal_exposure = 3"))
             with (
                 patch(
                     "chrysopoeia.cycle_runner.run_paper_cycle",
@@ -764,10 +813,8 @@ class OperatorCliTests(unittest.TestCase):
                     "cycle",
                     "--snapshot",
                     str(source),
-                    "--market-exposure",
-                    "2",
-                    "--total-exposure",
-                    "3",
+                    "--config",
+                    str(config),
                     "--output",
                     str(output),
                 )
@@ -1287,12 +1334,12 @@ class OperatorCliTests(unittest.TestCase):
             )
             self.assertFalse(output.exists())
 
-            code, stdout, stderr = self.invoke(
-                "cycle", "--snapshot", str(bad), "--bankroll", "0"
-            )
+            config = root / "invalid.toml"
+            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace("bankroll = 1000", "bankroll = 0"))
+            code, stdout, stderr = self.invoke("cycle", "--snapshot", str(bad), "--config", str(config))
             self.assertEqual(
                 (code, stdout, stderr),
-                (2, "", "cycle failed: invalid operating configuration\n"),
+                (2, "", "cycle failed: model/workflow unavailable\n"),
             )
 
     def test_cycle_model_failure_leaves_no_output_or_private_error(self) -> None:

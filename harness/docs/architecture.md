@@ -129,6 +129,15 @@ flowchart TD
 
 ## Context and evidence
 
+Operator CLI settings resolve from an explicit `--config`, then
+`CHRYSOPOEIA_CONFIG`, then the checked-in default. The configuration boundary
+validates required session/risk sections and venue selection before any network
+or model work; there are no operating-setting CLI overrides. `run` derives its
+loop parameters from these values; `cycle` uses the same validated operating
+limits. Existing non-journal exposures are cycle-only and rejected by `run`,
+whose journal owns exposure. The Platform bundles a separate Harness-owned
+two-cycle profile rather than encoding session limits in job arguments.
+
 Two-sided paper proposals carry `outcome=YES|NO`, while their probability remains
 P(YES/Up). Production captures load both token books. Python selects the actual
 side for edge, depth, fills, marks, exits and settlement. NO plans and outcomes

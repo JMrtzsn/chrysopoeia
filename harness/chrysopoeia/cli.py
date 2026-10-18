@@ -9,7 +9,6 @@ import tempfile
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from chrysopoeia.configuration import (
@@ -82,6 +81,8 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "execution": "paper-only",
             "paper_fee_rate": config.venue.paper_fee_rate,
             "paper_fee_source": config.venue.paper_fee_source,
+            "series": config.venue.series,
+            "discovery_limit": config.venue.discovery_limit,
         },
         "models": {
             "location": config.models.location,
@@ -91,6 +92,8 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "reviewer": config.models.reviewer,
         },
         "cost_policy": config.cost_policy,
+        "session": {**asdict(config.session), "cost_budget": str(config.session.cost_budget)},
+        "risk": asdict(config.risk),
     }
 
 
@@ -341,57 +344,6 @@ def _write_new(path: Path, content: bytes) -> None:
         raise
 
 
-def _finite_float(value: str) -> float:
-    try:
-        number = float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError("invalid number") from None
-    if not number == number or abs(number) == float("inf"):
-        raise argparse.ArgumentTypeError("invalid number")
-    return number
-
-
-def _positive_float(value: str) -> float:
-    number = _finite_float(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("invalid positive number")
-    return number
-
-
-def _fraction_arg(value: str) -> float:
-    number = _finite_float(value)
-    if not 0 <= number <= 1:
-        raise argparse.ArgumentTypeError("invalid fraction")
-    return number
-
-
-def _exposure_arg(value: str) -> float:
-    number = _finite_float(value)
-    if not 0 < number <= 1:
-        raise argparse.ArgumentTypeError("invalid exposure fraction")
-    return number
-
-
-def _cycles_arg(value: str) -> int:
-    try:
-        number = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError("invalid cycle count") from None
-    if not 1 <= number <= 1_000:
-        raise argparse.ArgumentTypeError("invalid cycle count")
-    return number
-
-
-def _cost_arg(value: str) -> Decimal:
-    try:
-        number = Decimal(value)
-    except InvalidOperation:
-        raise argparse.ArgumentTypeError("invalid cost budget") from None
-    if not number.is_finite() or number < 0:
-        raise argparse.ArgumentTypeError("invalid cost budget")
-    return number
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chrysopoeia")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -404,7 +356,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture.add_argument("--config", type=Path)
     capture.add_argument("--output", type=Path)
     discover = commands.add_parser("discover")
-    discover.add_argument("--limit", type=int, choices=range(1, 21), default=10)
     discover.add_argument("--config", type=Path)
     cycle = commands.add_parser("cycle")
     targets = cycle.add_mutually_exclusive_group()
@@ -414,34 +365,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     cycle.add_argument("--draft")
     cycle.add_argument("--config", type=Path)
     cycle.add_argument("--evidence", type=Path)
-    cycle.add_argument("--bankroll", type=float, default=1_000)
-    cycle.add_argument("--maximum-market-exposure", type=float, default=0.01)
-    cycle.add_argument("--maximum-total-exposure", type=float, default=0.10)
-    cycle.add_argument("--maximum-loss", type=float, default=100)
-    cycle.add_argument("--daily-cloud-cost-budget", type=float, default=5)
-    cycle.add_argument("--market-exposure", type=float, default=0)
-    cycle.add_argument("--total-exposure", type=float, default=0)
     cycle.add_argument("--journal", type=Path)
     cycle.add_argument("--output", type=Path)
     run = commands.add_parser("run")
     run.add_argument("--journal", type=Path, required=True)
     run.add_argument("--config", type=Path)
-    run.add_argument("--bankroll", type=_positive_float, default=1_000)
-    run.add_argument("--maximum-loss", type=_positive_float, default=100)
-    run.add_argument("--target-win-rate", type=_fraction_arg, default=0.5)
-    run.add_argument("--window-minutes", type=_positive_float, default=60)
-    run.add_argument("--max-cycles", type=_cycles_arg, required=True)
-    run.add_argument("--cost-budget", type=_cost_arg, default=Decimal("5"))
     run.add_argument("--stop-file", type=Path)
-    run.add_argument("--interval-seconds", type=_finite_float)
-    run.add_argument(
-        "--series",
-        choices=("btc-updown-5m",),
-        help="forecast the current BTC 5m window at each five-minute boundary",
-    )
-    run.add_argument("--maximum-market-exposure", type=_exposure_arg, default=0.01)
-    run.add_argument("--maximum-total-exposure", type=_exposure_arg, default=0.10)
-    run.add_argument("--daily-cloud-cost-budget", type=_positive_float, default=5)
     book = commands.add_parser("book")
     book.add_argument("--journal", type=Path, required=True)
     settle_command = commands.add_parser("settle")
@@ -680,7 +609,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
         return 0
     path = args.config or default_config_path()
-    label = "chrysopoeia.toml" if args.config is None else args.config.name
+    label = path.name
     try:
         config = load_harness_config(path)
     except (ConfigurationError, OSError, TypeError, ValueError) as exc:
@@ -700,15 +629,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from chrysopoeia.accounting import JournalError
         from chrysopoeia.loop import LoopParams, StopFlag, run_loop
 
-        if args.interval_seconds is None:
-            args.interval_seconds = 300 if args.series else 30
-        if (
-            args.interval_seconds < 0
-            or (args.series is not None and args.interval_seconds != 300)
-            or args.maximum_loss > args.bankroll
-            or args.maximum_market_exposure > args.maximum_total_exposure
-        ):
-            parser.exit(2, "run failed: invalid operating configuration\n")
+        if config.risk.market_exposure or config.risk.total_exposure:
+            parser.exit(2, "run failed: existing exposures are cycle-only; run uses its journal\n")
         flag = StopFlag()
         previous = {}
         try:
@@ -718,19 +640,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_loop(
                     LoopParams(
                         args.journal,
-                        args.bankroll,
-                        args.maximum_loss,
-                        args.target_win_rate,
-                        args.window_minutes,
-                        args.max_cycles,
-                        args.cost_budget,
-                        args.interval_seconds,
-                        args.maximum_market_exposure,
-                        args.maximum_total_exposure,
-                        args.daily_cloud_cost_budget,
+                        config.session.bankroll,
+                        config.session.maximum_loss,
+                        config.session.target_win_rate,
+                        config.session.window_minutes,
+                        config.session.max_cycles,
+                        config.session.cost_budget,
+                        config.session.interval_seconds,
+                        config.risk.maximum_market_exposure,
+                        config.risk.maximum_total_exposure,
+                        config.session.daily_cloud_cost_budget,
                         args.stop_file,
                         flag,
-                        args.series,
+                        config.venue.series,
                     ),
                     config,
                     sleep=asyncio.sleep,
@@ -780,7 +702,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "discover":
         try:
-            candidates = discover_markets(limit=args.limit, fetch=polymarket_fetch)
+            candidates = discover_markets(
+                limit=config.venue.discovery_limit,
+                series=config.venue.series,
+                fetch=polymarket_fetch,
+            )
             result = {
                 "schema_version": 1,
                 "record_type": "market_discovery",
@@ -796,25 +722,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.journal is not None and args.snapshot is None and args.market is None:
             parser.exit(2, "cycle failed: --journal requires --snapshot or --market\n")
         try:
-            operating = OperatingConfig(
-                args.bankroll,
-                1,
-                args.maximum_market_exposure,
-                args.maximum_total_exposure,
-                args.maximum_loss,
-                args.daily_cloud_cost_budget,
-            )
+            operating = config.operating
             MarketSnapshot(
                 "validation",
                 "validation",
                 0.5,
                 operating.bankroll,
-                args.market_exposure,
-                args.total_exposure,
+                config.risk.market_exposure,
+                config.risk.total_exposure,
             )
         except (TypeError, ValueError):
             parser.exit(2, "cycle failed: invalid operating configuration\n")
-        total_exposure = args.total_exposure
+        total_exposure = config.risk.total_exposure
         book_state = None
         if args.journal is not None:
             from chrysopoeia.accounting import JournalError, open_session
@@ -843,14 +762,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.snapshot,
                     config,
                     operating,
-                    args.market_exposure,
+                    config.risk.market_exposure,
                     total_exposure,
                 )
                 if args.snapshot is not None
                 else load_market_snapshot(
                     args.market,
                     operating.bankroll,
-                    args.market_exposure,
+                    config.risk.market_exposure,
                     total_exposure,
                     include_no_book=True,
                     paper_fee_rate=config.venue.paper_fee_rate,

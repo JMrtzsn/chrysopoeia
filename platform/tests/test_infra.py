@@ -4,6 +4,21 @@ from pathlib import Path
 
 
 class InfraContractTests(unittest.TestCase):
+    def test_job_uses_bundled_operating_config_without_setting_flags(self) -> None:
+        root = Path(__file__).parents[1]
+        source = root.joinpath("infra", "__main__.py").read_text()
+        dockerfile = root.joinpath("Dockerfile").read_text()
+        build = root.joinpath("build.sh").read_text()
+        stack = root.joinpath("infra", "Pulumi.local-dev.yaml").read_text()
+
+        self.assertIn('name="CHRYSOPOEIA_CONFIG"', source)
+        self.assertIn('value="/etc/chrysopoeia-platform.toml"', source)
+        self.assertIn("COPY .build/platform.toml /etc/chrysopoeia-platform.toml", dockerfile)
+        self.assertIn('"$HARNESS_DIR/configs/platform.toml"', build)
+        self.assertIn("validate --config /etc/chrysopoeia-platform.toml --json", build)
+        self.assertIn('["run","--journal","/mnt/journal/run"]', stack)
+        self.assertNotIn("--max-cycles", stack)
+
     def test_archive_storage_is_protected_and_retained_independently_of_runtime(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
         dataset = source.split("    archive_dataset =", 1)[1].split(

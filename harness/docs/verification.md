@@ -128,3 +128,67 @@ failed capture waits for the next boundary. CLI tests cover the default 300 s
 series cadence and rejection of incompatible intervals. A real-model
 `run --series` session remains unverified by explicit operator choice; do not
 claim the forward benchmark is complete. See [collection usage](collection.md).
+
+## Config-only operating settings (2026-10-18)
+
+The operator approved removing operating-setting flags and migrating the
+deployed job to a bundled two-cycle config, including one bounded two-cycle
+paper verification. This does not authorize the BTC benchmark. The earlier
+`--series` CLI syntax is historical: current selection is `[venue].series` in
+`configs/btc5m.toml`. Other historical commands above retain their original syntax.
+
+Offline gates passed: `uv sync --all-groups --all-extras`, all 341 Harness
+tests, `uv run ruff check .`, `uv run ty check .`,
+`uv run chrysopoeia validate --json`, agent import, and `uv build`. All four
+bundled TOML profiles loaded. Tests cover removed flags, strict config bounds,
+profile routing into the loop/cycle, zero budget stopping before external work,
+and rejecting external exposure in the journal-owned run loop. Ten Platform
+contract tests cover the bundled config and setting-free job arguments.
+
+The Platform verification uses `configs/platform.toml`: at most two cycles,
+$1.50 conservative session cost ceiling, $5 daily model budget, $100 paper loss
+halt, a 60-minute configured session window bounded externally by the existing
+900-second job task timeout, and no task retries. Expected actual completed-cycle
+cost is about $0.35; provider billing is not measured. The separate BTC profile
+is only validated offline, not executed.
+
+The built amd64 image also passed both default/platform `validate --json`
+checks and rejected the removed `--max-cycles` flag with exit 2 before model
+work. Registry upload exceeded the initial 120-second build-command timeout
+and a separate 600-second push timeout; no job update was applied during these
+attempts. The migration's deployed boundary is not verified until the image
+pin, job update, and bounded execution evidence are recorded below.
+
+After the final large layer uploaded, the manifest request returned EOF; one
+manifest retry succeeded without rebuilding. Image
+`sha256:d6c13fc6fcababcae0c62066513b0d55c447af0fb86f460c5176d6589a286840`
+was pinned through Pulumi. Only the job image, config environment variable,
+and arguments changed; 18 other resources remained unchanged, including the
+protected/retained archive. Post-apply preview reported 19 unchanged.
+
+One approved invocation of `platform/run.sh job
+--args=run,--journal=/mnt/journal/config-only-20261018-01 --wait` created execution
+`chrysopoeia-cycle-local-nr6tj`, which exited successfully with
+`stop_reason=max_cycles` and `cycles_run=2`. The first turn filled a $1 paper
+plan on market `5315588` at 0.14 (7.142857 shares, $0.02 fee, $1.02 total cost).
+Its estimated model cost was $0.17610935. The second turn failed and booked the
+conservative $0.7038528 reservation; actual provider spend is unknown. Total
+booked model cost was $0.87996215, below the $1.50 session ceiling. The report
+showed realized P&L $0 and marked unrealized P&L -$0.11, before model costs.
+No win rate or settled profitability claim is supported.
+
+The journal recorded two admitted/finished turns, one fill, and two outbox
+acknowledgements. A single date-filtered BigQuery query capped at 100 MiB
+confirmed one copy each of `outcome-4c831aa9a771c397bb8ba4e1` (`turn_outcome`)
+and `turn-4c831aa9a771c397bb8ba4e1` (`trade_plan_ready`), with matching attributes;
+the original synthetic archive row remained present. The failed turn did not
+produce an outcome event. Query/storage billing was not measured; incremental
+verification cost beyond model work is expected negligible.
+
+The authoritative journal is retained at
+`gs://PROJECT_ID-chrs-journals-local/config-only-20261018-01/chrysopoeia.jsonl`.
+It contains one open paper position; the finished job is not monitoring it.
+No real orders, Consumer deployment, scheduler, or BTC benchmark were run.
+This verifies deployed config loading, caps, paper behavior, and event archival;
+it does not verify consistent model success or the separate BTC profile's live
+forecast quality.

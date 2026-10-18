@@ -1,11 +1,13 @@
 # Local BTC 5m collection
 
-`run --series btc-updown-5m` selects the current UTC five-minute window from
+`run --config configs/btc5m.toml` selects the current UTC five-minute window from
 the clock, not the broad volume-ranked discovery list. It starts immediately,
 then waits for each next five-minute boundary (not 300 seconds after model
-completion). Other intervals are rejected. Missing captures wait until the
+completion). The profile sets `[venue].series = "btc-updown-5m"` and
+`[session].interval_seconds = 300`; incompatible cadence fails config validation.
+Missing captures wait until the
 next boundary; admitted markets, including failed turns, are not retried.
-Slow cycles can skip windows. `--max-cycles` bounds admitted turns, not guaranteed
+Slow cycles can skip windows. `[session].max_cycles` bounds admitted turns, not guaranteed
 forecasts: discovery/capture failures do not count, but the deadline still applies.
 The default non-series loop is unchanged.
 
@@ -18,24 +20,25 @@ as fills. See [Platform storage](../../platform/docs/deployment.md#event-archive
 ## Explicitly start a bounded session
 
 No collection starts automatically. Before running, obtain approval for cycle,
-deadline, loss, daily model-cost, and session cost limits. Set `JOURNAL` to a
-new persistent local directory, and the other variables to approved values.
+deadline, loss, daily model-cost, and session cost limits. The bundled BTC profile
+sets 20 cycles, a 110-minute window, $15 session/daily model ceilings, and a
+$100 paper loss limit on $1,000 paper capital. Selecting it is not approval to
+spend. Edit a local TOML copy for different approved bounds; old setting flags
+are rejected rather than override the file. Set `JOURNAL` to a new persistent
+local directory.
 From `harness/`, with ambient ADC:
 
 ```sh
 GOOGLE_CLOUD_PROJECT=PROJECT_ID \
 CHRYSOPOEIA_EVENT_SINK=pubsub:projects/PROJECT_ID/topics/chrysopoeia-events \
-uv run chrysopoeia run --series btc-updown-5m \
+uv run chrysopoeia run --config configs/btc5m.toml \
   --journal "${JOURNAL:?choose a persistent local journal}" \
-  --max-cycles "${MAX_CYCLES:?set approved cycle limit}" \
-  --window-minutes "${WINDOW_MINUTES:?set approved deadline}" \
-  --cost-budget "${COST_BUDGET:?set approved session cost ceiling}" \
-  --daily-cloud-cost-budget "${DAILY_COST_BUDGET:?set approved daily ceiling}" \
-  --maximum-loss "${MAXIMUM_LOSS:?set approved paper loss ceiling}" \
   --stop-file "$JOURNAL/stop"
 ```
 
 The session uses the checked-in model configuration and local paper simulator.
+Inspect all settings without model/network calls using
+`uv run chrysopoeia validate --config configs/btc5m.toml --json`.
 This does not run a Cloud Run job or deploy a consumer. Use one writer per local
 journal. The publisher needs topic-scoped Pub/Sub publishing permission; it
 does not need BigQuery write access. Delivery failures leave pending outbox

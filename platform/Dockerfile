@@ -6,6 +6,7 @@ FROM python:3.12-slim
 # CHRYSOPOEIA_CONFIG.
 COPY .build/*.whl /tmp/harness/
 COPY .build/chrysopoeia.toml /etc/chrysopoeia.toml
+COPY .build/platform.toml /etc/chrysopoeia-platform.toml
 
 RUN pip install --no-cache-dir /tmp/harness/*.whl \
   && rm -rf /tmp/harness

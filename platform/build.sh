@@ -24,6 +24,7 @@ mkdir -p "$HARNESS_DIR/dist" "$PLATFORM_DIR/.build"
 (cd "$HARNESS_DIR" && uv build)
 cp "$HARNESS_DIR"/dist/*.whl "$PLATFORM_DIR/.build/"
 cp "$HARNESS_DIR/chrysopoeia.toml" "$PLATFORM_DIR/.build/chrysopoeia.toml"
+cp "$HARNESS_DIR/configs/platform.toml" "$PLATFORM_DIR/.build/platform.toml"
 
 docker build --platform linux/amd64 \
   -t "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest" "$PLATFORM_DIR"
@@ -31,6 +32,10 @@ docker build --platform linux/amd64 \
 docker run --rm --platform linux/amd64 \
   "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest" validate --json \
   | tee "$PLATFORM_DIR/.build/validate.json"
+
+docker run --rm --platform linux/amd64 \
+  "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest" \
+  validate --config /etc/chrysopoeia-platform.toml --json
 
 docker push "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest"
 

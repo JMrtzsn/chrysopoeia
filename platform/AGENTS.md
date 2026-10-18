@@ -27,6 +27,10 @@ Ordered platform work lives in `ROADMAP.md`.
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
   `job_args` Pulumi config for the current on-demand job. The harness owns
   bounded proposal cycles; platform does not drive them.
+- Operating settings are Harness-owned TOML, not CLI flags. Bundle
+  `harness/configs/platform.toml` with the wheel, set `CHRYSOPOEIA_CONFIG` to
+  `/etc/chrysopoeia-platform.toml`, and pass only command/journal invocation
+  inputs. Rebuild and pin the image when that profile changes.
 - Optional Pub/Sub configuration sets the Harness-owned event sink on the plain
   CLI image. Harness publishes from its journal outbox; Platform keeps only the
   topic and IAM. Future consumers own their identities, effects, and ledgers.
