@@ -25,6 +25,7 @@ MAX_METADATA_FUTURE_SKEW = timedelta(seconds=5)
 MAX_BOOK_LEVELS = 50
 DISCOVERY_HORIZON = timedelta(days=30)
 DEFAULT_TIMEOUT = 5.0
+MIN_SERIES_SECONDS_REMAINING = 30
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
 # First outcome is the "YES side" the harness buys; Up/Down markets map Up to it.
@@ -310,6 +311,7 @@ def discover_markets(
     *,
     limit: int = 10,
     series: str | None = None,
+    series_offset_seconds: float = 0,
     now: datetime | None = None,
     fetch: Fetch = _fetch,
 ) -> tuple[MarketCandidate, ...]:
@@ -318,6 +320,12 @@ def discover_markets(
         raise PolymarketError("Polymarket discovery limit must be between 1 and 20")
     if series not in (None, "btc-updown-5m"):
         raise PolymarketError("Polymarket discovery series is unsupported")
+    if (
+        isinstance(series_offset_seconds, bool)
+        or not isinstance(series_offset_seconds, (int, float))
+        or not 0 <= series_offset_seconds < 300
+    ):
+        raise PolymarketError("Polymarket discovery series offset is unsupported")
     current = now or datetime.now(timezone.utc)
     if not isinstance(current, datetime) or current.tzinfo is None:
         raise PolymarketError("Polymarket adapter current time must include a UTC offset")
@@ -338,6 +346,8 @@ def discover_markets(
                 if (
                     candidate.source_url == f"https://polymarket.com/event/{slug}"
                     and end.timestamp() == start + 300
+                    and current.timestamp() >= start + series_offset_seconds
+                    and end.timestamp() - current.timestamp() >= MIN_SERIES_SECONDS_REMAINING
                 ):
                     return (candidate,)
         return ()

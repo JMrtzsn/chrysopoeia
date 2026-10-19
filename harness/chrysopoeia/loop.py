@@ -40,14 +40,17 @@ class LoopParams:
     stop_file: Path | None = None
     stop_flag: StopFlag | None = None
     series: str | None = None
+    series_offset_seconds: float = 0.0
 
 
 def _sleep_seconds(params: LoopParams, current: datetime, end: datetime) -> float:
     if params.series is None:
         return params.interval_seconds
-    return max(
-        0.0, min(300 - current.timestamp() % 300, (end - current).total_seconds())
-    )
+    base = int(current.timestamp()) // 300 * 300
+    target = base + params.series_offset_seconds
+    if target <= current.timestamp():
+        target += 300
+    return max(0.0, min(target - current.timestamp(), (end - current).total_seconds()))
 
 
 def _stop_reason(
@@ -141,6 +144,15 @@ async def run_loop(
         if reason is not None:
             return _report(book, reason, cycles), iterations
 
+        if params.series is not None:
+            start = int(now().timestamp()) // 300 * 300
+            target = start + params.series_offset_seconds
+            if now().timestamp() < target:
+                await sleep(
+                    min(target - now().timestamp(), (window_end - now()).total_seconds())
+                )
+                continue
+
         iteration: dict[str, object] = {"iteration": len(iterations) + 1, "errors": []}
         errors = iteration["errors"]
         assert isinstance(errors, list)
@@ -169,7 +181,11 @@ async def run_loop(
         book = replay(params.journal)
         try:
             candidates = discover_markets(
-                limit=20, series=params.series, now=now(), fetch=fetch
+                limit=20,
+                series=params.series,
+                series_offset_seconds=params.series_offset_seconds,
+                now=now(),
+                fetch=fetch,
             )
         except Exception:
             errors.append("discovery unavailable")

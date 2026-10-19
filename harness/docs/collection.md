@@ -43,6 +43,16 @@ The BTC profile disables the pre-trader research step (`[research] enabled =
 false`) because web news rarely moves a five-minute window and grounded search
 was ~70% of measured cycle cost; the trader still uses 1-minute OHLCV analysis.
 A verified local cycle cost $0.0443 with research off versus $0.2127 with it on.
+
+The BTC profiles also set `[venue] forecast_offset_seconds = 120` and
+`window_baseline = true`. The offset is the minimum elapsed time in a window
+before forecasting, so a session started afterwards forecasts immediately and
+may land closer to the close. Each cycle attaches one snapshot-bound evidence
+record, "BTC 5m deterministic window baseline", with the window open, latest
+public last price, delta in bps, seconds remaining, recent 1-minute volatility,
+and a normal-approximation P(Up). It is measured evidence, not an instruction:
+the trader may ignore it, and deterministic policy still decides. If the
+exchange history or ticker is unavailable, the cycle proceeds without it.
 Inspect all settings without model/network calls using
 `uv run chrysopoeia validate --config configs/btc5m.toml --json`.
 This does not run a Cloud Run job or deploy a consumer. Use one writer per local

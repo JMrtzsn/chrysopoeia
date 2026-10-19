@@ -299,3 +299,31 @@ $1.50 session ceiling, so the deployed profile now matches the switch. The same
 build moved the dependency install into its own Docker layer so ordinary code or
 TOML changes should push only small layers; that speedup is unmeasured until the
 next such build, and no model cycle ran during this rollout.
+
+## BTC window baseline and forecast offset (2026-10-19)
+
+Operator approved two trader improvements. First, a deterministic baseline
+evidence record per BTC cycle: window open, latest public last price, delta in
+bps, seconds remaining, recent 1-minute volatility, and a normal-approximation
+P(Up), attached snapshot-bound as `BTC 5m deterministic window baseline`. It is
+measured evidence, never an instruction, and policy still decides. Second,
+`[venue].forecast_offset_seconds` (BTC profiles: 120) makes the loop wait until
+a window has elapsed that long before forecasting, instead of forecasting at the
+boundary when almost nothing is known.
+
+Offline: window math, monotonicity/clamping, insufficient-history rejection,
+optional ticker/history failure, discovery offset and the 30-second
+close guard, loop sleep target, config validation, and cycle evidence wiring are
+covered. 354 unit tests, Ruff, ty, config validation, and agent import pass.
+
+Two bounded local cycles verified the live boundary (research off, 120s offset,
+one cycle each, no event sink). The first cost $0.02586375 and exposed a
+stale-price bug: `last` came from the newest closed 1-minute candle, equal to the
+window open, so delta was 0.0 and P(Up) 0.500. The fix reads the public last
+price and the window-start candle's open. The second cycle cost $0.05032995 and
+attached `window_open=81919.94 last=81926.60 delta_bps=+0.8
+seconds_remaining=93 minute_vol=0.000590 baseline_p_up=0.544`; the trader
+returned a plan at p=0.75. Because the session started after the offset, it
+forecast 93 seconds from close — the offset is a minimum elapsed time, not an
+exact schedule. No orders, no benchmark, no Brier sample, and no platform change;
+no multi-window run has been scored since the fix.

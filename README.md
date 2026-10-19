@@ -105,6 +105,12 @@ web-research step. `configs/btc5m.toml` and `configs/platform.toml` set it to
 and grounded search dominated cost. Disabling it also removes the research
 allowance from the reservation (about $0.70 to $0.28 per failed turn).
 
+`[venue]` also accepts `forecast_offset_seconds` (0–299, default 0) and
+`window_baseline` (default `false`). The BTC profiles forecast 120 seconds into
+the window and attach a deterministic baseline evidence record (window open,
+last price, delta, remaining time, volatility, and a normal-approximation P(Up)).
+The offset is a minimum elapsed time, not an exact schedule.
+
 To score forecasts after their markets resolve (any binary Yes/No or Up/Down
 Polymarket market; Up is treated as the YES side):
 

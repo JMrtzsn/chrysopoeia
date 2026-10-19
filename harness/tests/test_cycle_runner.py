@@ -199,6 +199,47 @@ class CycleRunnerTests(unittest.TestCase):
         )
         return trader, reviewer, calls
 
+    def test_window_baseline_is_attached_as_citable_evidence_when_enabled(self) -> None:
+        from dataclasses import replace as dc_replace
+
+        from chrysopoeia.configuration import VenueConfig
+        from chrysopoeia.paper_cycle import external_evidence
+
+        trader, reviewer, _ = self.models("abstain")
+        record = external_evidence(
+            self.snapshot,
+            "https://www.bitstamp.net/api/?market=BTC/USD",
+            "BTC 5m deterministic window baseline",
+            self.snapshot.captured_at,
+            excerpt="baseline_p_up=0.620",
+        )
+        config = replace(
+            self.config,
+            venue=VenueConfig(
+                "polymarket", 0.02, "paper-assumption:flat-2pct-v1",
+                "btc-updown-5m", 120.0, True,
+            ),
+            research=dc_replace(self.config.research, enabled=False),
+        )
+
+        with patch(
+            "chrysopoeia.window_baseline.baseline_evidence", return_value=record
+        ):
+            state, _, _ = asyncio.run(
+                run_paper_cycle_state(
+                    config,
+                    self.snapshot,
+                    OperatingConfig(),
+                    trader,
+                    reviewer,
+                    FakeLlm(model=config.models.context, calls=[], response={}),
+                )
+            )
+
+        self.assertEqual(
+            state["validated_external_evidence"][0]["evidence_id"], record.evidence_id
+        )
+
     def test_disabled_research_skips_grounding_and_its_cost_reservation(self) -> None:
         from chrysopoeia.configuration import ResearchConfig
 

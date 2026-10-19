@@ -94,6 +94,8 @@ class VenueConfig:
     paper_fee_rate: float
     paper_fee_source: str
     series: str
+    forecast_offset_seconds: float = 0.0
+    window_baseline: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,9 @@ class HarnessConfig:
         research_config = ResearchConfig(enabled)
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
         venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "series"}
+        for optional in ("forecast_offset_seconds", "window_baseline"):
+            if isinstance(root["venue"], Mapping) and optional in root["venue"]:
+                venue_keys.add(optional)
         venue = _table(root["venue"], venue_keys, "venue")
         session = _table(root["session"], {
             "bankroll", "maximum_loss", "target_win_rate", "window_minutes",
@@ -255,7 +260,22 @@ class HarnessConfig:
             raise ConfigurationError("venue series is unsupported")
         if session_config.interval_seconds != 300:
             raise ConfigurationError("BTC 5m series requires a 300-second interval")
-        venue_config = VenueConfig(adapter, float(fee), fee_source, series)
+        offset = venue.get("forecast_offset_seconds", 0)
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, (int, float))
+            or not isfinite(offset)
+            or not 0 <= offset < 300
+        ):
+            raise ConfigurationError(
+                "forecast offset must be a finite number of seconds in [0, 300)"
+            )
+        baseline = venue.get("window_baseline", False)
+        if not isinstance(baseline, bool):
+            raise ConfigurationError("window baseline must be a boolean")
+        venue_config = VenueConfig(
+            adapter, float(fee), fee_source, series, float(offset), baseline
+        )
 
         model_adapter = _text(
             models.get("adapter", "adk-gemini")

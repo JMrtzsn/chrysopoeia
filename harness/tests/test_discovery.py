@@ -61,6 +61,48 @@ class MarketDiscoveryTests(unittest.TestCase):
             discover_markets(series="unknown", now=current, fetch=fetch)
         self.assertEqual(len(calls), 1)
 
+    def test_series_offset_targets_the_in_progress_window_and_skips_closing_windows(
+        self,
+    ) -> None:
+        slug = f"btc-updown-5m-{int(NOW.timestamp())}"
+        end = (NOW + timedelta(seconds=300)).isoformat()
+        page = [record(1, eventSlug=slug, outcomes=["Up", "Down"], endDate=end)]
+
+        def fetch(*_: object) -> bytes:
+            return json.dumps(page).encode()
+
+        candidates = discover_markets(
+            series="btc-updown-5m",
+            series_offset_seconds=120,
+            now=NOW + timedelta(seconds=135),
+            fetch=fetch,
+        )
+        self.assertEqual([item.market_id for item in candidates], ["1"])
+
+        early = discover_markets(
+            series="btc-updown-5m",
+            series_offset_seconds=120,
+            now=NOW + timedelta(seconds=75),
+            fetch=fetch,
+        )
+        self.assertEqual(early, ())
+
+        closing = discover_markets(
+            series="btc-updown-5m",
+            series_offset_seconds=120,
+            now=NOW + timedelta(seconds=285),
+            fetch=fetch,
+        )
+        self.assertEqual(closing, ())
+
+        with self.assertRaises(PolymarketError):
+            discover_markets(
+                series="btc-updown-5m",
+                series_offset_seconds=300,
+                now=NOW,
+                fetch=fetch,
+            )
+
     def test_paginates_ordered_near_term_gamma_markets_and_preserves_volume_order(
         self,
     ) -> None:

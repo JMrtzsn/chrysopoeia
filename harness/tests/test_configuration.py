@@ -110,6 +110,20 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(platform.venue.series, "btc-updown-5m")
         self.assertFalse(platform.research.enabled)
         self.assertFalse(btc.research.enabled)
+        self.assertEqual(btc.venue.forecast_offset_seconds, 120.0)
+        self.assertTrue(btc.venue.window_baseline)
+        self.assertTrue(platform.venue.window_baseline)
+        for key, invalid in (
+            ("forecast_offset_seconds", -1),
+            ("forecast_offset_seconds", 300),
+            ("forecast_offset_seconds", True),
+            ("forecast_offset_seconds", "120"),
+            ("window_baseline", "true"),
+        ):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            value["venue"][key] = invalid
+            with self.subTest(key=key, invalid=invalid), self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
         self.assertTrue(HarnessConfig.from_mapping(VALID).research.enabled)
         for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
             value = {name: fields.copy() for name, fields in VALID.items()}

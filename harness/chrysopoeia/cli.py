@@ -82,6 +82,8 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "paper_fee_rate": config.venue.paper_fee_rate,
             "paper_fee_source": config.venue.paper_fee_source,
             "series": config.venue.series,
+            "forecast_offset_seconds": config.venue.forecast_offset_seconds,
+            "window_baseline": config.venue.window_baseline,
         },
         "models": {
             "location": config.models.location,
@@ -653,6 +655,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.stop_file,
                         flag,
                         config.venue.series,
+                        config.venue.forecast_offset_seconds,
                     ),
                     config,
                     sleep=asyncio.sleep,

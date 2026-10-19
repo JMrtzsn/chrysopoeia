@@ -84,6 +84,31 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator approval (2026-10-19): improve BTC 5m forecasts with deterministic
+window context and later entry. (1) Attach a snapshot-bound baseline evidence
+record with the window open, latest price, delta, seconds remaining, recent
+1-minute volatility, and a normal-approximation P(Up); it is measured evidence,
+not an instruction. (2) Forecast at a configured offset into the window instead
+of at its boundary (`[venue].forecast_offset_seconds`), so the trader sees real
+price movement rather than a coin flip. Keep research off for BTC. Acceptance:
+offline math/selection tests, one bounded live cycle showing the baseline and
+the offset, then a clean multi-window benchmark. No platform, schema, or
+authenticated-execution change.
+
+Implementation evidence: 354 offline tests pass. Live cycles at the 120-second
+offset attached `window_open/last/delta_bps/seconds_remaining/minute_vol/
+baseline_p_up` evidence ($0.0259 and $0.0503 booked); one produced a plan at
+p=0.75. An earlier attempt exposed a stale-price bug (last closed 1-minute
+candle equal to the window open, delta 0.0), fixed by reading the public last
+price and the window-start candle's open. The configured offset is a minimum
+elapsed time: a session started later in a window forecasts immediately and can
+land closer to close. A clean multi-window benchmark has not rerun since.
+
+Follow-ups recorded from the same review, not implemented:
+`window_baseline` remains a config-gated Harness measurement only; replay-based
+A/B scoring, archive-backed past-outcome context, and a bounded provider-error
+retry stay unapproved future work. A ~9-market pilot is not evidence for tuning.
+
 Operator approval (2026-10-19): implement local missing-trader-output diagnostics
 only. Store safe cost error/reason and reserved model-call count in the failed
 turn, without changing tools, retries, budgets, or running paid cycles. Offline

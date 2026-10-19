@@ -55,6 +55,8 @@ EXPECTED = {
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
         "series": "btc-updown-5m",
+        "forecast_offset_seconds": 0.0,
+        "window_baseline": False,
     },
 }
 

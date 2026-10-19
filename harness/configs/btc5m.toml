@@ -5,6 +5,8 @@ mode = "paper"
 [venue]
 adapter = "polymarket"
 series = "btc-updown-5m"
+forecast_offset_seconds = 120
+window_baseline = true
 paper_fee_rate = 0.02
 paper_fee_source = "paper-assumption:flat-2pct-v1"
 

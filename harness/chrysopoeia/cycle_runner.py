@@ -412,6 +412,12 @@ async def run_paper_cycle_state(
             raise ValueError("external evidence bundle is missing")
         external = validated[1:]
     created: tuple[BaseLlm, ...] = ()
+    if config.venue.window_baseline and snapshot is not None:
+        from chrysopoeia.window_baseline import baseline_evidence
+
+        baseline = baseline_evidence(snapshot, now=datetime.now(timezone.utc))
+        if baseline is not None:
+            external = [baseline, *external]
     if trader_model is None and reviewer_model is None:
         created = (
             resolve_context_model(config.models),

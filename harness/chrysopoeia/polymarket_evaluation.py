@@ -16,6 +16,7 @@ from chrysopoeia.polymarket import (
 
 MAX_MARKETS = 200
 BASELINE_LOOKBACK_SECONDS = 300
+BASELINE_LOOKBACK_SECONDS = 300
 
 
 def brier_score(probabilities: list[float], outcomes: list[bool]) -> float | None:

@@ -77,6 +77,37 @@ def abstained(cost: str = "0.01") -> dict[str, object]:
 
 
 class LoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_series_offset_sleeps_into_the_window_before_forecasting(self) -> None:
+        current = NOW + timedelta(seconds=75)
+        sleeps = []
+
+        async def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            nonlocal current
+            current += timedelta(seconds=seconds)
+
+        with (
+            patch("chrysopoeia.loop.discover_markets", return_value=(candidate("1"),)) as discover,
+            patch("chrysopoeia.loop.load_market_snapshot", return_value=snapshot("1")),
+            patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value=abstained()),
+            ),
+        ):
+            await run_loop(
+                self.params(
+                    series="btc-updown-5m",
+                    series_offset_seconds=120,
+                    interval_seconds=300,
+                ),
+                self.config,
+                now=lambda: current,
+                sleep=sleep,
+            )
+
+        self.assertEqual(sleeps, [45])
+        self.assertEqual(discover.call_args.kwargs["series_offset_seconds"], 120)
+
     async def test_series_waits_for_next_boundary_without_retrying_failed_window(
         self,
     ) -> None:
