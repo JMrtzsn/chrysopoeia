@@ -46,6 +46,19 @@ coordination decision, not a new platform work item.
 
 ## Next
 
+Coordination boundary (2026-10-19): the Dockerfile installs the locked
+dependency set in its own layer before copying the wheel and configs. Keep that
+ordering; it is what makes an ordinary code or TOML change push only small layers
+instead of re-uploading ~357 MB. A `uv.lock` change is still a full push. No
+service, resource, or contract change is included.
+
+Implementation evidence: Dockerfile reordered and an 11th Platform contract test
+asserts the dependency layer precedes wheel/config copies. Image
+`sha256:13eac92e…` was pinned and deployed; `validate --json` execution
+`chrysopoeia-cycle-local-mdptj` exited 0 and loaded the platform profile with
+`research=False` and the BTC series. The claim that later code/TOML changes push
+small layers is not yet measured.
+
 Coordinated operator approval (2026-10-18): consume the Harness config-only
 operating-settings contract. Bundle its platform profile, pin the rebuilt
 image, and replace setting flags with `CHRYSOPOEIA_CONFIG`. Verify exactly one

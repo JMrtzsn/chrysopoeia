@@ -289,6 +289,13 @@ Recorded grounding cost was 11 queries × $0.014 = $0.154 of that $0.2127
 (about 72%), which motivated the switch. Vertex's monthly free grounding tier
 may make actual billing lower; the per-query figure is our recorded estimate,
 not a confirmed invoice. Offline coverage: 344 unit tests, Ruff, ty, config
-validation, and agent import passed. The deployed job remains unchanged and
-still enables research until an approved rebuild and rollout; no benchmark or
-Brier evidence is claimed.
+validation, and agent import passed. No benchmark or Brier evidence is claimed.
+
+The deployed job was then rebuilt, repinned (`sha256:13eac92e…`), deployed, and
+verified with a no-model `validate --json` execution
+(`chrysopoeia-cycle-local-mdptj`, exit 0). Its output confirms
+`research={'enabled': False}`, `series='btc-updown-5m'`, `max_cycles=2`, and a
+$1.50 session ceiling, so the deployed profile now matches the switch. The same
+build moved the dependency install into its own Docker layer so ordinary code or
+TOML changes should push only small layers; that speedup is unmeasured until the
+next such build, and no model cycle ran during this rollout.

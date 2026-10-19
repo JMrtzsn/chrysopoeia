@@ -30,6 +30,24 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn("pip install --no-cache-dir --no-deps -r", dockerfile)
         self.assertIn("pip install --no-cache-dir --no-deps /tmp/harness/*.whl", dockerfile)
         self.assertNotIn("pip install --no-cache-dir /tmp/harness/*.whl", dockerfile)
+        # The dependency layer must stay before wheel/config copies, or every
+        # code change rebuilds and re-pushes the whole dependency layer.
+        self.assertLess(
+            dockerfile.index("COPY .build/requirements.txt"),
+            dockerfile.index("COPY .build/*.whl"),
+        )
+        self.assertLess(
+            dockerfile.index("RUN pip install --no-cache-dir --no-deps -r"),
+            dockerfile.index("COPY .build/*.whl"),
+        )
+        for path in (
+            "/etc/chrysopoeia.toml",
+            "/etc/chrysopoeia-platform.toml",
+        ):
+            self.assertLess(
+                dockerfile.index("RUN pip install --no-cache-dir --no-deps -r"),
+                dockerfile.index(path),
+            )
 
     def test_archive_storage_is_protected_and_retained_independently_of_runtime(self) -> None:
         source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()

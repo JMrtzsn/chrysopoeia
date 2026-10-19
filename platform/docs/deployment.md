@@ -6,7 +6,10 @@ Cloud.
 ## Deployed shape
 
 - `harness/` builds a wheel and container image. `platform/` builds/publishes the
-  image and deploys the Pulumi program in `infra/`.
+  image and deploys the Pulumi program in `infra/`. `Dockerfile` installs the
+  locked dependencies in their own layer before copying the wheel and configs, so
+  a code or config change reuses the cached dependency layer and pushes only
+  small layers; changing `uv.lock` is still a full re-push.
 - The image installs the exact `uv.lock` export produced by `build.sh`
   (`uv export --frozen --no-emit-project`) with `--no-deps`, then the wheel
   itself. Installing the wheel alone lets transitive dependencies drift, which
@@ -205,6 +208,7 @@ can desynchronize state.
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
+| 2026-10-19 | `platform/build.sh` after splitting the dependency install into its own Docker layer; Pulumi repin to `sha256:13eac92e…`; one `platform/run.sh job --args=validate,--json --wait` | Scope: layer-cache ordering only; dependencies unchanged. Rebuilt image installs ADK 2.8.0/pydantic 2.13.4 and loads the bundled platform profile with `research=False` and `series=btc-updown-5m`. Pulumi updated only the job; 18 unchanged. Execution `chrysopoeia-cycle-local-mdptj` exited 0 and printed the platform profile summary. No model calls, market reads, or new resources. This build re-pushed the dependency layer because its content/position changed; later code-only or TOML-only changes should push small layers, unverified until the next such build. |
 | 2026-10-18 | `platform/build.sh` with frozen-lock install; Pulumi repin to `sha256:3ae64def…`; one `platform/run.sh job --args=validate,--json --wait` | Image now installs `uv export --frozen --no-emit-project` with `--no-deps`; container reports ADK 2.8.0/pydantic 2.13.4 matching the verified lock (previous image drifted to ADK 2.12.0/pydantic 2.14.1). Both bundled profiles validated inside the image. Pulumi updated only the job; 18 unchanged. Execution `chrysopoeia-cycle-local-7jccr` exited 0 and loaded the BTC platform profile. No model calls, market reads, or new resources. |
 | 2026-10-18 | Two-cycle BTC smoke `chrysopoeia-cycle-local-jj49n` (`run --journal /mnt/journal/btc-only-20261018-01`) under `configs/platform.toml` | BTC binding confirmed (markets `5818529`, `5818549`), but both turns failed with `ProposalOutput=None` before producing a proposal; no events archived. Booked $1.4077056 of conservative reservations; actual spend unknown. Exposes a trader missing-output defect, recorded in Harness verification. |
 | 2026-10-18 | Wheel/image build; Pulumi image pin and config-only job update; one `platform/run.sh job --args=run,--journal=/mnt/journal/config-only-20261018-01 --wait` | Image `sha256:d6c13fc6fcababcae0c62066513b0d55c447af0fb86f460c5176d6589a286840` validated both bundled profiles before upload. Upload required longer timeouts and a final manifest retry after EOF; no rebuild or extra job execution. Pulumi updated only the job; final preview 19 unchanged. Execution `chrysopoeia-cycle-local-nr6tj` exited 0, stopped at configured `max_cycles=2`: one paper fill and one failed turn. Booked model cost $0.87996215 ($0.17610935 completed + $0.7038528 conservative failed-turn reservation; actual failed-turn billing unknown), below $1.50 session cap. Both emitted events reached BigQuery with metadata; original synthetic row retained. One 100 MiB-capped query, no new cloud resources or real orders. Journal retained at `gs://PROJECT_ID-chrs-journals-local/config-only-20261018-01/chrysopoeia.jsonl`, with one unmonitored open paper position. Full bounds/results in Harness verification. No Consumer rollout, scheduler, or BTC benchmark. |
