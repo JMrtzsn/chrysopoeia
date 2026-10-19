@@ -114,6 +114,8 @@ def research_query_price(config: HarnessConfig) -> Decimal:
 
 def research_allowance(config: HarnessConfig) -> Decimal:
     """Reserved research cost for one cycle under the configured provider."""
+    if not config.research.enabled:
+        return Decimal(0)
     provider = resolve_research_provider(config.models)
     if provider == "google-search":
         return MAX_RESEARCH_QUERIES * GROUNDING_QUERY_PRICE_USD
@@ -451,7 +453,9 @@ async def run_paper_cycle_state(
         research = {"status": "unavailable", "reason": "research not run", "query_count": 0}
         ledger_records: list[dict[str, object]] | None = None
         if snapshot is not None and context_model is not None:
-            if provider == "google-search" and agents.context_agent.tools:
+            if not config.research.enabled:
+                research = {"status": "unavailable", "reason": "research disabled", "query_count": 0}
+            elif provider == "google-search" and agents.context_agent.tools:
                 context_agent = agents.context_agent.clone(
                     update={
                         "model": context_model,

@@ -91,6 +91,7 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "reviewer": config.models.reviewer,
         },
         "cost_policy": config.cost_policy,
+        "research": {"enabled": config.research.enabled},
         "session": {**asdict(config.session), "cost_budget": str(config.session.cost_budget)},
         "risk": asdict(config.risk),
     }

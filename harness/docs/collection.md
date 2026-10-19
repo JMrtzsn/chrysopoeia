@@ -39,6 +39,10 @@ uv run chrysopoeia run --config configs/btc5m.toml \
 ```
 
 The session uses the checked-in model configuration and local paper simulator.
+The BTC profile disables the pre-trader research step (`[research] enabled =
+false`) because web news rarely moves a five-minute window and grounded search
+was ~70% of measured cycle cost; the trader still uses 1-minute OHLCV analysis.
+A verified local cycle cost $0.0443 with research off versus $0.2127 with it on.
 Inspect all settings without model/network calls using
 `uv run chrysopoeia validate --config configs/btc5m.toml --json`.
 This does not run a Cloud Run job or deploy a consumer. Use one writer per local

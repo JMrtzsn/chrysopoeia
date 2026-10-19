@@ -108,6 +108,14 @@ class HarnessConfigurationTests(unittest.TestCase):
         platform = load_harness_config(base / "platform.toml")
         self.assertEqual(platform.session.max_cycles, 2)
         self.assertEqual(platform.venue.series, "btc-updown-5m")
+        self.assertFalse(platform.research.enabled)
+        self.assertFalse(btc.research.enabled)
+        self.assertTrue(HarnessConfig.from_mapping(VALID).research.enabled)
+        for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            value["research"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
         with self.assertRaises(ConfigurationError):
             HarnessConfig.from_mapping({
                 **{name: fields.copy() for name, fields in VALID.items()},

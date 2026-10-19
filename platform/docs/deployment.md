@@ -26,9 +26,12 @@ Cloud.
   300-second cadence), a 60-minute configured session deadline bounded by the
   job's 900-second task timeout, and a $1.50 session model-cost ceiling. Two
   windows plus the boundary wait stay well inside that timeout. Cost is reserved
-  before model work; expected actual spend for two completed cycles is about
-  $0.35, not a guaranteed bill. Changing the profile requires an image rebuild
-  and digest update, not extra CLI setting flags.
+  before model work; the profile disables the pre-trader research step
+  (`[research] enabled = false`), so one cycle reserves $0.2838528 and expected
+  actual spend for two completed cycles is about $0.09, not a guaranteed bill.
+  Changing the profile requires an image rebuild and digest update, not extra CLI
+  setting flags. The deployed job still runs the previous image with research
+  enabled until that rebuild and rollout happen.
 - The harness owns market selection, cadence, recovery, and stopping. The
   platform launches the process but does not drive cycles.
 - Re-running the job starts a fresh bounded session only when given a new

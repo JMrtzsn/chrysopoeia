@@ -90,6 +90,19 @@ turn, without changing tools, retries, budgets, or running paid cycles. Offline
 tests reproduce the cost-cap missing-output failure; the prior live trigger is
 still unconfirmed. See `docs/verification.md`.
 
+Operator approval (2026-10-19): add an optional validated `[research] enabled`
+switch (default on) and set it `false` in the BTC and Platform profiles. Web
+research dominated measured BTC cycle cost (~72%) and rarely informs a
+five-minute window; disabling it also removes the research allowance from the
+failure reservation ($0.7038528 to $0.2838528). Ledger the change, verify it
+offline, and keep the local journal authoritative.
+
+Implementation evidence: a local BTC cycle with research disabled abstained at
+$0.04432065 and recorded zero grounded queries, versus $0.21271855 with research
+enabled; no failures occurred. The reservation drops to $0.2838528. The deployed
+job still runs an older image with research enabled and needs a rebuild/rollout.
+See `docs/verification.md`.
+
 Coordinated operator approval (2026-10-18): move CLI operating settings to
 required validated TOML session/risk sections and venue selection; remove
 setting flags rather than retain overrides. Keep invocation inputs as flags.

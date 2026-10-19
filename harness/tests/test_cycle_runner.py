@@ -199,6 +199,34 @@ class CycleRunnerTests(unittest.TestCase):
         )
         return trader, reviewer, calls
 
+    def test_disabled_research_skips_grounding_and_its_cost_reservation(self) -> None:
+        from chrysopoeia.configuration import ResearchConfig
+
+        trader, reviewer, _ = self.models("abstain")
+        active = replace(
+            self.config,
+            research=ResearchConfig(enabled=False),
+        )
+        state, _, _ = asyncio.run(
+            run_paper_cycle_state(
+                active,
+                self.snapshot,
+                OperatingConfig(),
+                trader,
+                reviewer,
+                FakeLlm(model=active.models.context, calls=[], response={}),
+            )
+        )
+        summary = summarize_cycle(active, self.snapshot, state)
+
+        self.assertEqual(state["research"]["reason"], "research disabled")
+        self.assertEqual(state["research"]["query_count"], 0)
+        self.assertGreater(
+            reserved_ceiling(self.config) - reserved_ceiling(active),
+            Decimal("0.4"),
+        )
+        self.assertEqual(summary["status"], "abstained")
+
     def test_missing_proposal_records_cost_denial_and_call_count_in_failed_turn(self) -> None:
         from chrysopoeia.accounting import open_session, replay
         from chrysopoeia.operations import run_journal_turn

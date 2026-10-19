@@ -267,3 +267,28 @@ because no failure occurred; the 2026-10-18 cause is still unknown. All 343
 offline unit tests, Ruff, ty, config validation, agent import, dependency sync,
 and `git diff --check` passed. Do not treat one abstention as forecast-quality
 or benchmark evidence; no Brier/coverage/P&L sample exists.
+
+## Research switch and cost reduction (2026-10-19)
+
+Operator approved an optional validated `[research] enabled` setting (default
+`true`) and disabling it in `configs/btc5m.toml` and `configs/platform.toml`.
+The BTC trader keeps the 1-minute OHLCV analysis tool; only the pre-trader
+grounded/web research step is skipped, and its cost allowance leaves the
+reservation.
+
+One bounded local cycle ran at 2026-10-19T09:04Z from a temporary copy of the
+BTC profile capped at one cycle and a $1.50 budget: the turn abstained,
+`research` recorded `unavailable` / `research disabled` with `query_count=0`,
+and actual estimated model cost was **$0.04432065** against the $0.2838528
+reserved ceiling and $1.50 budget. Two plan checks ran. The comparable
+research-enabled cycle on 2026-10-19 cost $0.21271855, so measured cost fell
+about 79%. One public window, no orders, no event sink, no platform change;
+journal retained at `~/chrysopoeia-journals/nosearch-20261019T090437`.
+
+Recorded grounding cost was 11 queries × $0.014 = $0.154 of that $0.2127
+(about 72%), which motivated the switch. Vertex's monthly free grounding tier
+may make actual billing lower; the per-query figure is our recorded estimate,
+not a confirmed invoice. Offline coverage: 344 unit tests, Ruff, ty, config
+validation, and agent import passed. The deployed job remains unchanged and
+still enables research until an approved rebuild and rollout; no benchmark or
+Brier evidence is claimed.

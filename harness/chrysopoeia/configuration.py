@@ -145,6 +145,11 @@ class CostConfig:
 
 
 @dataclass(frozen=True)
+class ResearchConfig:
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     runtime: RuntimeConfig
     venue: VenueConfig
@@ -152,10 +157,20 @@ class HarnessConfig:
     cost: CostConfig
     session: SessionConfig
     risk: RiskConfig
+    research: ResearchConfig = ResearchConfig()
 
     @classmethod
     def from_mapping(cls, value: object) -> "HarnessConfig":
-        root = _table(value, {"runtime", "venue", "models", "cost", "session", "risk"}, "harness")
+        root_keys = {"runtime", "venue", "models", "cost", "session", "risk"}
+        if isinstance(value, Mapping) and "research" in value:
+            root_keys.add("research")
+        root = _table(value, root_keys, "harness")
+        research_raw = root.get("research", {"enabled": True})
+        research = _table(research_raw, {"enabled"}, "research")
+        enabled = research["enabled"]
+        if not isinstance(enabled, bool):
+            raise ConfigurationError("research enabled must be a boolean")
+        research_config = ResearchConfig(enabled)
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
         venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "series"}
         venue = _table(root["venue"], venue_keys, "venue")
@@ -322,7 +337,15 @@ class HarnessConfig:
             ),
             _positive_int(cost["maximum_model_calls_per_cycle"], "maximum model calls"),
         )
-        result = cls(runtime_config, venue_config, model_config, cost_config, session_config, risk_config)
+        result = cls(
+            runtime_config,
+            venue_config,
+            model_config,
+            cost_config,
+            session_config,
+            risk_config,
+            research_config,
+        )
         try:
             _ = result.operating
         except ValueError as exc:

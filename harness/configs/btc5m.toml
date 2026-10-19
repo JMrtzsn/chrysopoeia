@@ -33,6 +33,9 @@ cost_budget = "15"
 interval_seconds = 300
 daily_cloud_cost_budget = 15
 
+[research]
+enabled = false
+
 [risk]
 maximum_market_exposure = 0.01
 maximum_total_exposure = 0.10

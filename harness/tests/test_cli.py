@@ -43,6 +43,7 @@ EXPECTED = {
         "trader": "gemini-3.5-flash",
     },
     "runtime": {"adapter": "adk", "mode": "paper"},
+    "research": {"enabled": True},
     "session": VALID["session"],
     "risk": VALID["risk"],
     "schema_version": 1,

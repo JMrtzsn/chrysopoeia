@@ -99,6 +99,12 @@ same series, so `discover` and `run` cannot select other markets. Explicit
 [collection instructions](harness/docs/collection.md). Do not start paid
 sessions without approved bounds.
 
+`[research] enabled` (optional, default `true`) controls the pre-trader
+web-research step. `configs/btc5m.toml` and `configs/platform.toml` set it to
+`false`: BTC 5m evidence comes from the snapshot and 1-minute OHLCV analysis,
+and grounded search dominated cost. Disabling it also removes the research
+allowance from the reservation (about $0.70 to $0.28 per failed turn).
+
 To score forecasts after their markets resolve (any binary Yes/No or Up/Down
 Polymarket market; Up is treated as the YES side):
 
