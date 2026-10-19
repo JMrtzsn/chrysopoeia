@@ -741,7 +741,12 @@ def record_fill(directory: Path, position: Position, turn_id: str) -> dict:
 
 
 def finish_turn(
-    directory: Path, turn_id: str, outcome: str, *, model_cost_usd: str = "0"
+    directory: Path,
+    turn_id: str,
+    outcome: str,
+    *,
+    model_cost_usd: str = "0",
+    failure: dict[str, object] | None = None,
 ) -> dict:
     """Record the one terminal outcome for an admitted turn."""
     _clean(turn_id, "turn_id")
@@ -761,7 +766,12 @@ def finish_turn(
     return append_record(
         directory,
         "turn_finished",
-        {"turn_id": turn_id, "outcome": outcome, "model_cost_usd": str(cost)},
+        {
+            "turn_id": turn_id,
+            "outcome": outcome,
+            "model_cost_usd": str(cost),
+            **({"failure": failure} if failure is not None else {}),
+        },
     )
 
 

@@ -229,3 +229,41 @@ path (for example, drop redundant discovery/capture tools from the
 already-captured cycle or add one bounded retry), verify with two windows, then
 rerun the benchmark with a fresh journal. No Brier/coverage/P&L evidence exists
 for this sample.
+
+## Missing trader output diagnostics (2026-10-19)
+
+Operator approved diagnostics only, not a new model run, retry, budget change,
+or tool change. A failed turn can now carry an optional `failure` object on
+its existing `turn_finished` journal record: `error_code`, `message`, and
+`model_calls`. The count is the cycle's cost-ledger reservations, including
+research/reviewer calls when present, not confirmed provider requests or billing.
+Denied calls that never reserve are not counted.
+
+Only recognized Harness cost error codes and allowlisted deterministic reasons
+are recorded. Unknown provider codes/messages or missing output produce
+`TRADER_OUTPUT_MISSING` with cause unavailable; prompts, provider bodies, and
+model text are not copied. This remains a local diagnostic, not a forecast or
+published outcome. Existing journals replay without requiring the optional field.
+Failure costs, admission, execution policy, cancellation, and no-retry behavior
+are unchanged.
+
+Offline fake-model checks exhaust a one-call ceiling through the real ADK loop,
+reproduce `ProposalOutput=None`, and assert that replayable failed-turn evidence
+contains `MODEL_COST_POLICY_DENIED`, the ceiling reason, and one reserved call.
+Separate checks cover empty trader output and rejection of arbitrary provider
+text.
+
+One approved local diagnostic cycle ran at 2026-10-19T08:56Z on the default
+BTC profile (`max_cycles=1`, no event sink): market capture, Vertex calls, and
+the full paper decision completed, the turn **abstained** (not failed), and
+$0.21271855 actual estimated model cost was booked under the $5 session budget.
+No `failure` field was recorded because the turn did not fail. One public
+window, no orders, no event sink, no platform change; the temporary journal is
+retained at `~/chrysopoeia-journals/diag-20261019T085634`.
+
+This shows the missing-output failure is intermittent, not deterministic, and
+the paid path still works. The new failure branch remains live-unverified
+because no failure occurred; the 2026-10-18 cause is still unknown. All 343
+offline unit tests, Ruff, ty, config validation, agent import, dependency sync,
+and `git diff --check` passed. Do not treat one abstention as forecast-quality
+or benchmark evidence; no Brier/coverage/P&L sample exists.

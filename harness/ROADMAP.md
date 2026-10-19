@@ -84,6 +84,12 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator approval (2026-10-19): implement local missing-trader-output diagnostics
+only. Store safe cost error/reason and reserved model-call count in the failed
+turn, without changing tools, retries, budgets, or running paid cycles. Offline
+tests reproduce the cost-cap missing-output failure; the prior live trigger is
+still unconfirmed. See `docs/verification.md`.
+
 Coordinated operator approval (2026-10-18): move CLI operating settings to
 required validated TOML session/risk sections and venue selection; remove
 setting flags rather than retain overrides. Keep invocation inputs as flags.
@@ -137,16 +143,38 @@ The implementation retains v1 YES compatibility. No platform change is included.
    delivery is verified 2026-10-15 (BYOK OpenRouter trader, HTTP sink to the local
    Consumer, paper fill recorded; `docs/verification.md`); the deployed path
    (Pulumi subscription) remains unverified.
-3. **Additional research providers:** Google Search, OpenRouter web search, and
+3. **Liquidity-aware sizing and profitability by amount** (operator-approved
+   roadmap addition, 2026-10-19; implementation not started): distinguish the
+   policy/risk allowance from measured executable book capacity and capacity
+   that still meets the configured net-edge requirement. For BTC 5m YES/Up and
+   NO/Down separately, use the actual selected token's fresh asks, not a
+   complemented price. Reuse the existing deterministic depth/fee quote logic;
+   order-book thickness is observed data, never an operator-invented constant.
+   Compare bounded candidate stake amounts using the same forecast and snapshot:
+   shares, VWAP, worst entry price, slippage, fees, total cash required, expected
+   net dollar profit, and expected net ROI. Show marginal as well as average
+   edge so extra dollars are not added at unprofitable prices just because the
+   earlier liquidity was cheap. Keep model/research costs separate and show
+   their effect on break-even; do not treat model probabilities as proven returns.
+   Acceptance example: when policy allows $50 but only $10 of depth meets the
+   edge requirement, compare the $10 quote with the full $50 quote, flag the
+   latter's deterioration/rejection, and constrain the chosen stake accordingly.
+   If $50 cannot be filled within captured depth/entry limits, report unavailable
+   rather than extrapolate. Preserve all risk/fee/expiry controls; never increase
+   the allowed stake to match depth. Cover thin books, multiple price levels,
+   insufficient depth, and YES/NO sides with offline behavior tests, followed by
+   separately approved bounded public-book verification. Keep this Harness-owned:
+   no Consumer/schema, platform, or authenticated-execution changes are included.
+4. **Additional research providers:** Google Search, OpenRouter web search, and
    public stock/crypto OHLCV analysis are implemented. Financial/company-data
    sources (e.g. FRED, CoinGecko, SEC EDGAR) remain open until separately
    selected and verified.
-4. **Trading-history context source:** read-only BigQuery-backed evidence tool,
+5. **Trading-history context source:** read-only BigQuery-backed evidence tool,
    after outcome data exists; see the spec's approved future item.
-5. **Additional venues:** separate milestones after the Polymarket paper path is
+6. **Additional venues:** separate milestones after the Polymarket paper path is
    verified. Two-sided paper positions were separately approved above; no new
    execution venue is introduced. Event-contract changes use new schema versions.
-6. **Future CCXT crypto-trading integration:** CCXT is now used only for public
+7. **Future CCXT crypto-trading integration:** CCXT is now used only for public
    OHLCV data. After the Polymarket YES-only live path is verified, separately
    plan any crypto venue execution, including exchange, spot/derivatives, and
    its own risk and activation gates.

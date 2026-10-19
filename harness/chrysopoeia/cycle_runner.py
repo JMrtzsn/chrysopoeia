@@ -67,6 +67,43 @@ OPENROUTER_WEB_RESULT_PRICE_USD = Decimal("0.004")
 RESEARCH_KEY = "research"
 
 
+class MissingTraderOutputError(RuntimeError):
+    """A failed trader invocation with safe journal diagnostics."""
+
+    def __init__(self, failure: dict[str, object]) -> None:
+        super().__init__("trader ended without a structured proposal")
+        self.failure = failure
+
+
+def _trader_failure(code: str | None, message: str | None, ledger: object) -> dict[str, object]:
+    safe_code = "TRADER_OUTPUT_MISSING"
+    safe_message = "trader ended without a structured proposal; cause unavailable"
+    if code == "MODEL_COST_POLICY_DENIED":
+        safe_code = code
+        safe_message = "model call denied by cost policy; detail unavailable"
+        for reason in (
+            "requested token ceiling exceeds cost policy",
+            "input token ceiling exceeds cost policy",
+            "output token ceiling exceeds cost policy",
+            "cycle model-call ceiling is exhausted",
+            "daily model cost budget is exhausted; increase the user budget or wait for the next UTC day",
+        ):
+            if message == f"Model call denied: {reason}.":
+                safe_message = reason
+                break
+    elif code == "MODEL_COST_USAGE_INVALID":
+        safe_code = code
+        safe_message = "model response rejected by cost usage policy"
+    elif code == "MODEL_COST_RELEASE_FAILED":
+        safe_code = code
+        safe_message = "model failure could not release its cost reservation"
+    return {
+        "error_code": safe_code,
+        "message": safe_message,
+        "model_calls": len(ledger) if isinstance(ledger, list) else 0,
+    }
+
+
 def research_query_price(config: HarnessConfig) -> Decimal:
     """Per-unit research price for the configured provider."""
     provider = resolve_research_provider(config.models)
@@ -538,19 +575,34 @@ async def run_paper_cycle_state(
             await sessions.append_event(session, Event(author="research", actions=EventActions(state_delta=delta)))
         runner = Runner(app_name=app_name, node=workflow, session_service=sessions)
         function_calls: list[str] = []
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=PaperCycleRequest(context=context, draft=draft).model_dump_json())],
-            ),
-        ):
-            for part in (
-                event.content.parts if event.content and event.content.parts else []
+        trader_seen = False
+        error_code = error_message = None
+        try:
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=types.Content(
+                    role="user",
+                    parts=[types.Part(text=PaperCycleRequest(context=context, draft=draft).model_dump_json())],
+                ),
             ):
-                if part.function_call:
-                    function_calls.append(part.function_call.name or "")
+                if event.author == "paper_market_trader":
+                    trader_seen = True
+                    error_code, error_message = event.error_code, event.error_message
+                for part in (
+                    event.content.parts if event.content and event.content.parts else []
+                ):
+                    if part.function_call:
+                        function_calls.append(part.function_call.name or "")
+        except Exception as exc:
+            session = await sessions.get_session(
+                app_name=app_name, user_id=user_id, session_id=session_id
+            )
+            if trader_seen and session is not None and not session.state.get(PROPOSAL_KEY):
+                raise MissingTraderOutputError(
+                    _trader_failure(error_code, error_message, session.state.get(LEDGER_KEY))
+                ) from exc
+            raise
         session = await sessions.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
         )

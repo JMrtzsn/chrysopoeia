@@ -151,7 +151,7 @@ async def run_journal_turn(
     draft: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run or recover one idempotent journal-backed paper turn."""
-    from chrysopoeia.cycle_runner import reserved_ceiling
+    from chrysopoeia.cycle_runner import MissingTraderOutputError, reserved_ceiling
 
     if run is None:
         from chrysopoeia.cycle_runner import run_paper_cycle
@@ -244,6 +244,17 @@ async def run_journal_turn(
             status = result.get("status")
             outcome = status if status in {"abstained", "rejected"} else "failed"
         finish_turn(journal, turn_id, outcome, model_cost_usd=str(cost))
+    except MissingTraderOutputError as exc:
+        state = replay(journal)
+        if turn_id in state.open_turns:
+            finish_turn(
+                journal,
+                turn_id,
+                "failed",
+                model_cost_usd=failed_cost,
+                failure=exc.failure,
+            )
+        raise
     except (JournalError, KeyError, TypeError, ValueError) as exc:
         state = replay(journal)
         if turn_id in state.open_turns:

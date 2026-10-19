@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import tempfile
 import unittest
 from collections.abc import AsyncGenerator
 from dataclasses import replace
@@ -20,6 +21,7 @@ from chrysopoeia.cost import LEDGER_KEY, settle_model_call
 from chrysopoeia.cycle_runner import (
     GROUNDING_QUERY_PRICE_USD,
     MAX_RESEARCH_QUERIES,
+    MissingTraderOutputError,
     normalize_grounding_metadata,
     reserved_ceiling,
     run_paper_cycle,
@@ -196,6 +198,54 @@ class CycleRunnerTests(unittest.TestCase):
             },
         )
         return trader, reviewer, calls
+
+    def test_missing_proposal_records_cost_denial_and_call_count_in_failed_turn(self) -> None:
+        from chrysopoeia.accounting import open_session, replay
+        from chrysopoeia.operations import run_journal_turn
+
+        trader, reviewer, _ = self.models()
+        config = replace(self.config, cost=replace(self.config.cost, maximum_model_calls_per_cycle=1))
+
+        async def run(config, snapshot, operating, **kwargs):
+            return await run_paper_cycle(config, snapshot, operating, trader, reviewer, **kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            open_session(journal, 1000, 100)
+            with self.assertRaises(RuntimeError):
+                asyncio.run(run_journal_turn(journal, config, self.snapshot, OperatingConfig(), run=run))
+            records = [json.loads(line) for line in (journal / "chrysopoeia.jsonl").read_text().splitlines()]
+            finished = records[-1]
+            self.assertEqual(finished["record_type"], "turn_finished")
+            self.assertEqual(finished["outcome"], "failed")
+            self.assertEqual(finished["failure"], {
+                "error_code": "MODEL_COST_POLICY_DENIED",
+                "message": "cycle model-call ceiling is exhausted",
+                "model_calls": 1,
+            })
+            self.assertEqual(list(replay(journal).finished_turns.values()), ["failed"])
+
+    def test_missing_proposal_diagnostics_do_not_persist_provider_text(self) -> None:
+        from chrysopoeia.cycle_runner import _trader_failure
+
+        failure = _trader_failure("provider secret", "credential=secret private rationale", [])
+        self.assertEqual(failure, {
+            "error_code": "TRADER_OUTPUT_MISSING",
+            "message": "trader ended without a structured proposal; cause unavailable",
+            "model_calls": 0,
+        })
+        denied = _trader_failure("MODEL_COST_POLICY_DENIED", "private provider body", [])
+        self.assertEqual(denied["message"], "model call denied by cost policy; detail unavailable")
+
+    def test_empty_trader_output_reports_unknown_cause_without_inventing_a_denial(self) -> None:
+        trader, reviewer, _ = self.models("abstain")
+        trader.raw_response = ""
+
+        with self.assertRaises(MissingTraderOutputError) as raised:
+            asyncio.run(run_paper_cycle(self.config, self.snapshot, OperatingConfig(), trader, reviewer))
+
+        self.assertEqual(raised.exception.failure["error_code"], "TRADER_OUTPUT_MISSING")
+        self.assertEqual(raised.exception.failure["model_calls"], 1)
 
     def test_cycle_requests_disable_thinking_and_keep_cost_output_ceiling(self) -> None:
         trader, reviewer, _ = self.models()
@@ -406,12 +456,13 @@ class CycleRunnerTests(unittest.TestCase):
                     )
                 )
             else:
-                with self.assertRaises(ValueError):
+                with self.assertRaises(MissingTraderOutputError) as raised:
                     asyncio.run(
                         run_paper_cycle(
                             self.config, self.snapshot, operating, trader, reviewer
                         )
                     )
+                self.assertEqual(raised.exception.failure["error_code"], "MODEL_COST_POLICY_DENIED")
 
     def test_operating_exposure_limits_control_deterministic_policy(self) -> None:
         trader, reviewer, _ = self.models()
