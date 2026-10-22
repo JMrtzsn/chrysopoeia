@@ -24,6 +24,8 @@ from chrysopoeia.agent import (
     route_proposal,
 )
 from chrysopoeia.configuration import HarnessConfig, ModelPrice
+from chrysopoeia.context_learning import resolve_context_profile
+from chrysopoeia.context_profiles import ContextProfile
 from chrysopoeia.cost import (
     LEDGER_KEY,
     release_model_call,
@@ -195,8 +197,15 @@ def build_cycle_workflow(
     config: HarnessConfig,
     trader_model: BaseLlm | str,
     reviewer_model: BaseLlm | str,
+    *,
+    context_profile: ContextProfile | None = None,
+    enforce_context_profile: bool = False,
 ) -> tuple[Workflow, tuple[str, str]]:
-    agents = build_agents(config)
+    agents = build_agents(
+        config,
+        context_profile=context_profile,
+        enforce_context_profile=enforce_context_profile,
+    )
     no_retry = RetryConfig(max_attempts=1)
     model_config = types.GenerateContentConfig(
         http_options=types.HttpOptions(
@@ -331,6 +340,12 @@ def summarize_cycle(
     evidence_value = state.get("paper_cycle_evidence", [])
     if not isinstance(evidence_value, list):
         raise ValueError("invalid cycle evidence")
+    profile_value = state.get("context_profile")
+    profile = (
+        ContextProfile.model_validate(profile_value)
+        if profile_value is not None
+        else None
+    )
     outcome_event = build_turn_outcome(
         proposal=proposal.model_dump(),
         review=review.model_dump() if review else None,
@@ -353,6 +368,7 @@ def summarize_cycle(
             if isinstance(record, Mapping)
         ],
         research=research,
+        context=profile.identity.as_dict() if profile is not None else None,
     )
     public_fill = None
     if fill is not None:
@@ -411,7 +427,7 @@ async def run_paper_cycle_state(
         if len(validated) < 2:
             raise ValueError("external evidence bundle is missing")
         external = validated[1:]
-    created: tuple[BaseLlm, ...] = ()
+    created: list[BaseLlm] = []
     if config.venue.window_baseline and snapshot is not None:
         from chrysopoeia.window_baseline import baseline_evidence
 
@@ -419,17 +435,19 @@ async def run_paper_cycle_state(
         if baseline is not None:
             external = [baseline, *external]
     if trader_model is None and reviewer_model is None:
-        created = (
+        created.extend((
             resolve_context_model(config.models),
             resolve_model(config.models, config.models.trader),
             resolve_model(config.models, config.models.reviewer),
-        )
+        ))
         context_model, trader_model, reviewer_model = created
     elif trader_model is None or reviewer_model is None:
         raise ValueError("both cycle models are required")
+    if context_model is None and config.context_learning.enabled:
+        context_model = resolve_context_model(config.models)
+        created.append(context_model)
     primary_error: BaseException | None = None
     try:
-        workflow, _ = build_cycle_workflow(config, trader_model, reviewer_model)
         agents = build_agents(config)
         sessions = session_service or InMemorySessionService()
         app_name = "chrysopoeia_cycle"
@@ -455,10 +473,51 @@ async def run_paper_cycle_state(
                 ),
             },
         )
+        context_resolution = await resolve_context_profile(
+            config,
+            snapshot,
+            context_model=context_model,
+            reviewer_model=reviewer_model,
+            sessions=sessions,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        profile = context_resolution.profile
+        profile_guidance = (
+            {
+                "scope_key": profile.scope_key,
+                "profile_id": profile.profile_id,
+                "profile_version": profile.profile_version,
+                "manifest_hash": profile.manifest_hash,
+                "learning_summary": profile.learning_summary,
+                "instructions": profile.instructions,
+            }
+            if profile is not None
+            else None
+        )
+        profile_state: dict[str, object] = {
+            "context_profile_available": profile is not None,
+        }
+        if profile is not None:
+            profile_state.update(
+                context_profile=profile.model_dump(),
+                market_context=profile.identity.as_dict(),
+                context_profile_guidance=profile_guidance,
+            )
+        session = await sessions.get_session(
+            app_name=app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            raise ValueError("paper cycle session is missing")
+        await sessions.append_event(
+            session,
+            Event(author="research", actions=EventActions(state_delta=profile_state)),
+        )
         provider = resolve_research_provider(config.models)
         research = {"status": "unavailable", "reason": "research not run", "query_count": 0}
         ledger_records: list[dict[str, object]] | None = None
-        if snapshot is not None and context_model is not None:
+        if snapshot is not None and context_model is not None and profile is not None and "public_web" in profile.evidence_sources:
             if not config.research.enabled:
                 research = {"status": "unavailable", "reason": "research disabled", "query_count": 0}
             elif provider == "google-search" and agents.context_agent.tools:
@@ -574,15 +633,45 @@ async def run_paper_cycle_state(
                     "reason": "no research provider configured",
                     "query_count": 0,
                 }
-            session = await sessions.get_session(app_name=app_name, user_id=user_id, session_id=session_id)
-            if session is None:
-                raise ValueError("paper cycle session is missing")
-            delta: dict[str, object] = {RESEARCH_KEY: research}
-            if external:
-                delta[VALIDATED_EXTERNAL_EVIDENCE_KEY] = [record.model_dump() for record in external]
-            if ledger_records is not None:
-                delta[LEDGER_KEY] = ledger_records
-            await sessions.append_event(session, Event(author="research", actions=EventActions(state_delta=delta)))
+        elif snapshot is not None and profile is None:
+            research = {"status": "unavailable", "reason": "context profile unavailable", "query_count": 0}
+        elif snapshot is not None and profile is not None and "public_web" not in profile.evidence_sources:
+            research = {"status": "unavailable", "reason": "profile excludes public web", "query_count": 0}
+        session = await sessions.get_session(
+            app_name=app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            raise ValueError("paper cycle session is missing")
+        delta: dict[str, object] = {RESEARCH_KEY: research}
+        if external:
+            delta[VALIDATED_EXTERNAL_EVIDENCE_KEY] = [record.model_dump() for record in external]
+        if ledger_records is not None:
+            delta[LEDGER_KEY] = ledger_records
+        await sessions.append_event(session, Event(author="research", actions=EventActions(state_delta=delta)))
+        if context_resolution.history_evidence is not None:
+            external = [*external[:18], context_resolution.history_evidence]
+        session = await sessions.get_session(
+            app_name=app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            raise ValueError("paper cycle session is missing")
+        context_delta: dict[str, object] = {}
+        if external:
+            context_delta[VALIDATED_EXTERNAL_EVIDENCE_KEY] = [
+                record.model_dump() for record in external
+            ]
+        if context_delta:
+            await sessions.append_event(
+                session,
+                Event(author="research", actions=EventActions(state_delta=context_delta)),
+            )
+        workflow, _ = build_cycle_workflow(
+            config,
+            trader_model,
+            reviewer_model,
+            context_profile=profile,
+            enforce_context_profile=True,
+        )
         runner = Runner(app_name=app_name, node=workflow, session_service=sessions)
         function_calls: list[str] = []
         trader_seen = False
@@ -593,7 +682,15 @@ async def run_paper_cycle_state(
                 session_id=session_id,
                 new_message=types.Content(
                     role="user",
-                    parts=[types.Part(text=PaperCycleRequest(context=context, draft=draft).model_dump_json())],
+                    parts=[
+                        types.Part(
+                            text=PaperCycleRequest(
+                                context=context,
+                                draft=draft,
+                                profile=profile_guidance,
+                            ).model_dump_json()
+                        )
+                    ],
                 ),
             ):
                 if event.author == "paper_market_trader":

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chrysopoeia.local/contracts/consumer_outcome.v1.schema.json",
+  "title": "Consumer-owned paper lifecycle outcome event v1",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_type", "event_id", "trade_plan_event_id", "market_id", "status", "recorded_at", "reason"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_type": {"const": "consumer_outcome"},
+        "event_id": {"$ref": "#/$defs/event_id"},
+        "trade_plan_event_id": {"$ref": "#/$defs/trade_plan_event_id"},
+        "market_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "status": {"const": "rejected"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 500}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_type", "event_id", "trade_plan_event_id", "market_id", "status", "recorded_at", "token_id", "quote_snapshot_id", "price", "stake", "fee", "total_cost", "shares"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_type": {"const": "consumer_outcome"},
+        "event_id": {"$ref": "#/$defs/event_id"},
+        "trade_plan_event_id": {"$ref": "#/$defs/trade_plan_event_id"},
+        "market_id": {"$ref": "#/$defs/id"},
+        "status": {"const": "filled"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "token_id": {"$ref": "#/$defs/id"},
+        "quote_snapshot_id": {"$ref": "#/$defs/id"},
+        "price": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "stake": {"type": "number", "exclusiveMinimum": 0},
+        "fee": {"type": "number", "minimum": 0},
+        "total_cost": {"type": "number", "exclusiveMinimum": 0},
+        "shares": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_type", "event_id", "trade_plan_event_id", "market_id", "status", "recorded_at", "quote_snapshot_id", "proceeds", "pnl", "price", "fee"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_type": {"const": "consumer_outcome"},
+        "event_id": {"$ref": "#/$defs/event_id"},
+        "trade_plan_event_id": {"$ref": "#/$defs/trade_plan_event_id"},
+        "market_id": {"$ref": "#/$defs/id"},
+        "status": {"const": "closed"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "quote_snapshot_id": {"$ref": "#/$defs/id"},
+        "proceeds": {"type": "number", "minimum": 0},
+        "pnl": {"type": "number"},
+        "price": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "fee": {"type": "number", "minimum": 0}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_type", "event_id", "trade_plan_event_id", "market_id", "status", "recorded_at", "quote_snapshot_id", "proceeds", "pnl", "resolution"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "record_type": {"const": "consumer_outcome"},
+        "event_id": {"$ref": "#/$defs/event_id"},
+        "trade_plan_event_id": {"$ref": "#/$defs/trade_plan_event_id"},
+        "market_id": {"$ref": "#/$defs/id"},
+        "status": {"const": "settled"},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "quote_snapshot_id": {"$ref": "#/$defs/id"},
+        "proceeds": {"type": "number", "minimum": 0},
+        "pnl": {"type": "number"},
+        "resolution": {"enum": ["YES", "NO"]}
+      }
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"},
+    "event_id": {"type": "string", "pattern": "^consumer-outcome-[0-9a-f]{24}$"},
+    "trade_plan_event_id": {"type": "string", "pattern": "^turn-[0-9a-f]{24}$"}
+  }
+}

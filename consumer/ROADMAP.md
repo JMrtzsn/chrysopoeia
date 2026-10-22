@@ -33,5 +33,13 @@ authorize deployment or real orders.
    until all spec gates pass.
 3. **Bounded live activation:** only after gates pass, run a separately approved
    smallest-possible live order and exit with the dedicated $10 wallet.
+4. **Consumer lifecycle outcome events** (coordinated operator approval,
+   2026-10-21; implementation underway): publish versioned `consumer_outcome`
+   records for durable fill, rejection, close, and settlement transitions to the
+   existing Harness event topic. Derive publication from the Consumer journal,
+   use stable event IDs and durable delivery acknowledgements, and retain the
+   Consumer journal as the authoritative ledger. Acceptance covers schema
+   validation, retries/restart replay without repeated fills, and no Consumer
+   behavior change when the optional event topic is unset.
 
 Authenticated execution remains prohibited until step 3 is approved.

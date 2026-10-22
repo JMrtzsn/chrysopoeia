@@ -8,6 +8,13 @@ records paper-only outcomes in its own append-only journal.
 The deployed subscription filters for `trade_plan_ready`; ingress also
 terminally acknowledges other Harness record types without journal writes.
 
+When `CHRYSOPOEIA_EVENT_TOPIC` is configured, the service publishes each durable
+Consumer lifecycle record as a `consumer_outcome` v1 event (see
+`../contracts/consumer_outcome.v1.schema.json`). Publication is journal-derived
+and at least once; stable event IDs and journaled acknowledgements allow retry
+after publisher or process failure. The Consumer ledger remains the financial
+authority, and the Pub/Sub topic is only an analytics/event copy.
+
 It is an idempotent consumer under at-least-once delivery: redeliveries with
 the same `event_id` never repeat a fill, and failures after ten attempts land in
 the dead-letter queue. See the event-driven architecture table in
@@ -16,9 +23,9 @@ the dead-letter queue. See the event-driven architecture table in
 Configuration is through `CONSUMER_JOURNAL`, `CONSUMER_BANKROLL`,
 `CONSUMER_MAXIMUM_STAKE`, `CONSUMER_MAXIMUM_MARKET_EXPOSURE`,
 `CONSUMER_MAXIMUM_TOTAL_EXPOSURE`, `CONSUMER_MAXIMUM_LOSS`,
-`CONSUMER_MINIMUM_EDGE`, and `CONSUMER_FEE_RATE`. Defaults are paper bankroll
-1000, stake 10, market 1%, total 10%, cumulative loss 100, edge 5%, and 2% paper
-fees.
+`CONSUMER_MINIMUM_EDGE`, `CONSUMER_FEE_RATE`, and the optional
+`CHRYSOPOEIA_EVENT_TOPIC`. Defaults are paper bankroll 1000, stake 10, market 1%,
+total 10%, cumulative loss 100, edge 5%, and 2% paper fees.
 
 No model, credentials, signing, order, or live-execution code exists here.
 

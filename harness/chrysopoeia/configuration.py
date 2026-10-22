@@ -152,6 +152,16 @@ class ResearchConfig:
 
 
 @dataclass(frozen=True)
+class HistoryConfig:
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
+class ContextLearningConfig:
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     runtime: RuntimeConfig
     venue: VenueConfig
@@ -160,12 +170,16 @@ class HarnessConfig:
     session: SessionConfig
     risk: RiskConfig
     research: ResearchConfig = ResearchConfig()
+    history: HistoryConfig = HistoryConfig()
+    context_learning: ContextLearningConfig = ContextLearningConfig()
 
     @classmethod
     def from_mapping(cls, value: object) -> "HarnessConfig":
         root_keys = {"runtime", "venue", "models", "cost", "session", "risk"}
-        if isinstance(value, Mapping) and "research" in value:
-            root_keys.add("research")
+        if isinstance(value, Mapping):
+            root_keys.update(
+                key for key in ("research", "history", "context_learning") if key in value
+            )
         root = _table(value, root_keys, "harness")
         research_raw = root.get("research", {"enabled": True})
         research = _table(research_raw, {"enabled"}, "research")
@@ -173,6 +187,16 @@ class HarnessConfig:
         if not isinstance(enabled, bool):
             raise ConfigurationError("research enabled must be a boolean")
         research_config = ResearchConfig(enabled)
+        history_raw = root.get("history", {"enabled": False})
+        history = _table(history_raw, {"enabled"}, "history")
+        if not isinstance(history["enabled"], bool):
+            raise ConfigurationError("history enabled must be a boolean")
+        history_config = HistoryConfig(history["enabled"])
+        learning_raw = root.get("context_learning", {"enabled": False})
+        learning = _table(learning_raw, {"enabled"}, "context learning")
+        if not isinstance(learning["enabled"], bool):
+            raise ConfigurationError("context learning enabled must be a boolean")
+        context_learning_config = ContextLearningConfig(learning["enabled"])
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
         venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "series"}
         for optional in ("forecast_offset_seconds", "window_baseline"):
@@ -365,6 +389,8 @@ class HarnessConfig:
             session_config,
             risk_config,
             research_config,
+            history_config,
+            context_learning_config,
         )
         try:
             _ = result.operating

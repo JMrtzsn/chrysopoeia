@@ -67,8 +67,10 @@ publishes all canonical event types to one topic with `event_id`, `record_type`,
 and `schema_version` attributes, and acknowledges
 only after confirmation. Failures leave events pending and may duplicate
 delivery, so consumers deduplicate by `event_id`. Platform retains topic, IAM,
-and the raw-event archive; it has no publisher wrapper. No authenticated trading is part of this
-milestone.
+and the raw-event archive. The optional paper Consumer publishes its own
+`consumer_outcome` lifecycle events to that topic from its durable journal; its
+subscription filters only `trade_plan_ready`, so outcome publication is not
+recursively consumed. No authenticated trading is part of this milestone.
 
 With neither consumer setting, no consumer resources exist. Setting
 `consumer_image_digest` without `pubsub_topic` is a configuration error. With both
@@ -90,11 +92,29 @@ The Pub/Sub service agent has `roles/bigquery.dataEditor` on this table only;
 producers still need only topic publishing permission. The BigQuery API stays
 enabled if the integration is removed.
 
+When the optional Consumer is deployed, its service identity receives
+`roles/pubsub.publisher` on this topic and the service gets its fully qualified
+topic path through `CHRYSOPOEIA_EVENT_TOPIC`. It publishes strict
+`consumer_outcome` v1 records for durable fills, rejections, closes, and
+settlements. Delivery is at least once; stable outcome event IDs and journaled
+acknowledgements make retries safe.
+
+Harness BigQuery reads are separately disabled by default. Enabling them requires
+both `[history].enabled = true` in the bundled Harness profile and Pulumi
+`context_history_enabled = true`. Pulumi then grants the runner project-level
+`roles/bigquery.jobUser` and dataset-scoped `roles/bigquery.dataViewer`, and sets
+the archive table/location environment. The query reads only the configured
+archive, filters its required `publish_time` partition, looks back 90 days, and
+sets `maximum_bytes_billed` to 100 MiB. This read path does not provision or
+mutate BigQuery data. A profile change still requires a rebuilt/pinned image;
+IAM changes and live queries require their usual separate operator approval.
+
 `data` preserves the raw UTF-8 event JSON as STRING. `attributes` preserves the
 Pub/Sub attributes as a JSON-encoded STRING. Metadata columns are `message_id`,
 `publish_time`, and `subscription_name`. Topic/table schema mapping is disabled,
 so event-version changes do not drop fields or require table migrations. All
-event types are archived, including abstentions; no worker or Dataflow job runs.
+event types are archived, including abstentions and Consumer lifecycle outcomes;
+no worker or Dataflow job runs.
 
 Rows have no configured expiration. Both dataset and table have Pulumi
 `protect=True` and `retain_on_delete=True`; the table also has provider deletion
@@ -115,8 +135,9 @@ by payload `event_id`, not Pub/Sub `message_id`: an outbox retry can publish the
 same event with a new message ID. Synthetic verification rows use
 `record_type=archive_verification` and must be excluded from strategy metrics.
 Existing journals and events published before subscription creation are not
-backfilled. Only published events are captured; local simulator fills,
-settlements, and failed turns without outcome events still require the journal.
+backfilled. Only published events are captured. Harness in-process paper fills
+and settlements remain in the Harness journal; Consumer outcomes are archived
+only when the optional Consumer publisher is deployed and configured.
 
 The subscription never expires from inactivity. Undelivered messages retain
 for 31 days, not forever. If export fails, inspect `bigqueryConfig.state` with

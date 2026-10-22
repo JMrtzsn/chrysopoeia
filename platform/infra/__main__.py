@@ -40,8 +40,11 @@ job_args = config.get_object("job_args") or [
 pubsub_topic = config.get("pubsub_topic")
 consumer_image_digest = config.get("consumer_image_digest")
 consumer_sweep_schedule = config.get("consumer_sweep_schedule") or "* * * * *"
+context_history_enabled = config.get_bool("context_history_enabled") or False
 if consumer_image_digest and not pubsub_topic:
     pubsub_topic = config.require("pubsub_topic")
+if context_history_enabled and not pubsub_topic:
+    raise pulumi.RunError("context history requires the configured event archive topic")
 
 bucket = gcp.storage.Bucket(
     "journals",
@@ -62,8 +65,10 @@ runner = gcp.serviceaccount.Account(
         account_id=f"chrysopoeia-runner-{operator}"[:30],
         display_name=f"Chrysopoeia paper-cycle runner ({operator})",
         description=(
-            "Job execution identity: Vertex model calls, image reads, and the "
-            "journal bucket only."
+            "Job execution identity: Vertex model calls, image reads, and journal "
+            "bucket, plus read-only context history."
+            if context_history_enabled
+            else "Job execution identity: Vertex model calls, image reads, and the journal bucket only."
         ),
     ),
 )
@@ -183,6 +188,27 @@ if pubsub_topic:
     )
     pulumi.export("event_archive_table", archive_subscription.bigquery_config.table)
     pulumi.export("event_archive_subscription", archive_subscription.name)
+
+    if context_history_enabled:
+        gcp.projects.IAMMember(
+            "runner-bigquery-job-user",
+            gcp.projects.IAMMemberArgs(
+                project=project_id,
+                role="roles/bigquery.jobUser",
+                member=serviceaccount_member,
+            ),
+            opts=pulumi.ResourceOptions(depends_on=[archive_api]),
+        )
+        gcp.bigquery.DatasetIamMember(
+            "runner-event-archive-reader",
+            gcp.bigquery.DatasetIamMemberArgs(
+                project=project_id,
+                dataset_id=archive_dataset.dataset_id,
+                role="roles/bigquery.dataViewer",
+                member=serviceaccount_member,
+            ),
+            opts=pulumi.ResourceOptions(depends_on=[archive_dataset]),
+        )
 
 gcp.projects.IAMMember(
     "runner-vertex-user",
@@ -305,6 +331,25 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                                 if pubsub_topic
                                 else []
                             ),
+                            *(
+                                [
+                                    gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                        name="CHRYSOPOEIA_HISTORY_TABLE",
+                                        value=pulumi.Output.concat(
+                                            project_id,
+                                            ".",
+                                            archive_dataset.dataset_id,
+                                            ".raw_events",
+                                        ),
+                                    ),
+                                    gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                        name="CHRYSOPOEIA_HISTORY_LOCATION",
+                                        value=region,
+                                    ),
+                                ]
+                                if context_history_enabled and pubsub_topic
+                                else []
+                            ),
                         ],
                         resources=(
                             gcp.cloudrunv2.JobTemplateTemplateContainerResourcesArgs(
@@ -363,6 +408,15 @@ if consumer_image_digest and pubsub_topic:
         ),
     )
     consumer_member = pulumi.Output.concat("serviceAccount:", consumer.email)
+    gcp.pubsub.TopicIAMMember(
+        "consumer-outcome-publisher",
+        gcp.pubsub.TopicIAMMemberArgs(
+            project=project_id,
+            topic=topic.name,
+            role="roles/pubsub.publisher",
+            member=consumer_member,
+        ),
+    )
     gcp.storage.BucketIAMMember(
         "consumer-ledger-writer",
         gcp.storage.BucketIAMMemberArgs(
@@ -392,7 +446,13 @@ if consumer_image_digest and pubsub_topic:
                         envs=[
                             gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
                                 name="CONSUMER_JOURNAL", value="/mnt/consumer/ledger.jsonl"
-                            )
+                            ),
+                            gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                                name="CHRYSOPOEIA_EVENT_TOPIC",
+                                value=pulumi.Output.concat(
+                                    "projects/", project_id, "/topics/", topic.name
+                                ),
+                            ),
                         ],
                         volume_mounts=[
                             gcp.cloudrunv2.ServiceTemplateContainerVolumeMountArgs(

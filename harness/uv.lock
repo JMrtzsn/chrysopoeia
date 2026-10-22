@@ -557,6 +557,7 @@ dependencies = [
     { name = "ccxt" },
     { name = "gcsfs" },
     { name = "google-adk", extra = ["gcp"] },
+    { name = "google-cloud-bigquery" },
     { name = "google-cloud-pubsub" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
@@ -593,6 +594,7 @@ requires-dist = [
     { name = "google-adk", extras = ["eval"], marker = "extra == 'eval'", specifier = ">=2.6.0,<3.0.0" },
     { name = "google-adk", extras = ["gcp"], specifier = ">=2.6.0,<3.0.0" },
     { name = "google-cloud-aiplatform", extras = ["evaluation"], marker = "extra == 'eval'", specifier = ">=1.156.0" },
+    { name = "google-cloud-bigquery", specifier = ">=3,<4" },
     { name = "google-cloud-pubsub", specifier = ">=2,<3" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.4.6,<1.0.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.4.1" },

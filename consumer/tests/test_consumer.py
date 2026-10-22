@@ -11,7 +11,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from paper_consumer.app import create_app
-from paper_consumer.core import Config, Journal, Quote, TransientFailure
+from paper_consumer.core import Config, Consumer, Journal, Quote, TransientFailure, load_validator
 from paper_consumer.market import Polymarket, _get
 
 NOW = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
@@ -23,6 +23,7 @@ class BuildScriptTests(unittest.TestCase):
 
         self.assertIn("docker build --platform linux/amd64", script)
         self.assertNotIn("docker push", script)
+        self.assertIn("consumer_outcome.v1.schema.json", script)
 
 
 def event(**changes: object) -> dict[str, object]:
@@ -89,6 +90,17 @@ class FakeMarket:
         return value
 
 
+class FakePublisher:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+        self.fail = False
+
+    def publish(self, event: dict[str, object]) -> None:
+        if self.fail:
+            raise RuntimeError("publish failed")
+        self.events.append(deepcopy(event))
+
+
 def quote(**changes: object) -> Quote:
     values = {
         "snapshot_id": "fresh-snapshot",
@@ -127,6 +139,113 @@ class LocalSendScriptTests(unittest.TestCase):
 
 
 class ConsumerTests(unittest.TestCase):
+    def test_outcome_events_are_published_after_the_ledger_write(self) -> None:
+        publisher = FakePublisher()
+        client = TestClient(
+            create_app(self.config, FakeMarket(), lambda: NOW, publisher=publisher)
+        )
+        plan = event()
+
+        self.assertEqual(client.post("/push", json=envelope(plan)).status_code, 204)
+
+        self.assertEqual(len(publisher.events), 1)
+        outcome = publisher.events[0]
+        self.assertEqual(outcome["record_type"], "consumer_outcome")
+        self.assertEqual(outcome["status"], "filled")
+        self.assertEqual(outcome["trade_plan_event_id"], plan["event_id"])
+        self.assertEqual(outcome["market_id"], plan["market_id"])
+
+    def test_rejection_outcomes_are_published_without_raw_plan_content(self) -> None:
+        publisher = FakePublisher()
+        client = TestClient(
+            create_app(self.config, FakeMarket(), lambda: NOW, publisher=publisher)
+        )
+
+        self.assertEqual(
+            client.post("/push", json=envelope(event(stake="invalid"))).status_code,
+            204,
+        )
+
+        self.assertEqual(len(publisher.events), 1)
+        outcome = publisher.events[0]
+        self.assertEqual(outcome["status"], "rejected")
+        self.assertNotIn("stake", outcome)
+        self.assertEqual(outcome["market_id"], "12345")
+
+    def test_failed_outcome_publish_retries_without_repeating_the_fill(self) -> None:
+        publisher = FakePublisher()
+        publisher.fail = True
+        market = FakeMarket()
+        client = TestClient(
+            create_app(self.config, market, lambda: NOW, publisher=publisher)
+        )
+        request = envelope(event())
+
+        self.assertEqual(client.post("/push", json=request).status_code, 503)
+        publisher.fail = False
+        restarted = TestClient(
+            create_app(self.config, market, lambda: NOW, publisher=publisher)
+        )
+        self.assertEqual(restarted.post("/push", json=request).status_code, 204)
+
+        self.assertEqual(market.calls, 1)
+        self.assertEqual(len(publisher.events), 1)
+        self.assertEqual(publisher.events[0]["status"], "filled")
+
+    def test_outcome_delivery_is_bounded_per_flush(self) -> None:
+        publisher = FakePublisher()
+        consumer = Consumer(self.config, FakeMarket(), load_validator(), publisher)
+        for index in range(6):
+            consumer.journal.append(
+                {
+                    "event_id": f"turn-{index:024x}",
+                    "recorded_at": NOW.isoformat(),
+                    "status": "rejected",
+                    "reason": "bounded test",
+                }
+            )
+
+        consumer.flush_outbox(NOW)
+        self.assertEqual(len(publisher.events), 5)
+        consumer.flush_outbox(NOW)
+
+        self.assertEqual(len(publisher.events), 6)
+
+    def test_sweep_publishes_a_distinct_settlement_outcome(self) -> None:
+        publisher = FakePublisher()
+        market = FakeMarket([
+            quote(),
+            quote(resolution="YES", asks=(), bids=()),
+        ])
+        client = TestClient(
+            create_app(self.config, market, lambda: NOW, publisher=publisher)
+        )
+        plan = event()
+
+        self.assertEqual(client.post("/push", json=envelope(plan)).status_code, 204)
+        self.assertEqual(client.post("/sweep").status_code, 204)
+
+        self.assertEqual([item["status"] for item in publisher.events], ["filled", "settled"])
+        self.assertNotEqual(publisher.events[0]["event_id"], publisher.events[1]["event_id"])
+
+    def test_sweep_publishes_a_closed_outcome_with_realized_pnl(self) -> None:
+        publisher = FakePublisher()
+        market = FakeMarket([
+            quote(asks=((0.3, 100.0),), bids=((0.29, 100.0),)),
+            quote(asks=((0.4, 100.0),), bids=((0.39, 100.0),)),
+        ])
+        client = TestClient(
+            create_app(self.config, market, lambda: NOW, publisher=publisher)
+        )
+
+        self.assertEqual(client.post("/push", json=envelope(event())).status_code, 204)
+        self.assertEqual(client.post("/sweep").status_code, 204)
+
+        self.assertEqual(publisher.events[-1]["status"], "closed")
+        pnl = publisher.events[-1]["pnl"]
+        assert isinstance(pnl, (int, float))
+        self.assertGreater(pnl, 0)
+
     def test_v2_no_plan_fills_no_token_and_settles_when_no_wins(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = Config(Path(directory) / "journal.jsonl")

@@ -45,6 +45,44 @@ class TurnOutcomeTests(unittest.TestCase):
             research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
         )
 
+    def test_context_attributed_outcome_uses_the_v3_contract(self) -> None:
+        outcome = build_turn_outcome(
+            proposal={
+                "snapshot_id": "snapshot-context",
+                "market_id": "123",
+                "action": "abstain",
+                "probability": 0.4,
+                "amount": 0.0,
+                "max_entry_price": None,
+                "exit_plan": None,
+                "citations": [],
+                "rationale": "No reliable edge.",
+            },
+            review=None,
+            policy=None,
+            status="abstained",
+            reason="trader_abstained",
+            created_at="2026-10-09T00:00:00+00:00",
+            trade_plan_event_id=None,
+            model_cost_usd="0.25",
+            context={
+                "scope_key": "polymarket:series:btc-updown-5m",
+                "profile_id": "crypto.btcusd.5m.updown",
+                "profile_version": 1,
+                "manifest_hash": "a" * 64,
+            },
+        )
+        schema = json.loads(
+            Path(__file__)
+            .parents[2]
+            .joinpath("contracts", "turn_outcome.v3.schema.json")
+            .read_text()
+        )
+
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(outcome)
+        self.assertEqual(outcome["schema_version"], 3)
+        self.assertEqual(validate_turn_outcome(outcome), outcome)
+
     def test_every_decided_status_conforms_to_shared_schema(self) -> None:
         schema = json.loads(
             Path(__file__)

@@ -122,9 +122,16 @@ runtime resources were replaced or deleted. Recovery steps are in
    request-triggered; no always-on harness process is required. Repeat
    executions should pass a fresh `--journal` via `execute --args`, since
    resuming a session immediately hits its cycle cap.
-3. Deploy the live-execution consumer (separate identity and secret handling)
-   only after `../consumer/ROADMAP.md` live-execution gates pass and are
-   approved.
+ 3. Deploy the live-execution consumer (separate identity and secret handling)
+    only after `../consumer/ROADMAP.md` live-execution gates pass and are
+    approved.
+4. **Outcome archive and context-history access** (coordinated operator
+   approval, 2026-10-21; implementation underway): allow the optional Consumer
+   service identity to publish lifecycle outcomes to the existing topic. When
+   `context_history_enabled` is explicitly enabled, grant the Harness runner
+   `bigquery.jobUser` plus dataset-scoped `bigquery.dataViewer`, and pass the
+   archive table/location to the job. No live apply, image rollout, or BigQuery
+   query is authorized by this roadmap addition.
 
 ## Deferred
 

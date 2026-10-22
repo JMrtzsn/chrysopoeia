@@ -326,6 +326,43 @@ class OutcomeEvidence(StrictOutput):
     excerpt: str | None = Field(default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH)
 
 
+class ContextReference(StrictOutput):
+    scope_key: str = Field(min_length=1, max_length=200, strict=True)
+    profile_id: str = Field(min_length=1, max_length=200, strict=True)
+    profile_version: int = Field(ge=1, strict=True)
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+
+    @field_validator("scope_key", "profile_id")
+    @classmethod
+    def validate_identifier(cls, value: str) -> str:
+        if re.fullmatch(r"[a-z0-9][a-z0-9:._-]{0,199}", value) is None:
+            raise ValueError("context identifier is invalid")
+        return value
+
+
+class ContextProfileGuidance(StrictOutput):
+    scope_key: str = Field(min_length=1, max_length=200, strict=True)
+    profile_id: str = Field(min_length=1, max_length=200, strict=True)
+    profile_version: int = Field(ge=1, strict=True)
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+    learning_summary: str = Field(min_length=1, max_length=500, strict=True)
+    instructions: str = Field(min_length=1, max_length=1_500, strict=True)
+
+    @field_validator("scope_key", "profile_id")
+    @classmethod
+    def validate_profile_identifiers(cls, value: str) -> str:
+        if re.fullmatch(r"[a-z0-9][a-z0-9:._-]{0,199}", value) is None:
+            raise ValueError("context profile identifier is invalid")
+        return value
+
+    @field_validator("instructions")
+    @classmethod
+    def validate_instructions(cls, value: str) -> str:
+        if not value.strip() or any(ord(char) < 32 and char not in "\n\t" for char in value):
+            raise ValueError("context profile instructions are invalid")
+        return value.strip()
+
+
 class ResearchStatus(StrictOutput):
     status: Literal["ok", "unavailable"]
     reason: str | None = Field(default=None, min_length=1, max_length=200)
@@ -351,6 +388,7 @@ def build_turn_outcome(
     plan_checks: object = (),
     evidence: object = (),
     research: object | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build one deterministic, strict outcome payload from decided cycle state."""
     output = ProposalOutput.model_validate(proposal)
@@ -365,6 +403,7 @@ def build_turn_outcome(
         raise ValueError("outcome evidence is invalid")
     try:
         checked_evidence = [OutcomeEvidence.model_validate(record) for record in evidence]
+        checked_context = ContextReference.model_validate(context) if context is not None else None
         checked_research = ResearchStatus.model_validate(
             research or {"status": "unavailable", "reason": "legacy outcome", "query_count": 0}
         )
@@ -425,8 +464,15 @@ def build_turn_outcome(
         raise ValueError("model cost must be non-negative") from None
     if not cost.is_finite() or cost < 0:
         raise ValueError("model cost must be non-negative")
-    return {
-        "schema_version": 2 if output.outcome == "NO" or any(check.plan and check.plan.outcome == "NO" for check in checked_plan_checks) else 1,
+    result: dict[str, object] = {
+        "schema_version": (
+            3
+            if checked_context is not None
+            else 2
+            if output.outcome == "NO"
+            or any(check.plan and check.plan.outcome == "NO" for check in checked_plan_checks)
+            else 1
+        ),
         "record_type": "turn_outcome",
         "event_id": "outcome-" + turn_id.removeprefix("turn-"),
         "turn_id": turn_id,
@@ -448,6 +494,9 @@ def build_turn_outcome(
         "trade_plan_event_id": trade_plan_event_id,
         "model_cost_usd": float(cost),
     }
+    if checked_context is not None:
+        result["context"] = checked_context.model_dump()
+    return result
 
 
 def validate_turn_outcome(value: object) -> dict[str, object]:
@@ -461,10 +510,14 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         "research",
         {"status": "unavailable", "reason": "legacy outcome", "query_count": 0},
     )
-    if set(normalized) != {
+    legacy_keys = {
         "schema_version", "record_type", "event_id", "turn_id", "snapshot_id",
         "market_id", "created_at", "status", "reason", "proposal", "review",
         "policy", "trade_plan_event_id", "model_cost_usd", "plan_checks", "evidence", "research",
+    }
+    if frozenset(normalized) not in {
+        frozenset(legacy_keys),
+        frozenset(legacy_keys | {"context"}),
     }:
         raise ValueError("invalid turn outcome")
     try:
@@ -486,10 +539,11 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
             plan_checks=normalized["plan_checks"],
             evidence=normalized["evidence"],
             research=normalized["research"],
+            context=normalized.get("context"),
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None
-    if normalized.get("schema_version") not in {1, 2} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
+    if normalized.get("schema_version") not in {1, 2, 3} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
         raise ValueError("invalid turn outcome")
     return expected
 
@@ -532,6 +586,7 @@ class ProposalDraft(StrictOutput):
 class PaperCycleRequest(StrictOutput):
     context: str | None = Field(default=None, max_length=2_000)
     draft: ProposalDraft | None = None
+    profile: ContextProfileGuidance | None = None
 
     @field_validator("draft", mode="before")
     @classmethod
@@ -545,6 +600,7 @@ class ReviewerInput(StrictOutput):
     market_snapshot: dict[str, object]
     proposal: ProposalOutput
     evidence: list[EvidenceRecord] = Field(max_length=20)
+    profile: ContextProfileGuidance | None = None
 
 
 class PaperCycleReportOutput(StrictOutput):

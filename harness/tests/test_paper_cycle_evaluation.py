@@ -160,15 +160,14 @@ class PaperCycleEvaluationTests(unittest.TestCase):
                     self.assertEqual(state[key], value)
                 self.assertEqual(set(summary), evaluation.SUMMARY_FIELDS)
                 self.assertEqual(function_calls, ["check_trade_plan"])
+                # The generic-event context profile carries no analysis tools;
+                # only the core discovery/capture/check tools are registered.
                 self.assertEqual(
                     available_tools,
                     [
                         "find_markets",
                         "get_market",
                         "check_trade_plan",
-                        "analyze_stock_history",
-                        "analyze_crypto_history",
-                        "analyze_polymarket_history",
                     ],
                 )
 

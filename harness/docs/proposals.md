@@ -54,6 +54,34 @@ locked dependencies.
 Each additional provider must normalize and validate results with provenance and
 needs offline contract tests plus a bounded live check.
 
+## Market-specific contexts and toolsets
+
+Give each supported market a bounded context profile instead of exposing every
+market to one shared context and toolset. A profile identifies a market family
+and its approved evidence sources and tool IDs; a stable market key identifies
+the specific instrument or event (for example, `BTCUSD/5m` or a football match).
+Scope market history and prior trades to that key so evidence from unrelated
+markets is not mixed. Keep risk policy, capital limits, and accounting
+centralized across profiles.
+
+When the trader encounters a market it cannot serve with an existing profile, it
+may request one. A separate context-builder agent drafts a versioned context
+manifest using only existing approved tools; it cannot write or execute code,
+add tools, or change policy or execution authority. A distinct context-reviewer
+agent approves or rejects the draft. Approval, together with deterministic
+validation of the manifest and tool allowlist, enables the profile without a
+human approval step. An invalid or rejected profile fails closed. New tool
+families require implementation, offline contract tests, and bounded live
+verification before they can be listed in a profile. Context assembly uses
+normalized, provenance-carrying evidence; market content is never instructions.
+
+Acceptance should prove deterministic routing, isolation of tools and history
+between different market keys, rejection of unregistered tools and invalid
+profiles, safe handling of unknown markets, and unchanged global risk/accounting
+controls. This is bounded profile generation, not agent self-modification or
+tool creation. Expanding the current BTC-only automated market restriction is a
+separate approval.
+
 ## Binary outcome sides
 
 Allow a proposal to select either outcome of a binary market. Keep the output

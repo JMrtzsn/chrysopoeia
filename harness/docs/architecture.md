@@ -13,6 +13,15 @@ flowchart TD
     Research --> Evidence["Normalized grounding metadata<br/>URL + title + excerpt"]
     Evidence --> State
     Snapshot --> State[("ADK cycle state")]
+    Snapshot --> HistoryQuery["Optional bounded BigQuery history query<br/>context scope + profile family"]
+    HistoryQuery --> HistoryEvidence["Snapshot-bound historical outcome evidence"]
+    HistoryEvidence --> State
+    ProfileCatalog[("Bundled profiles + local JSONL catalog")] --> ContextRouter["Deterministic market-scope routing"]
+    Snapshot --> ContextRouter
+    ContextRouter --> State
+    HistoryQuery -. "20 finalized outcomes for active version" .-> Curator["Context curator agent"]
+    Curator --> ProfileReviewer["Independent context-profile reviewer"]
+    ProfileReviewer -->|approved + validated| ProfileCatalog
 
     State --> Trader["Trader ADK agent"]
     Trader --> ContextTool["Read-only tools<br/>find_markets + get_market + check_trade_plan"]
@@ -32,6 +41,10 @@ flowchart TD
     Policy -->|blocked| Outcome
     Quote --> Journal[("Local journal<br/>turns, positions, marks, closes, settlement, cost")]
     Outcome --> Journal
+    Publisher --> EventTopic["Shared Pub/Sub topic"]
+    IndependentConsumer --> ConsumerOutcome["Consumer outcome publisher<br/>journal-derived outbox"]
+    ConsumerOutcome --> EventTopic
+    EventTopic --> BigQueryArchive[("Raw event archive")]
     Loop --> Lifecycle["Paper lifecycle simulation while this loop runs"]
     Lifecycle --> ExitQuote["Fresh executable bid-depth quote"]
     ExitQuote --> ExitPolicy["Deterministic ROI/time trigger and full-close policy"]
@@ -82,10 +95,28 @@ flowchart TD
   `trade_plan_ready` only after reviewer approval and deterministic hard-policy
   acceptance. The event is a verified request/plan, never an order, fill, open
   position, or completed execution. Every decided turn also emits a strict
-  `turn_outcome` containing the proposal rationale, bounded deterministic plan-
+  `turn_outcome` containing context scope/profile identity, proposal rationale, bounded deterministic plan-
   check attempts, optional review, policy result, reason, and model cost; failed
   and abandoned turns do not. Plan-check rejection reasons distinguish no check,
   no passing check, and a proposal changed after its last passing check.
+- Deterministic routing selects a bundled or locally approved profile by market
+  scope. The profile pins an immutable manifest hash, instructions, tool IDs,
+  and evidence-source IDs. Context tools are restricted to the registered
+  allowlist; profile text is guidance, never authority.
+- The optional BigQuery history query runs before the trader only when
+  `[history].enabled` and the archive table are configured. It filters the
+  context scope, profile ID/version/hash, enforces the archive's `publish_time`
+  partition and a 100 MiB maximum scan, joins Consumer lifecycle outcomes by plan
+  event ID, and adds only bounded aggregate evidence. Query failures are
+  non-fatal; results do not authorize or change risk, policy, or accounting.
+- With `[context_learning].enabled`, at least 20 distinct closed/settled plans
+  under the active profile version may trigger a curator draft and independent
+  profile review. Deterministic schema/tool/source validation gates append-only
+  catalog activation; rejections, open fills, abstentions, and repeated outcome
+  watermarks never replace or churn the current profile.
+- The Consumer publishes `consumer_outcome` lifecycle records from its own
+  durable journal. Its publisher is at-least-once with stable event IDs and
+  journaled acknowledgements; the Consumer ledger remains authoritative.
 - The minimal event envelope contains version and type, stable `event_id`,
   creation time, market and snapshot identity, outcome, stake, maximum entry
   price, immutable ROI/time exit plan, review approval and policy/evidence
@@ -200,8 +231,13 @@ authorization.
 | Live venue state | Authority for actual accepted orders and fills; the execution consumer reconciles it |
 | External content | Untrusted; citable only after deterministic validation |
 
-RAG, long-term memory, and context catalogs are deferred. They cannot become
-authoritative for balances, fills, risk, permissions, or lifecycle decisions.
+Bundled profiles are source controlled. Generated profiles and review decisions
+are stored in a local append-only JSONL catalog outside the financial journal;
+the default path is under `XDG_STATE_HOME` (or `~/.local/share/chrysopoeia`).
+Locally generated profiles are never packaged or deployed automatically. Profile
+curation changes only later analysis guidance/tool selection; historical
+aggregates cannot become authoritative for balances, fills, risk, permissions,
+or lifecycle decisions.
 
 ## Keeping this map current
 

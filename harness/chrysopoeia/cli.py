@@ -94,6 +94,8 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
         },
         "cost_policy": config.cost_policy,
         "research": {"enabled": config.research.enabled},
+        "history": {"enabled": config.history.enabled},
+        "context_learning": {"enabled": config.context_learning.enabled},
         "session": {**asdict(config.session), "cost_budget": str(config.session.cost_budget)},
         "risk": asdict(config.risk),
     }
@@ -104,16 +106,22 @@ def _human(summary: dict[str, object]) -> str:
     venue = summary["venue"]
     models = summary["models"]
     cost = summary["cost_policy"]
+    history = summary["history"]
+    context_learning = summary["context_learning"]
     assert isinstance(runtime, dict)
     assert isinstance(venue, dict)
     assert isinstance(models, dict)
     assert isinstance(cost, dict)
+    assert isinstance(history, dict)
+    assert isinstance(context_learning, dict)
     return "\n".join(
         (
             f"configuration valid: {summary['config_path']}",
             f"runtime: {runtime['adapter']} ({runtime['mode']})",
             f"venue: {venue['adapter']} ({venue['market_data']}, {venue['execution']})",
             f"paper fee: {venue['paper_fee_rate']} ({venue['paper_fee_source']})",
+            f"BigQuery context history: {'enabled' if history['enabled'] else 'disabled'}",
+            f"Local context learning: {'enabled' if context_learning['enabled'] else 'disabled'}",
             "models: " + ", ".join(f"{role}={model}" for role, model in models.items()),
             f"cost policy: {cost['version']} ({cost['model']})",
         )

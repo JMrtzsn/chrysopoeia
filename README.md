@@ -152,13 +152,13 @@ Current and planned (see roadmaps) patterns:
 
 | Pattern | Here |
 | --- | --- |
-| Domain events / event notification | One topic carries `trade_plan_ready` and decided-turn `turn_outcome`; subscriptions filter by `record_type` |
-| Transactional outbox | Harness journal outbox; publish after the durable write |
+| Domain events / event notification | One topic carries `trade_plan_ready`, context-tagged `turn_outcome` v3, and optional Consumer `consumer_outcome` lifecycle events; subscriptions filter by `record_type` |
+| Transactional outbox | Harness and Consumer journals retain events until confirmed delivery |
 | At-least-once delivery + idempotent consumer | Pub/Sub retries; consumers deduplicate by stable `event_id` |
 | Dead-letter queue | Consumer subscription dead-letters after ten attempts |
-| CQRS read model / projections | Planned: Pub/Sub BigQuery subscriptions for analytics views |
-| Decision (outcome) logging | `turn_outcome` records abstentions, reviewer/policy rejections, and accepted plans; live verification pending |
-| Retrieval-augmented context / closed learning loop | Approved future item: past outcomes as untrusted, provenance-carrying evidence |
+| CQRS read model / projections | Raw Pub/Sub-to-BigQuery archive is deployed; bounded context-history reads are optional and live verification is pending |
+| Decision (outcome) logging | `turn_outcome` records context identity, decisions, review/policy results, and evidence; Consumer lifecycle outcomes are archived separately |
+| Retrieval-augmented context / closed learning loop | Bounded prior outcomes can be added as untrusted evidence; automatic profile creation/revision remains future work |
 
 This is not event sourcing: each unit's own ledger stays authoritative; analytics
 copies are never used for balances, risk, or lifecycle decisions.

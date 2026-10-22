@@ -4,6 +4,19 @@ from pathlib import Path
 
 
 class InfraContractTests(unittest.TestCase):
+    def test_consumer_can_publish_outcomes_and_history_access_is_optional_and_read_only(self) -> None:
+        source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
+
+        self.assertIn('context_history_enabled = config.get_bool("context_history_enabled") or False', source)
+        self.assertIn('role="roles/bigquery.jobUser"', source)
+        self.assertIn('role="roles/bigquery.dataViewer"', source)
+        self.assertIn('name="CHRYSOPOEIA_HISTORY_TABLE"', source)
+        self.assertIn('name="CHRYSOPOEIA_HISTORY_LOCATION"', source)
+        self.assertIn('"runner-event-archive-reader"', source)
+        self.assertIn('"consumer-outcome-publisher"', source)
+        self.assertIn('name="CHRYSOPOEIA_EVENT_TOPIC"', source)
+        self.assertIn('role="roles/pubsub.publisher"', source)
+
     def test_job_uses_bundled_operating_config_without_setting_flags(self) -> None:
         root = Path(__file__).parents[1]
         source = root.joinpath("infra", "__main__.py").read_text()

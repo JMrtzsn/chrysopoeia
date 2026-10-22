@@ -3,16 +3,20 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
 
 from jsonschema import Draft202012Validator, FormatChecker
+
+MAX_OUTCOME_EVENTS_PER_FLUSH = 5
 
 
 class InvalidEvent(ValueError):
@@ -80,6 +84,10 @@ class Validator(Protocol):
     def iter_errors(self, instance: object) -> Iterable[object]: ...
 
 
+class OutcomePublisher(Protocol):
+    def publish(self, event: dict[str, object]) -> None: ...
+
+
 def _timestamp(value: object) -> datetime:
     if not isinstance(value, str):
         raise InvalidEvent("invalid timestamp")
@@ -92,11 +100,89 @@ def _timestamp(value: object) -> datetime:
     return result.astimezone(timezone.utc)
 
 
+def _safe_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 500
+        and not any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+    )
+
+
 def _schema_path() -> Path:
     configured = os.environ.get("TRADE_PLAN_SCHEMA")
     if configured:
         return Path(configured)
     return Path(__file__).parents[2] / "contracts" / "trade_plan_ready.v1.schema.json"
+
+
+@lru_cache(maxsize=1)
+def _outcome_validator() -> Validator:
+    configured = os.environ.get("CONSUMER_OUTCOME_SCHEMA")
+    path = (
+        Path(configured)
+        if configured
+        else Path(__file__).parents[2] / "contracts" / "consumer_outcome.v1.schema.json"
+    )
+    try:
+        schema = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("consumer outcome schema is unavailable") from exc
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def _consumer_outcome(record: dict[str, object]) -> dict[str, object] | None:
+    status = record.get("status")
+    trade_plan_event_id = record.get("event_id")
+    if (
+        status not in {"rejected", "filled", "closed", "settled"}
+        or not isinstance(trade_plan_event_id, str)
+        or re.fullmatch(r"turn-[0-9a-f]{24}", trade_plan_event_id) is None
+    ):
+        return None
+    recorded_at = record.get("recorded_at")
+    identity = json.dumps(
+        [trade_plan_event_id, status, recorded_at], separators=(",", ":")
+    )
+    event: dict[str, object] = {
+        "schema_version": 1,
+        "record_type": "consumer_outcome",
+        "event_id": "consumer-outcome-" + sha256(identity.encode()).hexdigest()[:24],
+        "trade_plan_event_id": trade_plan_event_id,
+        "market_id": record.get("market_id"),
+        "status": status,
+        "recorded_at": recorded_at,
+    }
+    if status == "rejected":
+        event["reason"] = record.get("reason")
+    elif status == "filled":
+        event.update(
+            token_id=record.get("token_id"),
+            quote_snapshot_id=record.get("quote_snapshot_id"),
+            price=record.get("price"),
+            stake=record.get("stake"),
+            fee=record.get("fee"),
+            total_cost=record.get("total_cost"),
+            shares=record.get("shares"),
+        )
+    elif status == "closed":
+        event.update(
+            quote_snapshot_id=record.get("quote_snapshot_id"),
+            proceeds=record.get("proceeds"),
+            pnl=record.get("pnl"),
+            price=record.get("price"),
+            fee=record.get("fee"),
+        )
+    else:
+        event.update(
+            quote_snapshot_id=record.get("quote_snapshot_id"),
+            proceeds=record.get("proceeds"),
+            pnl=record.get("pnl"),
+            resolution=record.get("resolution"),
+        )
+    if list(_outcome_validator().iter_errors(event)):
+        raise ValueError("invalid consumer outcome event")
+    return event
 
 
 def load_validator() -> Validator:
@@ -119,8 +205,46 @@ class Journal:
     def replay(self) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
         terminal: dict[str, dict[str, object]] = {}
         open_positions: dict[str, dict[str, object]] = {}
+        try:
+            for record in self.records():
+                if record["record_type"] == "consumer_outcome_ack":
+                    continue
+                event_id = record["event_id"]
+                assert isinstance(event_id, str)
+                previous = terminal.get(event_id)
+                if (previous is None and record["status"] in {"closed", "settled"}) or (
+                    previous is not None
+                    and not (
+                        previous["status"] == "filled"
+                        and record["status"] in {"closed", "settled"}
+                    )
+                ):
+                    raise ValueError
+                if previous is not None and (
+                    record["market_id"] != previous["market_id"]
+                    or abs(
+                        Decimal(str(record["pnl"]))
+                        - (
+                            Decimal(str(record["proceeds"]))
+                            - Decimal(str(previous["total_cost"]))
+                        )
+                    )
+                    > Decimal("1e-9")
+                ):
+                    raise ValueError
+                terminal[event_id] = record
+                if record.get("status") == "filled":
+                    open_positions[event_id] = record
+                elif record.get("status") in {"closed", "settled"}:
+                    open_positions.pop(event_id, None)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise TransientFailure("consumer journal is corrupt or unavailable") from exc
+        return terminal, open_positions
+
+    def records(self) -> list[dict[str, object]]:
         if not self.path.exists():
-            return terminal, open_positions
+            return []
+        records: list[dict[str, object]] = []
         try:
             with self.path.open() as stream:
                 for line in stream:
@@ -131,37 +255,26 @@ class Journal:
                     )
                     self._validate(record)
                     assert isinstance(record, dict)
-                    event_id = record["event_id"]
-                    assert isinstance(event_id, str)
-                    previous = terminal.get(event_id)
-                    if (previous is None and record["status"] in {"closed", "settled"}) or (
-                        previous is not None
-                        and not (
-                            previous["status"] == "filled"
-                            and record["status"] in {"closed", "settled"}
-                        )
-                    ):
-                        raise ValueError
-                    if previous is not None and (
-                        record["market_id"] != previous["market_id"]
-                        or abs(
-                            Decimal(str(record["pnl"]))
-                            - (
-                                Decimal(str(record["proceeds"]))
-                                - Decimal(str(previous["total_cost"]))
-                            )
-                        )
-                        > Decimal("1e-9")
-                    ):
-                        raise ValueError
-                    terminal[event_id] = record
-                    if record.get("status") == "filled":
-                        open_positions[event_id] = record
-                    elif record.get("status") in {"closed", "settled"}:
-                        open_positions.pop(event_id, None)
+                    records.append(record)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
             raise TransientFailure("consumer journal is corrupt or unavailable") from exc
-        return terminal, open_positions
+        return records
+
+    def pending_outcomes(self) -> list[dict[str, object]]:
+        records = self.records()
+        acknowledged = {
+            record["event_id"]
+            for record in records
+            if record["record_type"] == "consumer_outcome_ack"
+        }
+        pending: dict[str, dict[str, object]] = {}
+        for record in records:
+            if record["record_type"] != "consumer_ledger":
+                continue
+            event = _consumer_outcome(record)
+            if event is not None and event["event_id"] not in acknowledged:
+                pending[str(event["event_id"])] = event
+        return list(pending.values())
 
     @staticmethod
     def _pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -180,6 +293,16 @@ class Journal:
     def _validate(value: object) -> None:
         if not isinstance(value, dict):
             raise ValueError
+        if value.get("record_type") == "consumer_outcome_ack":
+            if (
+                set(value) != {"schema_version", "record_type", "event_id", "recorded_at"}
+                or value.get("schema_version") != 1
+                or not isinstance(value.get("event_id"), str)
+                or re.fullmatch(r"consumer-outcome-[0-9a-f]{24}", value["event_id"]) is None
+            ):
+                raise ValueError
+            _timestamp(value.get("recorded_at"))
+            return
         status = value.get("status")
         common = {"schema_version", "record_type", "event_id", "status", "recorded_at"}
         fields = {
@@ -207,7 +330,10 @@ class Journal:
             value.get("schema_version") != 1
             or value.get("record_type") != "consumer_ledger"
             or status not in fields
-            or set(value) != fields[status]
+            or frozenset(value) not in {
+                frozenset(fields[status]),
+                frozenset(fields[status] | {"market_id"}),
+            }
             or not isinstance(value.get("event_id"), str)
             or not value["event_id"]
         ):
@@ -224,6 +350,13 @@ class Journal:
             "exit_plan",
         }
         if not all(isinstance(value.get(field), str) and value[field] for field in string_fields):
+            raise ValueError
+        if "market_id" in value and not _safe_id(value["market_id"]):
+            raise ValueError
+        if status == "rejected" and (
+            len(value["reason"]) > 500
+            or any(ord(character) < 32 or ord(character) == 127 for character in value["reason"])
+        ):
             raise ValueError
         number_fields = fields[status] & {
             "price",
@@ -290,17 +423,53 @@ class Journal:
         except OSError as exc:
             raise TransientFailure("consumer journal write failed") from exc
 
+    def acknowledge_outcome(self, event_id: str, now: datetime) -> None:
+        record = {
+            "schema_version": 1,
+            "record_type": "consumer_outcome_ack",
+            "event_id": event_id,
+            "recorded_at": now.astimezone(timezone.utc).isoformat(),
+        }
+        self._validate(record)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        try:
+            with self.path.open("a") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as exc:
+            raise TransientFailure("consumer outcome acknowledgement failed") from exc
+
 
 class Consumer:
-    def __init__(self, config: Config, market: Market, validator: Validator) -> None:
+    def __init__(
+        self,
+        config: Config,
+        market: Market,
+        validator: Validator,
+        publisher: OutcomePublisher | None = None,
+    ) -> None:
         self.config = config
         self.market = market
         self.validator = validator
+        self.publisher = publisher
         self.journal = Journal(config.journal)
         self.lock = Lock()
 
+    def flush_outbox(self, now: datetime) -> None:
+        if self.publisher is None:
+            return
+        for event in self.journal.pending_outcomes()[:MAX_OUTCOME_EVENTS_PER_FLUSH]:
+            try:
+                self.publisher.publish(event)
+                self.journal.acknowledge_outcome(str(event["event_id"]), now)
+            except Exception as exc:
+                raise TransientFailure("consumer outcome delivery failed") from exc
+
     def consume(self, event: object, now: datetime) -> None:
         with self.lock:
+            self.flush_outbox(now)
             terminal, positions = self.journal.replay()
             event_id = event.get("event_id") if isinstance(event, dict) else None
             if isinstance(event_id, str) and event_id in terminal:
@@ -308,7 +477,9 @@ class Consumer:
             try:
                 self._validate_event(event, now)
             except InvalidEvent as exc:
-                self._reject(event_id, str(exc), now)
+                market_id = event.get("market_id") if isinstance(event, dict) else None
+                self._reject(event_id, str(exc), now, market_id)
+                self.flush_outbox(now)
                 return
             assert isinstance(event, dict) and isinstance(event_id, str)
             realized_pnl = sum(
@@ -317,24 +488,29 @@ class Consumer:
                 if record["status"] in {"closed", "settled"}
             )
             if realized_pnl <= -Decimal(str(self.config.maximum_loss)):
-                self._reject(event_id, "maximum cumulative loss reached", now)
+                self._reject(event_id, "maximum cumulative loss reached", now, event["market_id"])
+                self.flush_outbox(now)
                 return
             if any(position["market_id"] == event["market_id"] for position in positions.values()):
-                self._reject(event_id, "market already has an open position", now)
+                self._reject(event_id, "market already has an open position", now, event["market_id"])
+                self.flush_outbox(now)
                 return
             try:
                 quote = self.market.load(str(event["market_id"]), str(event["instrument_id"]), now)
             except InvalidEvent as exc:
-                self._reject(event_id, str(exc), now)
+                self._reject(event_id, str(exc), now, event["market_id"])
+                self.flush_outbox(now)
                 return
             except Exception as exc:
                 raise TransientFailure("public quote unavailable") from exc
             try:
                 fill = self._entry(event, quote, positions, now)
             except InvalidEvent as exc:
-                self._reject(event_id, str(exc), now)
+                self._reject(event_id, str(exc), now, event["market_id"])
+                self.flush_outbox(now)
                 return
             self.journal.append(fill)
+            self.flush_outbox(now)
 
     def _validate_event(self, event: object, now: datetime) -> None:
         errors = list(self.validator.iter_errors(event))
@@ -370,7 +546,9 @@ class Consumer:
         if exit_by is None and plan["hold_to_resolution"] is not True:
             raise InvalidEvent("trade plan exit policy is invalid")
 
-    def _reject(self, event_id: object, reason: str, now: datetime) -> None:
+    def _reject(
+        self, event_id: object, reason: str, now: datetime, market_id: object = None
+    ) -> None:
         if not isinstance(event_id, str) or not event_id:
             event_id = "invalid-" + now.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         self.journal.append(
@@ -379,6 +557,7 @@ class Consumer:
                 "recorded_at": now.astimezone(timezone.utc).isoformat(),
                 "status": "rejected",
                 "reason": reason,
+                **({"market_id": market_id} if _safe_id(market_id) else {}),
             }
         )
 
@@ -489,6 +668,7 @@ class Consumer:
 
     def sweep(self, now: datetime) -> None:
         with self.lock:
+            self.flush_outbox(now)
             _terminal, positions = self.journal.replay()
             for event_id, position in tuple(positions.items()):
                 try:
@@ -545,6 +725,7 @@ class Consumer:
                     record["price"] = float(price)
                     record["fee"] = float(gross - net)
                     self.journal.append(record)
+            self.flush_outbox(now)
 
     @staticmethod
     def _sell(

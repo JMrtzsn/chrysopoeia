@@ -216,6 +216,48 @@ The implementation retains v1 YES compatibility. No platform change is included.
    OHLCV data. After the Polymarket YES-only live path is verified, separately
    plan any crypto venue execution, including exchange, spot/derivatives, and
    its own risk and activation gates.
+8. **Outcome-driven market contexts and agent-approved profile iteration**
+   (operator-approved roadmap addition, 2026-10-21; offline implementation
+   complete, live verification pending): route canonical market families
+   and stable pair/event keys to bounded, versioned context profiles. The loop is
+   `trades -> outcomes -> context-scoped information -> summary -> proposed
+   profile revision -> independent agent review -> next profile version`.
+   Harness `turn_outcome` v3 and Consumer `consumer_outcome` v1 events provide
+   the joined history; deterministic BigQuery queries deduplicate events, enforce
+   an as-of cutoff, and return bounded aggregates for only the matching context.
+   A context-curator agent may summarize those aggregates and propose an
+   immutable profile revision; a separate context-reviewer agent approves or
+   rejects it. No human approves each local profile revision. The Harness
+    deterministically validates the manifest, at least 20 distinct closed/settled
+    trade plans from the active profile version, outcome sample sufficiency,
+   resource bounds, and registered tool/evidence allowlists before activation.
+   Open positions and abstentions are not losses, and sparse outcomes do not
+   trigger profile churn.
+
+   Persist bundled profiles in source control and generated profiles in a
+   Harness-owned local catalog separate from the financial journal. Every turn
+   pins the exact profile ID/version/hash and its outcome provenance. Local
+   generated profiles are not included in the wheel or deployed automatically;
+   promotion to the bundled set is a separate release. Agents cannot create
+   executable tools, change policy, risk, accounting, or execution authority.
+   New tool families need separate implementation, offline contract tests, and
+   bounded live verification. Acceptance: restart/replay loads the pinned
+   profile; different context keys cannot share tools or history; rejected,
+   malformed, under-sampled, or unregistered-tool revisions leave the active
+   profile unchanged; approved revisions only affect later turns; global risk
+   and accounting remain unchanged. The BTC-only automated-market restriction
+   remains until separately approved and verified.
+
+   The event/context foundation and the offline profile loop are implemented:
+   context identity routing (BTC series, recurring crypto series, and generic
+   events), bundled profiles, the local append-only profile catalog with
+   immutable manifest hashes and outcome-summary provenance, the
+   curator/reviewer agent flow with cost accounting, the 20-finalized-plan
+   activation gate, and profile-scoped trader tool allowlists. Remaining:
+   bounded live verification of an agent-generated local profile and of the
+   BigQuery-backed revision loop, plus forward-evaluation criteria before
+   enabling `[context_learning]` anywhere but local development. Do not infer
+   proven profitability from small samples.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved
 feature proposals; proposals do not expand this roadmap.

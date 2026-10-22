@@ -8,8 +8,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 
-from paper_consumer.core import Config, Consumer, Market, TransientFailure, load_validator
+from paper_consumer.core import (
+    Config,
+    Consumer,
+    Market,
+    OutcomePublisher,
+    TransientFailure,
+    load_validator,
+)
 from paper_consumer.market import Polymarket
+from paper_consumer.publisher import PubSubOutcomePublisher
 
 MAX_EVENT_BYTES = 256 * 1024
 
@@ -57,9 +65,12 @@ def create_app(
     config: Config,
     market: Market,
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    publisher: OutcomePublisher | None = None,
 ) -> FastAPI:
     app = FastAPI()
-    consumer = Consumer(config, market, load_validator())
+    if publisher is None and (topic := os.environ.get("CHRYSOPOEIA_EVENT_TOPIC")):
+        publisher = PubSubOutcomePublisher(topic)
+    consumer = Consumer(config, market, load_validator(), publisher)
 
     @app.post("/push")
     async def push(request: Request) -> Response:

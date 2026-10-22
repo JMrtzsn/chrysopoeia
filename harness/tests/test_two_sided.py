@@ -78,7 +78,11 @@ class TwoSidedTests(unittest.TestCase):
         result = asyncio.run(run_paper_cycle(config, snap, OperatingConfig(), trader, reviewer))
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["event"]["outcome"], "NO")
-        self.assertEqual(result["outcome_event"]["schema_version"], 2)
+        self.assertEqual(result["outcome_event"]["schema_version"], 3)
+        self.assertEqual(
+            result["outcome_event"]["context"]["scope_key"],
+            "polymarket:series:btc-updown-5m",
+        )
 
     def test_bearish_forecast_buys_actual_down_book_and_emits_v2(self):
         snap = snapshot()
@@ -159,7 +163,7 @@ class TwoSidedTests(unittest.TestCase):
             accounting.settle(path, accounting.replay(path), "123", "resolved_yes")
             self.assertAlmostEqual(accounting.replay(path).realized_pnl, -fill.total_cost)
 
-    def test_no_turn_outcome_has_a_versioned_schema_and_keeps_yes_probability(self):
+    def test_legacy_no_turn_outcome_remains_v2_without_context(self):
         output = paper_cycle.ProposalOutput(
             snapshot_id="snapshot", market_id="123", action="abstain", outcome="NO",
             probability=0.15, amount=0, citations=[], rationale="No sufficient edge",

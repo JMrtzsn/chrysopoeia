@@ -38,3 +38,9 @@ maximum_market_exposure = 0.01
 maximum_total_exposure = 0.10
 market_exposure = 0
 total_exposure = 0
+
+[history]
+enabled = false
+
+[context_learning]
+enabled = false

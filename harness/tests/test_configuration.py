@@ -73,6 +73,8 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(config.session.cost_budget, Decimal("5"))
         self.assertEqual(config.operating.bankroll, 1000)
         self.assertEqual(config.risk.total_exposure, 0)
+        self.assertFalse(config.history.enabled)
+        self.assertFalse(config.context_learning.enabled)
         for table, key, invalid in (
             ("session", "bankroll", True),
             ("session", "bankroll", 0),
@@ -110,6 +112,10 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(platform.venue.series, "btc-updown-5m")
         self.assertFalse(platform.research.enabled)
         self.assertFalse(btc.research.enabled)
+        self.assertFalse(platform.history.enabled)
+        self.assertFalse(btc.history.enabled)
+        self.assertFalse(platform.context_learning.enabled)
+        self.assertFalse(btc.context_learning.enabled)
         self.assertEqual(btc.venue.forecast_offset_seconds, 120.0)
         self.assertTrue(btc.venue.window_baseline)
         self.assertTrue(platform.venue.window_baseline)
@@ -125,6 +131,18 @@ class HarnessConfigurationTests(unittest.TestCase):
             with self.subTest(key=key, invalid=invalid), self.assertRaises(ConfigurationError):
                 HarnessConfig.from_mapping(value)
         self.assertTrue(HarnessConfig.from_mapping(VALID).research.enabled)
+        self.assertFalse(HarnessConfig.from_mapping(VALID).history.enabled)
+        self.assertFalse(HarnessConfig.from_mapping(VALID).context_learning.enabled)
+        for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            value["history"] = invalid
+            with self.subTest(history=invalid), self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
+        for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
+            value = {name: fields.copy() for name, fields in VALID.items()}
+            value["context_learning"] = invalid
+            with self.subTest(context_learning=invalid), self.assertRaises(ConfigurationError):
+                HarnessConfig.from_mapping(value)
         for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
             value = {name: fields.copy() for name, fields in VALID.items()}
             value["research"] = invalid

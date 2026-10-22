@@ -14,6 +14,8 @@ from chrysopoeia.agent import (
     build_trader_tools,
 )
 from chrysopoeia.configuration import load_harness_config
+from chrysopoeia.context import context_identity_for_series
+from chrysopoeia.context_profiles import bundled_profiles
 from chrysopoeia.financial_analysis import Candle
 from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY, PLAN_CHECKS_KEY
 from chrysopoeia.polymarket import (
@@ -85,6 +87,54 @@ class TraderToolTests(unittest.TestCase):
         instruction = build_agents(self.config).context_agent.instruction
 
         self.assertIn("at most 3 focused searches", instruction)
+
+    def test_get_assigns_only_registered_market_contexts(self) -> None:
+        self.snapshot = replace(
+            self.snapshot,
+            source_url="https://polymarket.com/event/btc-updown-5m-1792600000",
+        )
+
+        result = self.get("123", self.context)
+
+        expected = context_identity_for_series("btc-updown-5m").as_dict()
+        self.assertEqual(self.state["market_context"], expected)
+        self.assertEqual(result["market_context"], expected)
+
+        self.snapshot = replace(self.snapshot, source_url="https://polymarket.com/event/rain")
+        unsupported_state = {"operating_config": asdict(OperatingConfig())}
+        self.get("123", SimpleNamespace(state=unsupported_state))
+        self.assertEqual(
+            unsupported_state["market_context"]["scope_key"],
+            "polymarket:event:rain",
+        )
+        self.assertIsNone(unsupported_state["context_profile"])
+
+    def test_profile_tool_allowlist_and_context_mismatch_fail_closed(self) -> None:
+        profile = bundled_profiles()[0]
+        agents = build_agents(
+            self.config, context_profile=profile, enforce_context_profile=True
+        )
+        tool_ids = {
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in agents.trader_agent.tools
+        }
+        self.assertIn("analyze_crypto_history", tool_ids)
+        self.assertIn("analyze_polymarket_history", tool_ids)
+        self.assertNotIn("analyze_stock_history", tool_ids)
+
+        _, get_market, check = build_trader_tools(
+            self.config,
+            load=lambda *args, **kwargs: self.snapshot,
+            context_profile=profile,
+            enforce_context_profile=True,
+        )
+        state = {"operating_config": asdict(OperatingConfig())}
+        get_market("123", SimpleNamespace(state=state))
+        result = check(self.plan(), SimpleNamespace(state=state))
+        self.assertFalse(result["passed"])
+        self.assertEqual(
+            result["reasons"], ["no approved context profile is available for this market"]
+        )
 
     def test_non_empty_discovery_returns_only_matches_including_zero_results(self) -> None:
         self.assertEqual(self.find("hail", self.context)["candidates"], [])

@@ -44,6 +44,8 @@ EXPECTED = {
     },
     "runtime": {"adapter": "adk", "mode": "paper"},
     "research": {"enabled": True},
+    "history": {"enabled": False},
+    "context_learning": {"enabled": False},
     "session": VALID["session"],
     "risk": VALID["risk"],
     "schema_version": 1,

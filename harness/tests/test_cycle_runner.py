@@ -17,6 +17,8 @@ from google.genai import types
 from pydantic import Field, SkipValidation
 
 from chrysopoeia.configuration import load_harness_config
+from chrysopoeia.context_learning import build_history_evidence
+from chrysopoeia.context_profiles import bundled_profiles
 from chrysopoeia.cost import LEDGER_KEY, settle_model_call
 from chrysopoeia.cycle_runner import (
     GROUNDING_QUERY_PRICE_USD,
@@ -239,6 +241,35 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertEqual(
             state["validated_external_evidence"][0]["evidence_id"], record.evidence_id
         )
+
+    def test_bigquery_history_becomes_bounded_context_evidence(self) -> None:
+        snapshot = replace(self.snapshot, source_url="https://polymarket.com/event/btc-updown-5m-1792600000")
+        profile = bundled_profiles()[0]
+        history = {
+            "scope_key": "polymarket:series:btc-updown-5m",
+            "profile_id": "crypto.btcusd.5m.updown",
+            "profile_version": 1,
+            "as_of": snapshot.captured_at,
+            "lookback_days": 90,
+            "profile_version_count": 1,
+            "decision_count": 12,
+            "plan_ready_count": 4,
+            "abstained_count": 5,
+            "rejected_count": 3,
+            "consumer_rejected_count": 1,
+            "filled_count": 3,
+            "completed_trade_count": 2,
+            "winning_trade_count": 1,
+            "realized_pnl_usd": -0.25,
+            "outcome_watermark": "2026-10-20T00:00:00+00:00",
+        }
+
+        evidence = build_history_evidence(snapshot, profile, history, "p.d.raw_events")
+
+        self.assertEqual(evidence.source_kind, "external")
+        self.assertIn('"profile_version":1', evidence.excerpt or "")
+        self.assertIn('"decision_count":12', evidence.excerpt or "")
+        self.assertIn("bigquery", evidence.url)
 
     def test_disabled_research_skips_grounding_and_its_cost_reservation(self) -> None:
         from chrysopoeia.configuration import ResearchConfig
@@ -622,14 +653,7 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertEqual(function_calls, ["check_trade_plan"])
         self.assertEqual(
             available_tools,
-            [
-                "find_markets",
-                "get_market",
-                "check_trade_plan",
-                "analyze_stock_history",
-                "analyze_crypto_history",
-                "analyze_polymarket_history",
-            ],
+            ["find_markets", "get_market", "check_trade_plan"],
         )
         self.assertTrue(trader.requests[0].config.tools)
         self.assertTrue(trader.requests[1].config.tools)
