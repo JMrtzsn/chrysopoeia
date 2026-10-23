@@ -112,6 +112,9 @@ def _profile_agent(
         include_contents="none",
         output_schema=output_schema,
         output_key=output_key,
+        generate_content_config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        ),
         before_model_callback=configured_before_model_cost(cost_policy),
         after_model_callback=after_model_cost,
         on_model_error_callback=on_model_cost_error,

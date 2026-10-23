@@ -18,7 +18,7 @@ _TABLE_ID = re.compile(r"[A-Za-z0-9-]+\.[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z
 _QUERY = """
 WITH parsed AS (
   SELECT SAFE.PARSE_JSON(data) AS payload, publish_time
-  FROM `{table}`
+  FROM {table}
   WHERE publish_time >= TIMESTAMP_SUB(@as_of, INTERVAL @lookback_days DAY)
     AND publish_time < @as_of
     AND data IS NOT NULL

@@ -218,7 +218,8 @@ The implementation retains v1 YES compatibility. No platform change is included.
    its own risk and activation gates.
 8. **Outcome-driven market contexts and agent-approved profile iteration**
    (operator-approved roadmap addition, 2026-10-21; offline implementation
-   complete, live verification pending): route canonical market families
+   complete, local live verification passed 2026-10-22/23): route canonical
+   market families
    and stable pair/event keys to bounded, versioned context profiles. The loop is
    `trades -> outcomes -> context-scoped information -> summary -> proposed
    profile revision -> independent agent review -> next profile version`.
@@ -253,11 +254,17 @@ The implementation retains v1 YES compatibility. No platform change is included.
    events), bundled profiles, the local append-only profile catalog with
    immutable manifest hashes and outcome-summary provenance, the
    curator/reviewer agent flow with cost accounting, the 20-finalized-plan
-   activation gate, and profile-scoped trader tool allowlists. Remaining:
-   bounded live verification of an agent-generated local profile and of the
-   BigQuery-backed revision loop, plus forward-evaluation criteria before
-   enabling `[context_learning]` anywhere but local development. Do not infer
-   proven profitability from small samples.
+   activation gate, and profile-scoped trader tool allowlists. Live
+   verification passed 2026-10-22/23 for the local path: a v3-tagged BTC
+   outcome reached the archive, an agent-approved local profile was created
+   and pinned by its cycle, and the bounded BigQuery history query returned
+   matching aggregates (`docs/verification.md`). Remaining: the deployed
+   image still predates this feature (rebuild/pin/rollout is a separate
+   approval), the Consumer publisher IAM activates only with a consumer
+   rollout, `[context_learning]` stays off outside local development until
+   forward-evaluation criteria are defined, and no revision loop has run
+   (zero contexts have 20 finalized outcomes). Do not infer proven
+   profitability from small samples.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved
 feature proposals; proposals do not expand this roadmap.

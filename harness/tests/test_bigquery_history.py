@@ -40,6 +40,8 @@ class BigQueryHistoryTests(unittest.TestCase):
 
         sql = client.query.call_args.args[0]
         job_config = client.query.call_args.kwargs["job_config"]
+        self.assertIn("FROM `project.dataset.raw_events`", sql)
+        self.assertNotIn("``", sql)
         self.assertIn("publish_time >=", sql)
         self.assertIn("publish_time < @as_of", sql)
         self.assertIn("$.context.scope_key", sql)

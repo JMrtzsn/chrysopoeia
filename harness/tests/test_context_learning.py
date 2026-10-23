@@ -12,7 +12,7 @@ from chrysopoeia.configuration import (
     HistoryConfig,
     load_harness_config,
 )
-from chrysopoeia.context_learning import resolve_context_profile
+from chrysopoeia.context_learning import _profile_agent, resolve_context_profile
 from chrysopoeia.context_profiles import (
     ContextCatalog,
     ContextProfileDraft,
@@ -66,6 +66,22 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
             "user_id": "operator",
             "session_id": "cycle",
         }
+
+    def test_profile_agents_disable_thinking_within_the_output_ceiling(self) -> None:
+        for output_key, schema in (
+            ("context_profile_draft", ContextProfileDraft),
+            ("context_profile_review", ContextProfileReview),
+        ):
+            agent = _profile_agent(
+                name=f"agent_{output_key}",
+                model="model",
+                instruction="instruction",
+                output_schema=schema,
+                output_key=output_key,
+                cost_policy=self.config.cost_policy,
+            )
+            budget = agent.generate_content_config.thinking_config.thinking_budget
+            self.assertEqual(budget, 0)
 
     async def test_unknown_market_gets_local_profile_only_after_agent_approval(self) -> None:
         config = replace(
