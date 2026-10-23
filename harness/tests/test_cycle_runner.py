@@ -361,13 +361,13 @@ class CycleRunnerTests(unittest.TestCase):
             trader.requests, (ProposalOutput, ProposalOutput, ReviewOutput), strict=True
         ):
             self.assertEqual(request.config.thinking_config.thinking_budget, 0)
-            self.assertEqual(request.config.max_output_tokens, 1024)
+            self.assertEqual(request.config.max_output_tokens, 3072)
             self.assertIs(request.config.response_schema, schema)
 
     def test_reserved_ceiling_uses_configured_model_call_cap(self) -> None:
         self.assertEqual(
             reserved_ceiling(self.config),
-            Decimal("0.2838528") + 30 * GROUNDING_QUERY_PRICE_USD,
+            Decimal("0.5271552") + 30 * GROUNDING_QUERY_PRICE_USD,
         )
 
     def test_cycle_cost_includes_grounding_queries(self) -> None:
@@ -423,7 +423,7 @@ class CycleRunnerTests(unittest.TestCase):
     def test_temporary_five_call_verification_cap(self) -> None:
         self.assertEqual(
             reserved_ceiling(self.config, 5),
-            Decimal("0.118272") + 30 * GROUNDING_QUERY_PRICE_USD,
+            Decimal("0.219648") + 30 * GROUNDING_QUERY_PRICE_USD,
         )
 
     def test_largest_bounded_proposal_is_compact_relative_to_output_ceiling(
@@ -510,9 +510,9 @@ class CycleRunnerTests(unittest.TestCase):
                 self.assertEqual(len(calls), count)
                 self.assertEqual(summary["status"], status)
                 self.assertEqual(summary["reviewer_called"], action == "trade")
-                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.7038528")
+                self.assertEqual(summary["maximum_reserved_cost_usd"], "0.9471552")
                 self.assertLessEqual(
-                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.7038528")
+                    Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.9471552")
                 )
                 self.assertEqual(
                     set(summary),
@@ -564,7 +564,7 @@ class CycleRunnerTests(unittest.TestCase):
                     summarize_cycle(self.config, self.snapshot, state)
 
     def test_one_call_budget_allows_abstention_but_not_a_second_call(self) -> None:
-        budget = Decimal("0.0236544")
+        budget = Decimal("0.0439296")
         for action, succeeds in (("abstain", True), ("trade", False)):
             trader, reviewer, _ = self.models(action)
             operating = replace(

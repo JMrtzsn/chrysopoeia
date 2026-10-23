@@ -258,13 +258,39 @@ The implementation retains v1 YES compatibility. No platform change is included.
    verification passed 2026-10-22/23 for the local path: a v3-tagged BTC
    outcome reached the archive, an agent-approved local profile was created
    and pinned by its cycle, and the bounded BigQuery history query returned
-   matching aggregates (`docs/verification.md`). Remaining: the deployed
-   image still predates this feature (rebuild/pin/rollout is a separate
-   approval), the Consumer publisher IAM activates only with a consumer
-   rollout, `[context_learning]` stays off outside local development until
-   forward-evaluation criteria are defined, and no revision loop has run
-   (zero contexts have 20 finalized outcomes). Do not infer proven
+   matching aggregates (`docs/verification.md`). Do not infer proven
    profitability from small samples.
+
+   Ordered steps to reach a live self-learning cycle on the platform (each
+   separately operator-approved; 1-3 are coordinated with Platform and
+   Consumer and are recorded in both roadmaps):
+
+   1. **Rebuild and pin the feature image:** `uv build` + Platform image
+      build/pin/rollout of the current code (the deployed image
+      `sha256:13eac92e…` predates v3 outcomes, profiles, and learning).
+      Harness-owned wheel; Platform-owned build/pin.
+   2. **Enable the loop in the bundled platform profile:** set
+      `[history].enabled` and `[context_learning].enabled` and raise
+      `[cost].maximum_output_tokens_per_call` to 3072 in
+      `configs/platform.toml`, then rebuild/repin. Budget impact: the
+      conservative failed-turn reservation rises to ~$0.53/turn, so the
+      profile's `$1.50` / two-cycle budget must be re-checked or raised.
+      Define forward-evaluation criteria (profile versions compared on
+      forward trades, not the lookback that created them) before enabling.
+   3. **Deploy the Consumer** so real fills/closes/settlements publish
+      `consumer_outcome` events into the archive; the revision gate counts
+      only closed/settled trades, not abstentions. Requires the Consumer
+      rollout (image digest + subscription) recorded in both Platform and
+      Consumer roadmaps.
+   4. **Accumulate evidence:** run bounded, operator-approved cycles (on-demand
+      or scheduled via the job) until at least one context has ≥20 finalized
+      outcomes under its active profile version. The archive currently holds
+      1 decision and 0 completed trades.
+   5. **First revision turn:** a later cycle in that context triggers the
+      curator/reviewer revision flow; verify the new profile version is
+      recorded, activated only for later turns, and that the archive
+      aggregates match the journal. Record evidence in
+      `docs/verification.md`.
 
 See `docs/proposals.md` for the accepted live-trading design and other unapproved
 feature proposals; proposals do not expand this roadmap.

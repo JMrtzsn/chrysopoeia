@@ -141,7 +141,7 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         record = state["model_cost_ledger"][0]
-        self.assertEqual(record["estimated_reserved_usd"], "0.0236544")
+        self.assertEqual(record["estimated_reserved_usd"], "0.0439296")
         self.assertEqual(record["date"], "2026-08-20")
         self.assertNotIn("operating_config", state)
         denied = await callback(

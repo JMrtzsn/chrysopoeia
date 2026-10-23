@@ -30,7 +30,7 @@ EXPECTED = {
         "input_usd_per_million_tokens": "1.65",
         "maximum_input_tokens_per_call": 8192,
         "maximum_model_calls_per_cycle": 12,
-        "maximum_output_tokens_per_call": 1024,
+        "maximum_output_tokens_per_call": 3072,
         "model": "gemini-3.5-flash",
         "output_usd_per_million_tokens": "9.90",
         "version": "project-estimate-2026-10-v1",

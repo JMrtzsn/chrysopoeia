@@ -61,7 +61,7 @@ VALID = {
         "input_usd_per_million_tokens": "1.65",
         "output_usd_per_million_tokens": "9.90",
         "maximum_input_tokens_per_call": 8192,
-        "maximum_output_tokens_per_call": 1024,
+        "maximum_output_tokens_per_call": 3072,
         "maximum_model_calls_per_cycle": 12,
     },
 }
@@ -155,6 +155,22 @@ class HarnessConfigurationTests(unittest.TestCase):
                           "paper_fee_source": "paper-assumption:flat-2pct-v1"},
             })
 
+    def test_context_learning_requires_a_thinking_sized_output_ceiling(self) -> None:
+        from chrysopoeia.configuration import CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING
+
+        learning = {name: fields.copy() for name, fields in VALID.items()}
+        learning["context_learning"] = {"enabled": True}
+        learning["cost"]["maximum_output_tokens_per_call"] = 1024
+        with self.assertRaises(ConfigurationError):
+            HarnessConfig.from_mapping(learning)
+
+        learning["cost"]["maximum_output_tokens_per_call"] = (
+            CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING
+        )
+        config = HarnessConfig.from_mapping(learning)
+
+        self.assertTrue(config.context_learning.enabled)
+
     def test_valid_mapping_is_exact_immutable_configuration(self) -> None:
         config = HarnessConfig.from_mapping(VALID)
 
@@ -170,7 +186,7 @@ class HarnessConfigurationTests(unittest.TestCase):
                 "input_usd_per_million_tokens": "1.65",
                 "output_usd_per_million_tokens": "9.90",
                 "maximum_input_tokens_per_call": 8192,
-                "maximum_output_tokens_per_call": 1024,
+                "maximum_output_tokens_per_call": 3072,
                 "maximum_model_calls_per_cycle": 12,
             },
         )
@@ -332,7 +348,7 @@ class HarnessConfigurationTests(unittest.TestCase):
                 "maximum_input_tokens_per_call = 321",
             )
             .replace(
-                "maximum_output_tokens_per_call = 1024",
+                "maximum_output_tokens_per_call = 3072",
                 "maximum_output_tokens_per_call = 123",
             )
             .replace(

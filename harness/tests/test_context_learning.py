@@ -67,7 +67,12 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
             "session_id": "cycle",
         }
 
-    def test_profile_agents_disable_thinking_within_the_output_ceiling(self) -> None:
+    def test_profile_agents_use_bounded_thinking_within_the_cost_ceiling(self) -> None:
+        from chrysopoeia.configuration import (
+            CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING,
+            CONTEXT_LEARNING_THINKING_BUDGET,
+        )
+
         for output_key, schema in (
             ("context_profile_draft", ContextProfileDraft),
             ("context_profile_review", ContextProfileReview),
@@ -80,8 +85,13 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
                 output_key=output_key,
                 cost_policy=self.config.cost_policy,
             )
-            budget = agent.generate_content_config.thinking_config.thinking_budget
-            self.assertEqual(budget, 0)
+            config = agent.generate_content_config
+            self.assertEqual(config.thinking_config.thinking_budget, CONTEXT_LEARNING_THINKING_BUDGET)
+            ceiling = config.max_output_tokens
+            policy_ceiling = self.config.cost.maximum_output_tokens_per_call
+            assert isinstance(ceiling, int) and isinstance(policy_ceiling, int)
+            self.assertEqual(ceiling, CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING)
+            self.assertLessEqual(ceiling, policy_ceiling)
 
     async def test_unknown_market_gets_local_profile_only_after_agent_approval(self) -> None:
         config = replace(

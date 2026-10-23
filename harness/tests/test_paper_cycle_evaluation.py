@@ -196,7 +196,7 @@ class PaperCycleEvaluationTests(unittest.TestCase):
         self.assertEqual(summary["reason"], "trader_abstained")
         self.assertFalse(summary["reviewer_called"])
         self.assertEqual(summary["ledger_statuses"], ["completed"])
-        self.assertEqual(summary["reserved_ceiling_usd"], "0.0236544")
+        self.assertEqual(summary["reserved_ceiling_usd"], "0.0439296")
         self.assertIsNone(state["paper_cycle_fill"])
         self.assertEqual(
             state["paper_cycle_decision"],

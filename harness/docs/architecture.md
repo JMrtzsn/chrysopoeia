@@ -111,7 +111,12 @@ flowchart TD
   non-fatal; results do not authorize or change risk, policy, or accounting.
 - With `[context_learning].enabled`, at least 20 distinct closed/settled plans
   under the active profile version may trigger a curator draft and independent
-  profile review. Deterministic schema/tool/source validation gates append-only
+  profile review. Both profile agents run with bounded thinking (2048-token
+  budget) inside a raised per-call output ceiling (3072 tokens covers thinking
+  plus the schema-bounded response); the configuration rejects enabling
+  context learning with a smaller output ceiling. Thinking tokens are settled
+  against the reserved output cost like any other output. Deterministic
+  schema/tool/source validation gates append-only
   catalog activation; rejections, open fills, abstentions, and repeated outcome
   watermarks never replace or churn the current profile.
 - The Consumer publishes `consumer_outcome` lifecycle records from its own

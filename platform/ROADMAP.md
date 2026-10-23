@@ -122,16 +122,27 @@ runtime resources were replaced or deleted. Recovery steps are in
    request-triggered; no always-on harness process is required. Repeat
    executions should pass a fresh `--journal` via `execute --args`, since
    resuming a session immediately hits its cycle cap.
- 3. Deploy the live-execution consumer (separate identity and secret handling)
-    only after `../consumer/ROADMAP.md` live-execution gates pass and are
-    approved.
+3. Deploy the live-execution consumer (separate identity and secret handling)
+   only after `../consumer/ROADMAP.md` live-execution gates pass and are
+   approved.
 4. **Outcome archive and context-history access** (coordinated operator
-   approval, 2026-10-21; implementation underway): allow the optional Consumer
-   service identity to publish lifecycle outcomes to the existing topic. When
-   `context_history_enabled` is explicitly enabled, grant the Harness runner
-   `bigquery.jobUser` plus dataset-scoped `bigquery.dataViewer`, and pass the
-   archive table/location to the job. No live apply, image rollout, or BigQuery
-   query is authorized by this roadmap addition.
+   approval, 2026-10-21; IAM applied and verified 2026-10-22): the optional
+   Consumer service identity can publish lifecycle outcomes to the existing
+   topic, and `context_history_enabled` grants the Harness runner
+   `bigquery.jobUser` plus dataset-scoped `bigquery.dataViewer` and passes the
+   archive table/location to the job. Both grants are live-verified; the
+   deployed image does not use them yet.
+5. **Self-learning rollout steps** (coordinated with Harness roadmap item 8;
+   each separately operator-approved): (a) rebuild and pin a harness image
+   containing the context-profile feature — the deployed
+   `sha256:13eac92e…` predates it; (b) redeploy after the Harness platform
+   profile enables `[history]`/`[context_learning]` and raises its output
+   token ceiling, re-checking the session budget against the larger
+   reservation; (c) roll out the Consumer so real fills publish
+   `consumer_outcome` events; (d) run bounded cycles until a context has 20
+   finalized outcomes, then verify the first agent-approved profile revision
+   end to end. No image rollout, consumer rollout, or scheduling is
+   authorized by this entry alone.
 
 ## Deferred
 

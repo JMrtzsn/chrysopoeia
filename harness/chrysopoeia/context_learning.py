@@ -16,7 +16,11 @@ from google.genai import types
 from pydantic import ValidationError
 
 from chrysopoeia.bigquery_history import bigquery_console_url, query_context_history
-from chrysopoeia.configuration import HarnessConfig
+from chrysopoeia.configuration import (
+    CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING,
+    CONTEXT_LEARNING_THINKING_BUDGET,
+    HarnessConfig,
+)
 from chrysopoeia.context import (
     ContextIdentity,
     context_identity_for_series,
@@ -113,7 +117,10 @@ def _profile_agent(
         output_schema=output_schema,
         output_key=output_key,
         generate_content_config=types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(thinking_budget=0)
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=CONTEXT_LEARNING_THINKING_BUDGET
+            ),
+            max_output_tokens=CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING,
         ),
         before_model_callback=configured_before_model_cost(cost_policy),
         after_model_callback=after_model_cost,

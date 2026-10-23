@@ -161,6 +161,12 @@ class ContextLearningConfig:
     enabled: bool = False
 
 
+# Context-profile agents use bounded thinking; the per-call output ceiling must
+# cover thinking tokens plus the schema-bounded structured response.
+CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING = 3072
+CONTEXT_LEARNING_THINKING_BUDGET = 2048
+
+
 @dataclass(frozen=True)
 class HarnessConfig:
     runtime: RuntimeConfig
@@ -381,6 +387,15 @@ class HarnessConfig:
             ),
             _positive_int(cost["maximum_model_calls_per_cycle"], "maximum model calls"),
         )
+        if (
+            context_learning_config.enabled
+            and cost_config.maximum_output_tokens_per_call
+            < CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING
+        ):
+            raise ConfigurationError(
+                "context learning requires a per-call output token ceiling of at "
+                f"least {CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING} for bounded profile thinking"
+            )
         result = cls(
             runtime_config,
             venue_config,
