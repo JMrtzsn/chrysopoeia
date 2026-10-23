@@ -32,6 +32,10 @@ PAPER_CYCLE_FILL_KEY = "paper_cycle_fill"
 TRADE_PLAN_READY_KEY = "trade_plan_ready"
 TURN_OUTCOME_KEY = "turn_outcome"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
+OUTCOME_STATUS_KEY = "paper_cycle_outcome_status"
+OUTCOME_STATUSES = frozenset(
+    {"abstained", "plan_check_rejected", "reviewer_rejected", "policy_rejected", "plan_ready"}
+)
 LAST_SUCCESSFUL_PLAN_KEY = "last_successful_trade_plan"
 LAST_SUCCESSFUL_SNAPSHOT_KEY = "last_successful_trade_plan_snapshot"
 PLAN_CHECKS_KEY = "plan_checks"
@@ -788,13 +792,13 @@ def finalize_paper_cycle(
     if fill is not None and proposal_output.exit_plan is not None:
         fill["exit_plan"] = proposal_output.exit_plan.model_dump()
     if cycle.event and checked:
-        status, reason = "approved", cycle.decision.reason
+        status, reason, outcome = "approved", cycle.decision.reason, "plan_ready"
     elif cycle.event:
-        status, reason = "rejected", plan_check_rejection_reason(state)
+        status, reason, outcome = "rejected", plan_check_rejection_reason(state), "plan_check_rejected"
     elif not review.approved:
-        status, reason = "rejected", "review_rejected"
+        status, reason, outcome = "rejected", "review_rejected", "reviewer_rejected"
     else:
-        status, reason = "rejected", cycle.decision.reason
+        status, reason, outcome = "rejected", cycle.decision.reason, "policy_rejected"
     report = PaperCycleReportOutput(
         status=status, reason=reason, summary=cycle.summary
     ).model_dump()
@@ -802,4 +806,5 @@ def finalize_paper_cycle(
     state[PAPER_CYCLE_FILL_KEY] = fill
     state[TRADE_PLAN_READY_KEY] = event
     state[PAPER_CYCLE_REPORT_KEY] = report
+    state[OUTCOME_STATUS_KEY] = outcome
     return report

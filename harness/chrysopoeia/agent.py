@@ -606,6 +606,7 @@ def complete_unchecked_trade(ctx: Context, node_input: paper_cycle.ProposalOutpu
     ctx.state[paper_cycle.PAPER_CYCLE_FILL_KEY] = None
     ctx.state[paper_cycle.TRADE_PLAN_READY_KEY] = None
     ctx.state[paper_cycle.PAPER_CYCLE_REPORT_KEY] = report.model_dump()
+    ctx.state[paper_cycle.OUTCOME_STATUS_KEY] = "plan_check_rejected"
     return report
 
 
@@ -626,6 +627,7 @@ def complete_abstention(ctx: Context, node_input: paper_cycle.ProposalOutput) ->
     ctx.state[paper_cycle.PAPER_CYCLE_DECISION_KEY] = {"allowed": False, "reason": "trader_abstained"}
     ctx.state[paper_cycle.PAPER_CYCLE_FILL_KEY] = None
     ctx.state[paper_cycle.PAPER_CYCLE_REPORT_KEY] = report.model_dump()
+    ctx.state[paper_cycle.OUTCOME_STATUS_KEY] = "abstained"
     return report
 
 

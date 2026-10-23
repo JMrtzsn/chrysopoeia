@@ -542,6 +542,27 @@ class CycleRunnerTests(unittest.TestCase):
                 else:
                     self.assertIsNone(summary["event"])
 
+    def test_each_terminal_node_records_exactly_one_outcome_status(self) -> None:
+        for action, approved, checked, expected in (
+            ("abstain", True, False, "abstained"),
+            ("trade", True, True, "plan_check_rejected"),
+            ("trade", False, False, "reviewer_rejected"),
+            ("trade", True, False, "plan_ready"),
+        ):
+            trader, reviewer, _ = self.models(action, approved)
+            trader.checked = checked
+            state, _, _ = asyncio.run(
+                run_paper_cycle_state(self.config, self.snapshot, OperatingConfig(), trader, reviewer)
+            )
+
+            with self.subTest(expected=expected):
+                self.assertEqual(state["paper_cycle_outcome_status"], expected)
+                summary = summarize_cycle(self.config, self.snapshot, state)
+                self.assertEqual(summary["outcome_event"]["status"], expected)
+                del state["paper_cycle_outcome_status"]
+                with self.assertRaisesRegex(ValueError, "terminal outcome"):
+                    summarize_cycle(self.config, self.snapshot, state)
+
     def test_one_call_budget_allows_abstention_but_not_a_second_call(self) -> None:
         budget = Decimal("0.0236544")
         for action, succeeds in (("abstain", True), ("trade", False)):

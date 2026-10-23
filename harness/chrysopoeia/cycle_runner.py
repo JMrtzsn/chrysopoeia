@@ -38,6 +38,8 @@ from chrysopoeia.models import (
     resolve_research_provider,
 )
 from chrysopoeia.paper_cycle import (
+    OUTCOME_STATUS_KEY,
+    OUTCOME_STATUSES,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
@@ -324,16 +326,9 @@ def summarize_cycle(
     event = state.get(TRADE_PLAN_READY_KEY)
     review_value = state.get(REVIEW_KEY)
     review = ReviewOutput.model_validate(review_value) if review_value is not None else None
-    if report.status == "abstained":
-        outcome_status = "abstained"
-    elif review is None:
-        outcome_status = "plan_check_rejected"
-    elif not review.approved:
-        outcome_status = "reviewer_rejected"
-    elif event is None:
-        outcome_status = "policy_rejected"
-    else:
-        outcome_status = "plan_ready"
+    outcome_status = state.get(OUTCOME_STATUS_KEY)
+    if outcome_status not in OUTCOME_STATUSES:
+        raise ValueError("paper cycle ended without a terminal outcome")
     created_at = snapshot.captured_at if snapshot and snapshot.captured_at else None
     if created_at is None:
         raise ValueError("decided paper cycle is missing a capture timestamp")
