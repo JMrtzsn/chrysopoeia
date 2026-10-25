@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import tempfile
 import unittest
 from copy import deepcopy
@@ -24,6 +25,15 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("docker build --platform linux/amd64", script)
         self.assertNotIn("docker push", script)
         self.assertIn("consumer_outcome.v1.schema.json", script)
+
+    def test_dockerignore_whitelists_every_staged_contract(self) -> None:
+        root = Path(__file__).parents[1]
+        dockerfile = (root / "Dockerfile").read_text()
+        ignore = (root / ".dockerignore").read_text()
+        staged = re.findall(r"^COPY (\.build/\S+)", dockerfile, re.MULTILINE)
+        self.assertTrue(staged)
+        for path in staged:
+            self.assertIn(f"!{path}", ignore)
 
 
 def event(**changes: object) -> dict[str, object]:

@@ -280,11 +280,14 @@ The implementation retains v1 YES compatibility. No platform change is included.
       `docs/verification.md`): v3 outcome pinned the bundled BTC profile v1,
       the deployed history query returned matching aggregates, and the
       activation gate correctly stayed closed at 0 completed trades.
-   3. **Deploy the Consumer** so real fills/closes/settlements publish
-      `consumer_outcome` events into the archive; the revision gate counts
-      only closed/settled trades, not abstentions. Requires the Consumer
-      rollout (image digest + subscription) recorded in both Platform and
-      Consumer roadmaps.
+   3. ~~**Deploy the Consumer**~~ (done 2026-10-25): image `sha256:6807f5c7…`
+      pinned, 15 consumer resources deployed, filtered push subscription live.
+      Verified with a labeled synthetic plan: fresh-quote paper fill, minute
+      sweep settlement at resolution, and rejected/filled/settled
+      `consumer_outcome` events archived (evidence in
+      `../platform/docs/deployment.md`). Two bounded harness runs abstained
+      4/4 turns, so model-produced deployed delivery is still pending; the
+      gate structurally counts only outcomes joined to real harness turns.
    4. **Accumulate evidence:** run bounded, operator-approved cycles (on-demand
       or scheduled via the job) until at least one context has ≥20 finalized
       outcomes under its active profile version. The archive currently holds

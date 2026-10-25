@@ -110,11 +110,10 @@ The original synthetic row remained unchanged before/after. No storage or
 runtime resources were replaced or deleted. Recovery steps are in
 `docs/deployment.md#permanent-storage-and-infrastructure-recreation`.
 
-1. Deploy the Pulumi-managed consumer subscription and verify its
-   `trade_plan_ready` filter replacement. The rebuilt image and a bounded job
-   execution with `CHRYSOPOEIA_EVENT_SINK=pubsub:...` were live-verified
-   2026-10-14 (see `docs/deployment.md`): the deployed direct-publishing path is
-   confirmed, so only the undeployed subscription remains.
+1. ~~Deploy the Pulumi-managed consumer subscription and verify its
+   `trade_plan_ready` filter replacement~~ (done 2026-10-25): the filtered
+   push subscription is deployed and delivered only plan events to the
+   consumer; full lifecycle evidence in `docs/deployment.md`.
 2. Launch bounded paper `run` sessions from the Cloud Run Job. Live-verified
    2026-10-14: one execution completed two bounded cycles using CLI settings.
    The config-only contract above replaces those settings with the bundled
@@ -143,11 +142,13 @@ runtime resources were replaced or deleted. Recovery steps are in
    execution `chrysopoeia-cycle-local-j7xbh` exited 0 at its two-cycle cap
    with $0.12549240 actual cost and a context-pinned v3 outcome carrying the
    deployed history aggregate; see `../harness/docs/verification.md`;
-   (c) roll out the Consumer so real fills publish
-   `consumer_outcome` events; (d) run bounded cycles until a context has 20
+   (c) ~~roll out the Consumer so real fills publish
+   `consumer_outcome` events~~ (done 2026-10-25): `sha256:6807f5c7…` pinned,
+   15 resources created, synthetic-plan fill/settlement outcomes archived —
+   see `docs/deployment.md`; model-produced delivery pending a non-abstaining
+   turn; (d) run bounded cycles until a context has 20
    finalized outcomes, then verify the first agent-approved profile revision
-   end to end. No consumer rollout or scheduling is
-   authorized by this entry alone.
+   end to end. No scheduling is authorized by this entry alone.
 
 ## Deferred
 

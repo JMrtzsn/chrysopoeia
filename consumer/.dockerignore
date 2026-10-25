@@ -3,3 +3,4 @@
 !dist/*.whl
 !.build/trade_plan_ready.v1.schema.json
 !.build/trade_plan_ready.v2.schema.json
+!.build/consumer_outcome.v1.schema.json
