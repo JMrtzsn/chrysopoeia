@@ -133,15 +133,20 @@ runtime resources were replaced or deleted. Recovery steps are in
    archive table/location to the job. Both grants are live-verified; the
    deployed image does not use them yet.
 5. **Self-learning rollout steps** (coordinated with Harness roadmap item 8;
-   each separately operator-approved): (a) rebuild and pin a harness image
-   containing the context-profile feature — the deployed
-   `sha256:13eac92e…` predates it; (b) redeploy after the Harness platform
-   profile enables `[history]`/`[context_learning]` and raises its output
-   token ceiling, re-checking the session budget against the larger
-   reservation; (c) roll out the Consumer so real fills publish
+   each separately operator-approved): (a) ~~rebuild and pin a harness image
+   containing the context-profile feature~~ (done 2026-10-23):
+   `sha256:83447e14…` pinned and deployed; the job also sets
+   `CHRYSOPOEIA_CONTEXT_CATALOG=/mnt/journal/context_profiles.jsonl` so
+   generated profiles persist on the journal bucket; (b) ~~redeploy with
+   `[history]`/`[context_learning]` enabled and the 3072 output ceiling~~
+   (done 2026-10-23): budget re-checked (~$1.05 worst case vs $1.50),
+   execution `chrysopoeia-cycle-local-j7xbh` exited 0 at its two-cycle cap
+   with $0.12549240 actual cost and a context-pinned v3 outcome carrying the
+   deployed history aggregate; see `../harness/docs/verification.md`;
+   (c) roll out the Consumer so real fills publish
    `consumer_outcome` events; (d) run bounded cycles until a context has 20
    finalized outcomes, then verify the first agent-approved profile revision
-   end to end. No image rollout, consumer rollout, or scheduling is
+   end to end. No consumer rollout or scheduling is
    authorized by this entry alone.
 
 ## Deferred

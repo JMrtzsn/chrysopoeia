@@ -238,11 +238,21 @@ authorization.
 
 Bundled profiles are source controlled. Generated profiles and review decisions
 are stored in a local append-only JSONL catalog outside the financial journal;
-the default path is under `XDG_STATE_HOME` (or `~/.local/share/chrysopoeia`).
-Locally generated profiles are never packaged or deployed automatically. Profile
+the default path is under `XDG_STATE_HOME` (or `~/.local/share/chrysopoeia`),
+and deployed runs point `CHRYSOPOEIA_CONTEXT_CATALOG` at the durable journal
+mount. Locally generated profiles are never packaged or deployed automatically. Profile
 curation changes only later analysis guidance/tool selection; historical
 aggregates cannot become authoritative for balances, fills, risk, permissions,
 or lifecycle decisions.
+
+Profile versions are evaluated only on forward trades decided under that
+version, never on the lookback window that created the revision. An approved
+revision activates only for later turns, and a version's scorecard starts empty
+at activation: outcomes accumulate under it until the finalized-plan gate and
+sample sufficiency are met again. Sparse or losing lookbacks do not roll a
+version back, and open positions/abstentions are not losses; comparison between
+versions happens only after both have sufficient forward outcomes in the same
+context scope.
 
 ## Keeping this map current
 

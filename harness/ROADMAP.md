@@ -265,18 +265,21 @@ The implementation retains v1 YES compatibility. No platform change is included.
    separately operator-approved; 1-3 are coordinated with Platform and
    Consumer and are recorded in both roadmaps):
 
-   1. **Rebuild and pin the feature image:** `uv build` + Platform image
-      build/pin/rollout of the current code (the deployed image
-      `sha256:13eac92e…` predates v3 outcomes, profiles, and learning).
-      Harness-owned wheel; Platform-owned build/pin.
-   2. **Enable the loop in the bundled platform profile:** set
-      `[history].enabled` and `[context_learning].enabled` and raise
-      `[cost].maximum_output_tokens_per_call` to 3072 in
-      `configs/platform.toml`, then rebuild/repin. Budget impact: the
-      conservative failed-turn reservation rises to ~$0.53/turn, so the
-      profile's `$1.50` / two-cycle budget must be re-checked or raised.
-      Define forward-evaluation criteria (profile versions compared on
-      forward trades, not the lookback that created them) before enabling.
+   1. ~~**Rebuild and pin the feature image**~~ (done 2026-10-23): image
+      `sha256:83447e14…` built from the current wheel and deployed. The job
+      also gained `CHRYSOPOEIA_CONTEXT_CATALOG=/mnt/journal/context_profiles.jsonl`
+      so generated profiles persist on the journal bucket between executions
+      and rollouts; bundled profiles remain in the image.
+   2. ~~**Enable the loop in the bundled platform profile**~~ (done
+      2026-10-23): `[history].enabled`, `[context_learning].enabled`, and
+      `maximum_output_tokens_per_call = 3072` are set in
+      `configs/platform.toml`. Worst-case reservation ~$0.53/turn fits the
+      unchanged `$1.50` / two-cycle budget (~$1.05). Forward-evaluation
+      criteria are recorded in `docs/architecture.md`. Verified live by
+      execution `chrysopoeia-cycle-local-j7xbh` (evidence in
+      `docs/verification.md`): v3 outcome pinned the bundled BTC profile v1,
+      the deployed history query returned matching aggregates, and the
+      activation gate correctly stayed closed at 0 completed trades.
    3. **Deploy the Consumer** so real fills/closes/settlements publish
       `consumer_outcome` events into the archive; the revision gate counts
       only closed/settled trades, not abstentions. Requires the Consumer

@@ -319,6 +319,10 @@ paper_cycle_job = gcp.cloudrunv2.Job(
                                 name="GOOGLE_CLOUD_LOCATION",
                                 value=region,
                             ),
+                            gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(
+                                name="CHRYSOPOEIA_CONTEXT_CATALOG",
+                                value="/mnt/journal/context_profiles.jsonl",
+                            ),
                             *(
                                 [
                                     gcp.cloudrunv2.JobTemplateTemplateContainerEnvArgs(

@@ -22,7 +22,7 @@ model = "gemini-3.5-flash"
 input_usd_per_million_tokens = "1.65"
 output_usd_per_million_tokens = "9.90"
 maximum_input_tokens_per_call = 8192
-maximum_output_tokens_per_call = 1024
+maximum_output_tokens_per_call = 3072
 maximum_model_calls_per_cycle = 12
 
 [session]
@@ -39,10 +39,10 @@ daily_cloud_cost_budget = 5
 enabled = false
 
 [history]
-enabled = false
+enabled = true
 
 [context_learning]
-enabled = false
+enabled = true
 
 [risk]
 maximum_market_exposure = 0.01
