@@ -647,6 +647,110 @@ def _quote(
     )
 
 
+@dataclass(frozen=True)
+class StakeMetrics:
+    stake: float
+    shares: float
+    vwap: float
+    worst_entry_price: float
+    slippage: float
+    fees: float
+    total_cash: float
+    expected_net_profit: float
+    expected_net_roi: float
+    marginal_edge: float
+    average_edge: float
+    break_even_probability: float
+
+
+@dataclass(frozen=True)
+class CapacityPlan:
+    stake: float | None
+    reason: str | None
+    allowance: float
+    executable_stake: float
+    candidates: tuple[StakeMetrics, ...]
+
+
+def _stake_metrics(snapshot: MarketSnapshot, outcome: str, probability: float, stake: Decimal) -> StakeMetrics:
+    fill = _quote(
+        snapshot,
+        Proposal(snapshot.snapshot_id, snapshot.market_id, probability, float(stake), outcome=outcome),
+    )
+    selected = outcome_snapshot(snapshot, outcome)
+    p = Decimal(str(probability))
+    fee = Decimal(str(snapshot.fee_rate))
+    shares = Decimal(str(fill.shares))
+    cash = Decimal(str(fill.total_cost))
+    vwap = Decimal(str(fill.price))
+    worst = Decimal(str(selected.asks[fill.levels_consumed - 1].price))
+    profit = shares * p - cash
+    return StakeMetrics(
+        float(stake),
+        float(shares),
+        float(vwap),
+        float(worst),
+        float(vwap - Decimal(str(selected.price))),
+        float(Decimal(str(fill.fee))),
+        float(cash),
+        float(profit),
+        float(profit / cash),
+        float(p - worst * (1 + fee)),
+        float(p - vwap * (1 + fee)),
+        float(cash / shares),
+    )
+
+
+def plan_capacity(
+    snapshot: MarketSnapshot,
+    outcome: str,
+    probability: float,
+    allowance: float,
+) -> CapacityPlan:
+    """Largest stake whose marginal book level still meets the net edge.
+
+    `allowance` is the gross-spend cap from policy/exposure; executable depth
+    is observed book data and is never extrapolated. Requires a real ask book.
+    """
+    _finite(probability, "probability")
+    _finite(allowance, "allowance")
+    if not 0 < probability < 1:
+        raise ValueError("probability must be between 0 and 1")
+    if allowance < 0:
+        raise ValueError("allowance cannot be negative")
+    selected = outcome_snapshot(snapshot, outcome)
+    if not selected.asks:
+        raise ValueError("capacity planning requires an executable ask book")
+    cap = Decimal(str(allowance))
+    depth = Decimal(0)
+    stakes: list[Decimal] = []
+    for level in selected.asks:
+        depth += Decimal(str(level.price)) * Decimal(str(level.size))
+        if depth <= cap:
+            stakes.append(depth)
+    executable = min(cap, depth)
+    if not stakes or (stakes and executable > stakes[-1] and executable < depth):
+        stakes.append(executable)
+    if executable <= 0:
+        return CapacityPlan(None, f"no executable {outcome} stake within policy allowance", float(cap), float(executable), ())
+    candidates: list[StakeMetrics] = []
+    chosen: StakeMetrics | None = None
+    for stake in stakes:
+        metrics = _stake_metrics(snapshot, outcome, probability, stake)
+        candidates.append(metrics)
+        if metrics.marginal_edge >= MINIMUM_NET_EDGE - 1e-12:
+            chosen = metrics
+    if chosen is None:
+        return CapacityPlan(
+            None,
+            f"no executable {outcome} stake meets the minimum net edge of 0.05 within captured depth",
+            float(cap),
+            float(executable),
+            tuple(candidates),
+        )
+    return CapacityPlan(chosen.stake, None, float(cap), float(executable), tuple(candidates))
+
+
 def quote_exit(snapshot: MarketSnapshot, shares: float) -> ExitQuote:
     """Quote a complete YES close against executable bid depth."""
     _finite(shares, "shares")
@@ -708,6 +812,39 @@ def check_risk(
         return RiskDecision(False, "per-market exposure limit exceeded")
     if snapshot.total_exposure + quoted.total_cost > snapshot.bankroll * maximum_total_exposure:
         return RiskDecision(False, "total exposure limit exceeded")
+    # shortcut: six-field local snapshots without a real ask book keep the legacy path.
+    if selected.asks:
+        fee = Decimal(str(snapshot.fee_rate))
+        allowance = max(
+            Decimal(0),
+            min(
+                Decimal(str(snapshot.bankroll)) * Decimal(str(maximum_market_exposure))
+                - Decimal(str(snapshot.market_exposure)),
+                Decimal(str(snapshot.bankroll)) * Decimal(str(maximum_total_exposure))
+                - Decimal(str(snapshot.total_exposure)),
+            )
+            / (Decimal(1) + fee),
+        )
+        capacity = plan_capacity(snapshot, proposal.outcome, probability, float(allowance))
+        if capacity.stake is None:
+            return RiskDecision(False, capacity.reason or "no executable stake meets the minimum net edge")
+        if Decimal(str(proposal.amount)) > Decimal(str(capacity.stake)) + Decimal("1e-9"):
+            try:
+                deterioration = _stake_metrics(
+                    snapshot, proposal.outcome, probability, Decimal(str(proposal.amount))
+                )
+                detail = (
+                    f"; the {proposal.amount:g} quote deteriorates to marginal edge "
+                    f"{deterioration.marginal_edge:.4f} at worst entry {deterioration.worst_entry_price:g} "
+                    f"(expected net ROI {deterioration.expected_net_roi:.4f})"
+                )
+            except ValueError:
+                detail = f"; {proposal.amount:g} is not executable within captured depth"
+            return RiskDecision(
+                False,
+                f"stake {proposal.amount:g} exceeds the edge-aware capacity {capacity.stake:g} "
+                f"for forecast {probability:g} (policy allowance {capacity.allowance:g}){detail}",
+            )
     return RiskDecision(True, "approved by review and deterministic risk policy")
 
 

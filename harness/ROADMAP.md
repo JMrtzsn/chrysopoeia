@@ -189,7 +189,12 @@ The implementation retains v1 YES compatibility. No platform change is included.
    Consumer, paper fill recorded; `docs/verification.md`); the deployed path
    (Pulumi subscription) remains unverified.
 3. **Liquidity-aware sizing and profitability by amount** (operator-approved
-   roadmap addition, 2026-10-19; implementation not started): distinguish the
+   roadmap addition, 2026-10-19; offline implementation complete 2026-10-26
+   with 381 passing tests; evidence in `docs/verification.md`; bounded
+   public-book verification and image redeploy pending, each separately
+   approved; implementation started 2026-10-26 after the
+   first accumulation campaign showed 3 of 5 deployed plans rejected on the
+   consumer's fresh quote): distinguish the
    policy/risk allowance from measured executable book capacity and capacity
    that still meets the configured net-edge requirement. For BTC 5m YES/Up and
    NO/Down separately, use the actual selected token's fresh asks, not a
@@ -297,11 +302,14 @@ The implementation retains v1 YES compatibility. No platform change is included.
       gate structurally counts only outcomes joined to real harness turns.
    4. **Accumulate evidence:** run bounded, operator-approved cycles (on-demand
       or scheduled via the job) until at least one context has ≥20 finalized
-      outcomes under its active profile version. Campaign running since
-      2026-10-25: 80 queued executions at 30-minute spacing via the Platform
-      trigger queue (approved bound $120 worst case, ~$8-10 expected). The
-      counter is `completed_trade_count` in the archive aggregate; synthetic
-      verification outcomes are structurally excluded.
+      outcomes under its active profile version. First campaign ran 2026-10-25/26
+      and was halted early after ~39 of 80 executions ($2.76 actual): 46
+      decisions produced 5 plans (~11%), of which the consumer rejected 3 for
+      insufficient executable depth / maximum entry exceeded on its fresh
+      quote, leaving 2 completed trades. Yield is throttled by item 3 below;
+      the campaign resumes after liquidity-aware sizing ships. The counter is
+      `completed_trade_count` in the archive aggregate; synthetic verification
+      outcomes are structurally excluded.
    5. **First revision turn:** a later cycle in that context triggers the
       curator/reviewer revision flow; verify the new profile version is
       recorded, activated only for later turns, and that the archive

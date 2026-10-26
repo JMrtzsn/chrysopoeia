@@ -12,6 +12,7 @@ from chrysopoeia.trading import (
     Proposal,
     Review,
     consume_trade_plan,
+    plan_capacity,
     quote_exit,
     run_decision_cycle,
 )
@@ -44,6 +45,71 @@ class DecisionCycleTests(unittest.TestCase):
         self.assertIsNone(report.event)
         self.assertIn("snapshot-1", report.summary)
         self.assertIn("market-1", report.summary)
+
+    def test_stake_above_edge_aware_capacity_is_rejected_with_the_deterioration_comparison(self) -> None:
+        # Acceptance: policy allows $50, but only the first $10 of depth meets
+        # the net edge at p=0.78 (the 0.75 tail fails marginally after fees).
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 25), BookLevel(0.75, 1000)),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+        review = Review("snapshot-1", "market-1", True, "supported", ("evidence-1",))
+        operating = OperatingConfig(
+            bankroll=1_000, maximum_market_exposure=0.051, maximum_total_exposure=0.051
+        )
+
+        over = Proposal("snapshot-1", "market-1", 0.78, 50, 0.75, ExitPlan(0.1, hold_to_resolution=True))
+        report = run_decision_cycle(snapshot, over, review, operating)
+        self.assertFalse(report.decision.allowed)
+        self.assertIn("edge-aware capacity 10", report.decision.reason)
+        self.assertIn("policy allowance 50", report.decision.reason)
+        self.assertIn("deteriorates to marginal edge", report.decision.reason)
+
+        within = Proposal("snapshot-1", "market-1", 0.78, 10, 0.4, ExitPlan(0.1, hold_to_resolution=True))
+        self.assertTrue(run_decision_cycle(snapshot, within, review, operating).decision.allowed)
+
+    def test_capacity_reports_unavailable_when_no_stake_meets_the_fee_adjusted_edge(self) -> None:
+        # p - best ask clears the raw 0.05 gate, but not after the 2% fee.
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 100),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+        proposal = Proposal("snapshot-1", "market-1", 0.4501, 5, 0.4, ExitPlan(0.1, hold_to_resolution=True))
+        review = Review("snapshot-1", "market-1", True, "supported", ("evidence-1",))
+
+        report = run_decision_cycle(snapshot, proposal, review)
+        self.assertFalse(report.decision.allowed)
+        self.assertIn("no executable YES stake meets the minimum net edge", report.decision.reason)
+
+    def test_capacity_is_bounded_by_observed_depth_without_extrapolation(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 5),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+        )
+
+        capacity = plan_capacity(snapshot, "YES", 0.56, 50)
+        self.assertEqual(capacity.executable_stake, 2.0)
+        self.assertEqual(capacity.stake, 2.0)
+        self.assertTrue(all(candidate.stake <= 2.0 for candidate in capacity.candidates))
+
+    def test_no_side_capacity_uses_the_real_no_book(self) -> None:
+        snapshot = self.rich_snapshot(
+            asks=(BookLevel(0.4, 100),),
+            fee_rate=0.02,
+            fee_source="paper-assumption:flat-2pct-v1",
+            no_token_id="no-token",
+            no_asks=(BookLevel(0.35, 10), BookLevel(0.9, 1000)),
+            no_bids=(BookLevel(0.3, 10),),
+            no_book_captured_at="2026-09-01T00:00:00+00:00",
+        )
+        # NO forecast 0.78 (YES 0.22): the 0.9 tail fails the fee-adjusted edge.
+        capacity = plan_capacity(snapshot, "NO", 0.78, 50)
+
+        self.assertEqual(capacity.stake, 3.5)
+        self.assertEqual(capacity.candidates[0].worst_entry_price, 0.35)
 
     def test_consumer_preserves_depth_and_fee_quote(self) -> None:
         snapshot = self.rich_snapshot(

@@ -173,7 +173,7 @@ class TraderToolTests(unittest.TestCase):
             plan_inputs["template"]["amount"], plan_inputs["maximum_amount"]
         )
 
-    def test_plan_at_maximum_amount_and_required_entry_price_passes_across_ask_levels(self) -> None:
+    def test_plan_is_bounded_by_edge_aware_capacity_across_ask_levels(self) -> None:
         self.snapshot = replace(
             self.snapshot,
             asks=(BookLevel(0.4, 10), BookLevel(0.5, 100)),
@@ -198,10 +198,24 @@ class TraderToolTests(unittest.TestCase):
             rationale="Canonical evidence supports sufficient YES edge.",
         )
 
+        # The 0.5 level's marginal edge at p=0.46 with a 2% fee is negative, so
+        # only the first $4 of the book meets the net-edge requirement.
+        rejected = self.check(plan, self.context)
+        self.assertFalse(rejected["passed"])
+        self.assertIn("edge-aware capacity 4", rejected["reasons"][0])
+        self.assertIn("policy allowance 9.80392", rejected["reasons"][0])
+        self.assertIn("deteriorates to marginal edge", rejected["reasons"][0])
+
+        plan["amount"] = 4.0
+        plan["max_entry_price"] = 0.4
         self.assertTrue(self.check(plan, self.context)["passed"])
 
         rejected = self.check(
-            {**plan, "amount": plan_inputs["maximum_amount"] + 0.01},
+            {
+                **plan,
+                "amount": plan_inputs["maximum_amount"] + 0.01,
+                "max_entry_price": plan_inputs["max_entry_price_for_maximum_amount"],
+            },
             self.context,
         )
         self.assertEqual(rejected["reasons"], ["per-market exposure limit exceeded"])
