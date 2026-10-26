@@ -39,8 +39,37 @@ case "$ACTION" in
     exec gcloud beta run jobs execute "chrysopoeia-cycle-$OPERATOR" \
       --region "$REGION" --project "$PROJECT" "$@"
     ;;
+  enqueue)
+    # run.sh enqueue <count> <spacing-minutes> <journal-prefix>
+    # Enqueue individually scheduled tasks that each execute one bounded
+    # session with its own journal. Pause/purge the queue to stop a campaign.
+    PROJECT=${GOOGLE_CLOUD_PROJECT:?set GOOGLE_CLOUD_PROJECT}
+    COUNT=${1:?count required}
+    SPACING=${2:?spacing minutes required}
+    PREFIX=${3:?journal prefix required}
+    QUEUE="chrysopoeia-trigger-$OPERATOR"
+    TRIGGER_SA=$(gcloud iam service-accounts list --project="$PROJECT" \
+      --filter="email ~ ^chrysopoeia-trigger-$OPERATOR@" --format='value(email)' --limit=1)
+    if [ -z "$TRIGGER_SA" ]; then
+      echo "platform/run.sh: no trigger identity; deploy the stack first" >&2
+      exit 1
+    fi
+    URL="https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/chrysopoeia-cycle-$OPERATOR:run"
+    i=0
+    while [ "$i" -lt "$COUNT" ]; do
+      i=$((i + 1))
+      JOURNAL=$(printf '%s-%03d' "$PREFIX" "$i")
+      BODY=$(printf '{"overrides":{"containerOverrides":[{"args":["run","--journal","/mnt/journal/%s"]}]}}' "$JOURNAL")
+      SCHED=$(date -u -v+"$(( (i - 1) * SPACING ))"M '+%Y-%m-%dT%H:%M:%SZ')
+      gcloud tasks create-http-task --project="$PROJECT" --location="$REGION" --queue="$QUEUE" \
+        --url="$URL" --method=POST --header='Content-Type: application/json' \
+        --body-content="$BODY" --oauth-service-account-email="$TRIGGER_SA" \
+        --schedule-time="$SCHED" > /dev/null
+      echo "enqueued $JOURNAL at $SCHED"
+    done
+    ;;
   *)
-    echo "usage: platform/run.sh {deploy|job} [args...]" >&2
+    echo "usage: platform/run.sh {deploy|job|enqueue} [args...]" >&2
     exit 2
     ;;
 esac

@@ -61,6 +61,19 @@ Cloud.
   and new revisions.
 - Google API authentication uses the runner's ambient identity. Harness code
   never provisions cloud resources or invokes `gcloud`/`pulumi`.
+- A permanent Cloud Tasks queue `chrysopoeia-trigger-<operator>` executes the
+  job for bounded operator campaigns. `platform/run.sh enqueue <count>
+  <spacing-minutes> <journal-prefix>` creates individually scheduled HTTP
+  tasks; each task calls the Run `:run` API with an OAuth token from the
+  least-privilege trigger identity (`run.jobs.run` + `run.jobs.runWithOverrides`
+  only) and overrides the journal to its own `/mnt/journal/<prefix>-NNN`, so
+  every execution is an independently capped session. A campaign's absolute
+  worst-case cost is `<count>` × the profile's session `cost_budget`. The queue
+  is inert when empty; `gcloud tasks queues pause/purge
+  chrysopoeia-trigger-<operator>` stops or abandons a campaign. First campaign
+  (2026-10-25, approved): 80 executions at 30-minute spacing (2 pilot + 78),
+  worst case $120, expected ~$8-10, for the context-learning evidence
+  accumulation in `../harness/ROADMAP.md`.
 
 Harness drains old pending events before `cycle`/`run` and between run cycles,
 publishes all canonical event types to one topic with `event_id`, `record_type`,
@@ -229,6 +242,7 @@ can desynchronize state.
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
+| 2026-10-25 | Job-trigger queue: `platform/run.sh deploy` creating the Cloud Tasks API, queue `chrysopoeia-trigger-local`, least-privilege trigger identity (custom role `run.jobs.run` + `run.jobs.runWithOverrides`), and Cloud Tasks agent token-creator grant; `platform/run.sh enqueue 2 15 accum-pilot-20261025` pilot, then `enqueue 78 30 accum-20261025` | Apply: 7 created, 35 unchanged (plus one cosmetic consumer-service state normalization: dropped zero/empty scaling defaults; no service change). Pilot: both tasks dispatched at their schedule times and completed as executions `chrysopoeia-cycle-local-bf7tm`/`-ls6ng` with independent fresh journals on the bucket; queue drained. Approved campaign bound: 80 executions × $1.50 session budget = $120 absolute worst case, expected ~$8-10 actual model cost; each execution is a two-cycle paper session; any produced plans are consumer-filled in paper. Kill switches: `gcloud tasks queues pause/purge chrysopoeia-trigger-local`. Queue idle cost $0. |
 | 2026-10-25 | Consumer rollout (Harness self-learning step 3): `consumer/build.sh` (after fixing `.dockerignore` to whitelist the staged `consumer_outcome` schema — the 2026-10-10 build predated that file), push, `pulumi config set consumer_image_digest …@sha256:6807f5c7…`, `platform/run.sh deploy`; then two bounded harness `run` executions and three labeled synthetic `trade_plan_ready` publishes | Deploy created 15 consumer resources (service, filtered push subscription, dead-letter topic + retention sub, ledger bucket, identities, minute sweep); 21 unchanged. The two harness executions abstained (4/4 turns, $0.21739245 actual model cost — the trader declines coin-flip windows; no plan events produced). Synthetic publishes (snapshot_id `synthetic-verification-20261025`, excluded from gate metrics structurally: the history aggregate joins consumer outcomes to real harness turns): #1 rejected (`invalid trade plan event`, schema), #2 rejected (`event ID does not match` — consumer requires `turn-` + sha256 of `[snapshot_id, market_id]`), #3 `turn-9853f52d…` filled YES 10.204 shares @ 0.49, stake $5 + $0.10 fee on a fresh public quote, then settled by the minute sweep at market resolution NO with pnl −$5.10. All three lifecycle outcomes (`rejected`/`filled`/`settled`) published as `consumer_outcome` v1 and archived in BigQuery within ~2 s. Six transient sweep 503s (08:04–08:09) retried by Scheduler and self-recovered; dead-letter empty; ledger on the versioned consumer bucket. No real orders; Pub/Sub/Cloud Run/BigQuery cost ~$0. Model-produced deployed delivery remains pending a non-abstaining harness turn (accumulation step). The consumer stays deployed. |
 | 2026-10-22 | `pulumi config set context_history_enabled true` + `CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy`; `gcloud projects get-iam-policy`; `bq show` on the archive dataset | Apply created `roles/bigquery.jobUser` (project) and dataset `roles/bigquery.dataViewer` for the runner, updated the runner description and the job's archive table/location env vars; 17 unchanged. Both grants verified by IAM/bq reads. The runner SA did not run any query yet, and the pinned image predates the history feature, so the deployed query path remains unverified until the next image rollout. The optional Consumer publisher role activates only with a future `consumer_image_digest` rollout. Cost ~$0. |
 | 2026-10-19 | `platform/build.sh` after splitting the dependency install into its own Docker layer; Pulumi repin to `sha256:13eac92e…`; one `platform/run.sh job --args=validate,--json --wait` | Scope: layer-cache ordering only; dependencies unchanged. Rebuilt image installs ADK 2.8.0/pydantic 2.13.4 and loads the bundled platform profile with `research=False` and `series=btc-updown-5m`. Pulumi updated only the job; 18 unchanged. Execution `chrysopoeia-cycle-local-mdptj` exited 0 and printed the platform profile summary. No model calls, market reads, or new resources. This build re-pushed the dependency layer because its content/position changed; later code-only or TOML-only changes should push small layers, unverified until the next such build. |

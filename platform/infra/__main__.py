@@ -382,6 +382,73 @@ paper_cycle_job = gcp.cloudrunv2.Job(
     ),
 )
 
+# Bounded job-trigger queue: operator campaigns enqueue individually scheduled
+# HTTP tasks that execute the paper-cycle job with per-task journal args. The
+# queue is inert and free when empty; pausing or purging it stops a campaign.
+tasks_service = gcp.projects.Service(
+    "tasks-service",
+    gcp.projects.ServiceArgs(
+        project=project_id,
+        service="cloudtasks.googleapis.com",
+        disable_dependent_services=False,
+        disable_on_destroy=False,
+    ),
+)
+trigger = gcp.serviceaccount.Account(
+    "job-trigger",
+    gcp.serviceaccount.AccountArgs(
+        project=project_id,
+        account_id=f"chrysopoeia-trigger-{operator}"[:30],
+        display_name=f"Chrysopoeia job-trigger queue identity ({operator})",
+        description="Executes the paper-cycle job with arg overrides from queued campaign tasks only.",
+    ),
+)
+trigger_member = pulumi.Output.concat("serviceAccount:", trigger.email)
+trigger_role = gcp.projects.IAMCustomRole(
+    "job-trigger-role",
+    gcp.projects.IAMCustomRoleArgs(
+        project=project_id,
+        role_id=f"chrysopoeia_job_trigger_{operator.replace('-', '_')}"[:64],
+        title=f"Chrysopoeia job trigger ({operator})",
+        permissions=["run.jobs.run", "run.jobs.runWithOverrides"],
+    ),
+)
+gcp.projects.IAMMember(
+    "job-trigger-executor",
+    gcp.projects.IAMMemberArgs(
+        project=project_id,
+        role=trigger_role.name,
+        member=trigger_member,
+    ),
+)
+tasks_agent = gcp.projects.ServiceIdentity(
+    "tasks-agent",
+    gcp.projects.ServiceIdentityArgs(
+        project=project_id,
+        service="cloudtasks.googleapis.com",
+    ),
+    opts=pulumi.ResourceOptions(depends_on=[tasks_service]),
+)
+gcp.serviceaccount.IAMMember(
+    "tasks-agent-token-creator",
+    gcp.serviceaccount.IAMMemberArgs(
+        service_account_id=trigger.name,
+        role="roles/iam.serviceAccountTokenCreator",
+        member=pulumi.Output.concat("serviceAccount:", tasks_agent.email),
+    ),
+)
+trigger_queue = gcp.cloudtasks.Queue(
+    "job-trigger",
+    gcp.cloudtasks.QueueArgs(
+        project=project_id,
+        location=region,
+        name=f"chrysopoeia-trigger-{operator}",
+    ),
+    opts=pulumi.ResourceOptions(depends_on=[tasks_service]),
+)
+pulumi.export("trigger_queue_name", trigger_queue.name)
+pulumi.export("trigger_sa_email", trigger.email)
+
 if consumer_image_digest and pubsub_topic:
     scheduler_service = gcp.projects.Service(
         "scheduler-service",

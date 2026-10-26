@@ -17,6 +17,22 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn('name="CHRYSOPOEIA_EVENT_TOPIC"', source)
         self.assertIn('role="roles/pubsub.publisher"', source)
 
+    def test_trigger_queue_executes_the_job_with_least_privilege(self) -> None:
+        root = Path(__file__).parents[1]
+        source = root.joinpath("infra", "__main__.py").read_text()
+        run = root.joinpath("run.sh").read_text()
+
+        self.assertIn('service="cloudtasks.googleapis.com"', source)
+        self.assertIn('"job-trigger-role"', source)
+        self.assertIn('permissions=["run.jobs.run", "run.jobs.runWithOverrides"]', source)
+        self.assertIn('"tasks-agent-token-creator"', source)
+        self.assertIn('role="roles/iam.serviceAccountTokenCreator"', source)
+        self.assertIn("gcp.cloudtasks.Queue(", source)
+        self.assertIn('name=f"chrysopoeia-trigger-{operator}"', source)
+        self.assertIn("enqueue)", run)
+        self.assertIn("--oauth-service-account-email", run)
+        self.assertIn("/mnt/journal/%s", run)
+
     def test_job_uses_bundled_operating_config_without_setting_flags(self) -> None:
         root = Path(__file__).parents[1]
         source = root.joinpath("infra", "__main__.py").read_text()
@@ -185,7 +201,7 @@ class InfraContractTests(unittest.TestCase):
         self.assertIn("dead_letter_policy=", resources)
         self.assertIn("retry_policy=", resources)
         self.assertIn("pulumi-gcp>=8.41,<9", requirements)
-        self.assertNotIn("consumer_image_digest", local_config)
+        self.assertIn("chrysopoeia-infra:consumer_image_digest:", local_config)
         self.assertIn("chrysopoeia-infra:pubsub_topic: chrysopoeia-events", local_config)
 
     def test_push_subscription_waits_for_apis_identities_service_and_grants(self) -> None:

@@ -84,6 +84,13 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator request (2026-10-25): live cost insight ("cost watcher"). One place
+to see current booked and reserved model costs per session, context, and
+campaign, alongside cloud-side run/queue costs. Candidate surfaces: a
+`chrysopoeia cost` report over the local journal, the archive aggregates, or
+a BigQuery-backed view; cloud billing export would be coordinated Platform
+work. Scope and bounds to be agreed before implementation starts.
+
 Operator approval (2026-10-19): improve BTC 5m forecasts with deterministic
 window context and later entry. (1) Attach a snapshot-bound baseline evidence
 record with the window open, latest price, delta, seconds remaining, recent
@@ -290,8 +297,11 @@ The implementation retains v1 YES compatibility. No platform change is included.
       gate structurally counts only outcomes joined to real harness turns.
    4. **Accumulate evidence:** run bounded, operator-approved cycles (on-demand
       or scheduled via the job) until at least one context has ≥20 finalized
-      outcomes under its active profile version. The archive currently holds
-      1 decision and 0 completed trades.
+      outcomes under its active profile version. Campaign running since
+      2026-10-25: 80 queued executions at 30-minute spacing via the Platform
+      trigger queue (approved bound $120 worst case, ~$8-10 expected). The
+      counter is `completed_trade_count` in the archive aggregate; synthetic
+      verification outcomes are structurally excluded.
    5. **First revision turn:** a later cycle in that context triggers the
       curator/reviewer revision flow; verify the new profile version is
       recorded, activated only for later turns, and that the archive

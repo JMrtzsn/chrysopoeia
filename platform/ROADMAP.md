@@ -43,6 +43,11 @@ coordination decision, not a new platform work item.
   subscription received only the plan fixture while an unfiltered subscription
   received both the real outcome and plan fixture on 2026-10-12; all temporary
   resources were deleted. The Pulumi-managed subscription remains undeployed.
+- [x] Bounded job-trigger queue (2026-10-25): permanent Cloud Tasks queue,
+  least-privilege trigger identity, and the gated `run.sh enqueue` action for
+  operator-approved campaigns of independently capped sessions. Two-task pilot
+  verified; first campaign (80 executions × $1.50 = $120 worst case) running
+  for Harness evidence accumulation. See `docs/deployment.md`.
 
 ## Next
 
