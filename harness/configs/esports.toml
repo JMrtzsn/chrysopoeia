@@ -1,0 +1,48 @@
+# Esports forecast-benchmark profile: explicit capture/cycle targets only.
+# Grounded research inflates prompts past the default 8192 input ceiling.
+[runtime]
+adapter = "adk"
+mode = "paper"
+
+[venue]
+adapter = "polymarket"
+series = "btc-updown-5m"
+paper_fee_rate = 0.02
+paper_fee_source = "paper-assumption:flat-2pct-v1"
+
+[models]
+location = "us"
+root = "gemini-3.5-flash"
+context = "gemini-3.5-flash"
+trader = "gemini-3.5-flash"
+reviewer = "gemini-3.5-flash"
+
+[cost]
+model = "gemini-3.5-flash"
+input_usd_per_million_tokens = "1.65"
+output_usd_per_million_tokens = "9.90"
+maximum_input_tokens_per_call = 32768
+maximum_output_tokens_per_call = 3072
+maximum_model_calls_per_cycle = 12
+
+[session]
+bankroll = 1000
+maximum_loss = 100
+target_win_rate = 0.5
+window_minutes = 60
+max_cycles = 1
+cost_budget = "5"
+interval_seconds = 300
+daily_cloud_cost_budget = 5
+
+[risk]
+maximum_market_exposure = 0.01
+maximum_total_exposure = 0.10
+market_exposure = 0
+total_exposure = 0
+
+[history]
+enabled = false
+
+[context_learning]
+enabled = false

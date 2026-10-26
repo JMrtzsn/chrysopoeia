@@ -135,6 +135,14 @@ turn, without changing tools, retries, budgets, or running paid cycles. Offline
 tests reproduce the cost-cap missing-output failure; the prior live trigger is
 still unconfirmed. See `docs/verification.md`.
 
+Follow-up (2026-10-26): the live trigger is now confirmed and fixed. Grounded
+research inflates the served prompt server-side, so actual input usage can
+exceed the 8192 policy input ceiling (measured 8413) and produce
+`MODEL_COST_USAGE_INVALID` → no structured proposal. The reservation now always
+uses the policy input ceiling, and research-heavy profiles can raise the
+ceiling (`configs/esports.toml` uses 32768). Evidence in
+`docs/verification.md`.
+
 Operator approval (2026-10-19): add an optional validated `[research] enabled`
 switch (default on) and set it `false` in the BTC and Platform profiles. Web
 research dominated measured BTC cycle cost (~72%) and rarely informs a

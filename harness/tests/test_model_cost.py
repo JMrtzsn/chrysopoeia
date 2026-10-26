@@ -173,6 +173,17 @@ class ModelCostCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await configured_before(context(adk_state, "invocation-adk"), LlmRequest(model="gemini-flash-latest")))
         self.assertIn("model_cost_ledger", delta)
 
+    async def test_grounding_inflated_usage_within_policy_is_not_rejected(self) -> None:
+        state = configured_state()
+        request = LlmRequest(model="gemini-flash-latest")
+        request.cacheable_contents_token_count = 25
+        self.assertIsNone(await configured_before(context(state), request))
+        self.assertEqual(state["model_cost_ledger"][0]["input_token_ceiling"], 100)
+
+        # Grounding can inflate the served prompt beyond the precomputed count.
+        self.assertIsNone(await after_model_cost(context(state), usage(input_tokens=80, output_tokens=10)))
+        self.assertEqual(state["model_cost_ledger"][0]["status"], "completed")
+
     async def test_bootstrap_is_root_only_bounded_and_not_operating_config(self) -> None:
         state: dict[str, object] = {}
         self.assertIsNone(await configured_before(context(state, agent="chrysopoeia"), LlmRequest(model="gemini-flash-latest")))

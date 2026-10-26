@@ -261,9 +261,10 @@ async def before_model_cost(callback_context: Context, llm_request: LlmRequest, 
             state["model_cost_policy"] = dict(default_policy)
             state["cycle_id"] = f"bootstrap:{invocation_id}"
         policy = CostPolicy.from_mapping(state.get("model_cost_policy", default_policy))
-        requested_input = llm_request.cacheable_contents_token_count
+        # Grounding/tool-augmented prompts can grow server-side beyond any
+        # precomputed count, so the reservation is always the policy ceiling.
+        requested_input = policy.maximum_input_tokens_per_call
         requested_output = llm_request.config.max_output_tokens
-        requested_input = policy.maximum_input_tokens_per_call if requested_input is None else _tokens(requested_input, "requested input token ceiling")
         requested_output = policy.maximum_output_tokens_per_call if requested_output is None else _tokens(requested_output, "requested output token ceiling")
         if requested_input > policy.maximum_input_tokens_per_call or requested_output > policy.maximum_output_tokens_per_call:
             raise ValueError("requested token ceiling exceeds cost policy")
