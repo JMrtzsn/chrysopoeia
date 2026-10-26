@@ -204,7 +204,7 @@ class MarketDiscoveryTests(unittest.TestCase):
             record(2, active=1),
             record(3, closed=0),
             record(4, acceptingOrders=1),
-            record(5, outcomes=["No", "Yes"]),
+            record(5, outcomes=["Yes", "Yes"]),
             record(6, clobTokenIds=["same", "same"]),
             record(7, id="0"),
             record(8, id="01"),
@@ -218,11 +218,11 @@ class MarketDiscoveryTests(unittest.TestCase):
             record(16, id="\u0661"),
             "not an object",
         ]
-        body = json.dumps([record(1), *invalid]).encode()
+        body = json.dumps([record(1), record(17, outcomes=["Spirit", "FURIA"]), *invalid]).encode()
 
         candidates = discover_markets(limit=20, now=NOW, fetch=lambda *_: body)
 
-        self.assertEqual([item.market_id for item in candidates], ["1"])
+        self.assertEqual([item.market_id for item in candidates], ["1", "17"])
 
     def test_duplicate_identity_is_deduplicated_but_conflict_fails(self) -> None:
         duplicate = record(1)

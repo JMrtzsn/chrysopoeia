@@ -101,7 +101,15 @@ class Polymarket:
         tokens = _list(metadata.get("clobTokenIds"))
         outcomes = _list(metadata.get("outcomes"))
         if (
-            outcomes not in (["Yes", "No"], ["Up", "Down"])
+            len(outcomes) != 2
+            or outcomes[0] == outcomes[1]
+            or any(
+                not isinstance(outcome, str)
+                or not outcome
+                or outcome != outcome.strip()
+                or len(outcome) > 120
+                for outcome in outcomes
+            )
             or len(tokens) != 2
             or not all(isinstance(token, str) and token for token in tokens)
             or tokens[0] == tokens[1]

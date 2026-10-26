@@ -59,6 +59,17 @@ def fixture_fetch(calls: list[tuple[str, float, int]] | None = None):
 
 
 class PolymarketAdapterTests(unittest.TestCase):
+    def test_team_named_binary_outcomes_are_captured_with_first_outcome_as_yes(self) -> None:
+        def fetch(url, _timeout, _max_bytes):
+            if "clob.polymarket.com" in url:
+                return book()
+            return market(outcomes='["Spirit", "FURIA"]', question="Spirit vs FURIA (BO3)")
+
+        snap = load_market_snapshot("12345", 1_000, 0, 0, now=NOW, fetch=fetch, **FEE)
+
+        self.assertEqual(snap.yes_token_id, "yes-token")
+        self.assertEqual(snap.question, "Spirit vs FURIA (BO3)")
+
     def test_two_sided_capture_fetches_each_token_book_and_preserves_actual_no_asks(self):
         calls = []
 
@@ -390,7 +401,8 @@ class PolymarketAdapterTests(unittest.TestCase):
             (b"not json", "JSON"),
             (json.dumps([]).encode(), "schema"),
             (market(outcomes='["A", "B", "C"]', clobTokenIds='["a", "b", "c"]'), "binary"),
-            (market(outcomes='["No", "Yes"]'), "YES"),
+            (market(outcomes='["Yes", "Yes"]'), "distinct"),
+            (market(outcomes='["Yes", ""]'), "binary"),
             (market(clobTokenIds='["yes-token"]'), "token"),
             (market(question=""), "question"),
             (market(description=None), "rules"),

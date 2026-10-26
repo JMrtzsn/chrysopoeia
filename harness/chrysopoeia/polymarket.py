@@ -29,7 +29,24 @@ MIN_SERIES_SECONDS_REMAINING = 30
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
 # First outcome is the "YES side" the harness buys; Up/Down markets map Up to it.
-BINARY_OUTCOMES = (["Yes", "No"], ["Up", "Down"])
+# Any two distinct labels form a supported binary market (team names included).
+
+
+def _binary_outcomes(value: object) -> list[object]:
+    outcomes = _list_field(value, "outcomes")
+    if (
+        len(outcomes) != 2
+        or outcomes[0] == outcomes[1]
+        or any(
+            not isinstance(outcome, str)
+            or not outcome
+            or outcome != outcome.strip()
+            or len(outcome) > 120
+            for outcome in outcomes
+        )
+    ):
+        raise PolymarketError("Polymarket adapter requires two distinct binary outcome labels")
+    return outcomes
 
 
 class PolymarketError(ValueError):
@@ -250,7 +267,9 @@ def _candidate(data: object, current: datetime) -> tuple[MarketCandidate, dateti
             value = data.get(name)
             if isinstance(value, str) and len(value) > 10_000:
                 return None
-        if _list_field(data.get("outcomes"), "outcomes") not in BINARY_OUTCOMES:
+        try:
+            _binary_outcomes(data.get("outcomes"))
+        except PolymarketError:
             return None
         tokens = _list_field(data.get("clobTokenIds"), "token")
         if (
@@ -488,8 +507,10 @@ def load_resolved_market(
     )
     if str(data.get("id")) != market_id:
         raise PolymarketError("Polymarket adapter response does not match the requested market")
-    if _list_field(data.get("outcomes"), "outcomes") not in BINARY_OUTCOMES:
-        raise PolymarketError("Polymarket market is not a supported binary market")
+    try:
+        _binary_outcomes(data.get("outcomes"))
+    except PolymarketError:
+        raise PolymarketError("Polymarket market is not a supported binary market") from None
     tokens = _list_field(data.get("clobTokenIds"), "token")
     if len(tokens) != 2 or not all(isinstance(t, str) and t.isdigit() for t in tokens):
         raise PolymarketError("Polymarket market has unsupported token structure")
@@ -783,11 +804,7 @@ def load_market_snapshot(
     if data.get("acceptingOrders") is not True:
         raise PolymarketError("Polymarket adapter market is not accepting orders")
 
-    outcomes = _list_field(data.get("outcomes"), "outcomes")
-    if len(outcomes) != 2:
-        raise PolymarketError("Polymarket adapter supports only binary markets")
-    if outcomes not in BINARY_OUTCOMES:
-        raise PolymarketError("Polymarket adapter requires YES/NO or Up/Down outcomes in canonical order")
+    outcomes = _binary_outcomes(data.get("outcomes"))
     tokens = _list_field(data.get("clobTokenIds"), "token")
     if len(tokens) != 2 or any(not isinstance(token, str) or not token for token in tokens) or tokens[0] == tokens[1]:
         raise PolymarketError("Polymarket adapter has unsupported token structure")

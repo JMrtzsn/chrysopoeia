@@ -84,6 +84,19 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator approval (2026-10-26): benchmark esports match-winner markets (CS2,
+Dota 2) as the next forecast venue, with NBA/NFL pre-game as the sharp control
+group; macro, daily crypto, and other quant-priced markets are explicitly
+skipped. Two-plus weeks of scored-only forecasting (`polymarket-eval`, no
+trading); paper-trade a family only if measured edge survives fees. Team-named
+binary outcomes are now supported in the adapter and Consumer metadata checks
+(first listed outcome = YES side; no contract change). The BTC-only automated
+restriction is unchanged; benchmark cycles run as explicit `capture`/`cycle`
+verification inputs. Implementation evidence: 382 harness + 40 consumer offline
+tests pass; a real Spirit/FURIA match-winner book captured ($220k top-level
+depth). Blocked on local model credentials: ambient Vertex ADC lacks project
+rights and OpenRouter returns 402 (no credits), each as on 2026-10-22.
+
 Operator request (2026-10-25): live cost insight ("cost watcher"). One place
 to see current booked and reserved model costs per session, context, and
 campaign, alongside cloud-side run/queue costs. Candidate surfaces: a

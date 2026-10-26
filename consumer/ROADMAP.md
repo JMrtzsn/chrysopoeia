@@ -21,6 +21,10 @@ against public metadata, fill its real book, and settle the held token correctly
 Harness approval and acceptance are in `../harness/ROADMAP.md`. This does not
 authorize deployment or real orders.
 
+0. Team-named binary outcomes (2026-10-26, coordinated with the Harness
+   esports benchmark approval): market metadata checks accept any two distinct
+   outcome labels; the first listed outcome token remains the YES side. No
+   contract change; 40 offline tests pass.
 1. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
    through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery
    and replay, and the revision-rollover single-writer ceiling. A model-produced

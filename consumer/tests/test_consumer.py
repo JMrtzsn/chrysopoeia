@@ -657,6 +657,24 @@ class ConsumerTests(unittest.TestCase):
 
 
 class PublicMarketTests(unittest.TestCase):
+    def test_team_named_binary_market_maps_first_token_to_yes(self) -> None:
+        metadata = {
+            "id": "12345", "clobTokenIds": ["spirit-token", "furia-token"],
+            "outcomes": ["Spirit", "FURIA"],
+            "endDate": (NOW + timedelta(days=1)).isoformat(),
+            "updatedAt": NOW.isoformat(), "closed": False,
+            "active": True, "acceptingOrders": True,
+        }
+        book = {
+            "asset_id": "spirit-token",
+            "timestamp": str(int(NOW.timestamp() * 1_000)),
+            "asks": [{"price": "0.64", "size": "100"}],
+            "bids": [],
+        }
+        with patch("paper_consumer.market._get", side_effect=[metadata, book]):
+            result = Polymarket().load("12345", "spirit-token", NOW)
+        self.assertEqual(result.outcome, "YES")
+
     def test_down_token_resolves_as_winning_position_when_market_resolves_down(self) -> None:
         metadata = {
             "id": "12345", "clobTokenIds": ["up-token", "down-token"],
