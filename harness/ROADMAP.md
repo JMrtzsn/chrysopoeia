@@ -84,6 +84,12 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator direction (2026-10-28): BTC 5m runs are stopped as a default. The
+accumulation campaign was halted 2026-10-26 and no further BTC executions run
+unless explicitly approved for verification. The venue direction is match and
+game markets: esports (CS2, Dota 2) as the primary candidate, with NBA/NFL
+pre-game as the sharp control group.
+
 Operator approval (2026-10-26): benchmark esports match-winner markets (CS2,
 Dota 2) as the next forecast venue, with NBA/NFL pre-game as the sharp control
 group; macro, daily crypto, and other quant-priced markets are explicitly
@@ -107,19 +113,19 @@ replays a recorded failure idempotently. Vertex auth locally:
 credits. Benchmark journal lives under the opencode temp dir
 (`esports-bench/journal`); recapture fresh snapshots per cycle.
 
-Operator request (2026-10-25, refined 2026-10-27/28): live cost and outcome
-insight ("cost watcher" / central read model), split by ownership. (1)
-Harness-owned journal-local CLI (`chrysopoeia insight`) reporting per-context
-decisions, fills, settlements, win rate, realized P&L, actual vs reserved
-model cost, and campaign counters against the 20-trade gate. (2) An optional
-archive-backed insight service belongs to a separate consumer-side work unit,
-never Harness: Harness event consumption ends at the schema, and the archive
-is Platform-managed infrastructure, so any dashboard/alerting service reads
-events as data with its own read-only BigQuery identity. Build (2) only once
-a second consumer justifies it. No new authoritative store: the Harness and
-Consumer journals stay the financial ledgers, and the BigQuery archive stays
-the analytics read source. Cloud-side billing export would be separate
-coordinated Platform work.
+Operator direction (2026-10-28): insight is an independent **observer** work
+unit, not a Harness command. Like the Consumer, it consumes Harness-owned
+event schemas as data with its own read-only identity and no execution
+authority; Harness event consumption still ends at the schema. v1 is
+pull-based: at read time it queries the BigQuery archive (its event log) for
+per-context decisions, fills, settlements, win rate, realized P&L, actual vs
+reserved model cost, and campaign counters against the 20-trade gate. v2 adds
+its own subscription and alerting only when live alerts are needed. No new
+authoritative store and no projection database in v1; the Harness and
+Consumer journals stay the financial ledgers. Local and benchmark runs must
+publish to the topic (`CHRYSOPOEIA_EVENT_SINK`) or the observer cannot see
+them; a per-campaign/session tag on events would be a coordinated schema
+change. The Harness-local insight CLI is dropped as the central surface.
 
 Operator approval (2026-10-19): improve BTC 5m forecasts with deterministic
 window context and later entry. (1) Attach a snapshot-bound baseline evidence
