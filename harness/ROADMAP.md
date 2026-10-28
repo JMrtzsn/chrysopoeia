@@ -94,15 +94,29 @@ binary outcomes are now supported in the adapter and Consumer metadata checks
 restriction is unchanged; benchmark cycles run as explicit `capture`/`cycle`
 verification inputs. Implementation evidence: 382 harness + 40 consumer offline
 tests pass; a real Spirit/FURIA match-winner book captured ($220k top-level
-depth). Blocked on local model credentials: ambient Vertex ADC lacks project
-rights and OpenRouter returns 402 (no credits), each as on 2026-10-22.
+depth).
 
-Operator request (2026-10-25): live cost insight ("cost watcher"). One place
-to see current booked and reserved model costs per session, context, and
-campaign, alongside cloud-side run/queue costs. Candidate surfaces: a
-`chrysopoeia cost` report over the local journal, the archive aggregates, or
-a BigQuery-backed view; cloud billing export would be coordinated Platform
-work. Scope and bounds to be agreed before implementation starts.
+Resume state (2026-10-28): four forecasts are journaled (Astralis YES @0.58,
+Alliance/FaZe approved+filled, two Dota 2 abstains at p=0.5) and matches are
+resolving; next action is `polymarket-eval` on the benchmark journal, then
+daily match batches toward 20-30 scored forecasts. The grounded-prompt
+input-ceiling root cause is fixed and `configs/esports.toml` (32768 input)
+exists for the benchmark. Retry failed turns by recapturing, since the journal
+replays a recorded failure idempotently. Vertex auth locally:
+`GOOGLE_CLOUD_PROJECT=PROJECT_ID` with operator ADC; OpenRouter has no
+credits. Benchmark journal lives under the opencode temp dir
+(`esports-bench/journal`); recapture fresh snapshots per cycle.
+
+Operator request (2026-10-25, refined 2026-10-27/28): live cost and outcome
+insight ("cost watcher" / central read model). Staged shape: (1) a read-only
+`chrysopoeia insight` command over the event archive (local journal offline)
+with per-context decisions, fills, settlements, win rate, realized P&L,
+actual vs reserved model cost, and campaign counters against the 20-trade
+gate; (2) an optional hosted insight service (dashboard/alerts) only once a
+second consumer justifies it. No new authoritative store: the Harness and
+Consumer journals stay the financial ledgers, and the BigQuery archive stays
+the analytics read source. Cloud-side billing export would be separate
+coordinated Platform work.
 
 Operator approval (2026-10-19): improve BTC 5m forecasts with deterministic
 window context and later entry. (1) Attach a snapshot-bound baseline evidence
