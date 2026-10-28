@@ -108,12 +108,15 @@ credits. Benchmark journal lives under the opencode temp dir
 (`esports-bench/journal`); recapture fresh snapshots per cycle.
 
 Operator request (2026-10-25, refined 2026-10-27/28): live cost and outcome
-insight ("cost watcher" / central read model). Staged shape: (1) a read-only
-`chrysopoeia insight` command over the event archive (local journal offline)
-with per-context decisions, fills, settlements, win rate, realized P&L,
-actual vs reserved model cost, and campaign counters against the 20-trade
-gate; (2) an optional hosted insight service (dashboard/alerts) only once a
-second consumer justifies it. No new authoritative store: the Harness and
+insight ("cost watcher" / central read model), split by ownership. (1)
+Harness-owned journal-local CLI (`chrysopoeia insight`) reporting per-context
+decisions, fills, settlements, win rate, realized P&L, actual vs reserved
+model cost, and campaign counters against the 20-trade gate. (2) An optional
+archive-backed insight service belongs to a separate consumer-side work unit,
+never Harness: Harness event consumption ends at the schema, and the archive
+is Platform-managed infrastructure, so any dashboard/alerting service reads
+events as data with its own read-only BigQuery identity. Build (2) only once
+a second consumer justifies it. No new authoritative store: the Harness and
 Consumer journals stay the financial ledgers, and the BigQuery archive stays
 the analytics read source. Cloud-side billing export would be separate
 coordinated Platform work.
