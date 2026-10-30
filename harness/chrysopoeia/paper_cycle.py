@@ -389,6 +389,7 @@ def build_turn_outcome(
     created_at: str,
     trade_plan_event_id: str | None,
     model_cost_usd: str,
+    reserved_model_cost_usd: str | None = None,
     plan_checks: object = (),
     evidence: object = (),
     research: object | None = None,
@@ -468,9 +469,21 @@ def build_turn_outcome(
         raise ValueError("model cost must be non-negative") from None
     if not cost.is_finite() or cost < 0:
         raise ValueError("model cost must be non-negative")
+    reserved_cost = None
+    if reserved_model_cost_usd is not None:
+        try:
+            reserved_cost = Decimal(reserved_model_cost_usd)
+        except InvalidOperation:
+            raise ValueError("reserved model cost must be non-negative") from None
+        if not reserved_cost.is_finite() or reserved_cost < 0:
+            raise ValueError("reserved model cost must be non-negative")
+        if checked_context is None:
+            raise ValueError("reserved model cost requires context")
     result: dict[str, object] = {
         "schema_version": (
-            3
+            4
+            if checked_context is not None and reserved_cost is not None
+            else 3
             if checked_context is not None
             else 2
             if output.outcome == "NO"
@@ -500,6 +513,8 @@ def build_turn_outcome(
     }
     if checked_context is not None:
         result["context"] = checked_context.model_dump()
+    if reserved_cost is not None:
+        result["reserved_model_cost_usd"] = float(reserved_cost)
     return result
 
 
@@ -522,6 +537,7 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
     if frozenset(normalized) not in {
         frozenset(legacy_keys),
         frozenset(legacy_keys | {"context"}),
+        frozenset(legacy_keys | {"context", "reserved_model_cost_usd"}),
     }:
         raise ValueError("invalid turn outcome")
     try:
@@ -540,6 +556,11 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
             created_at=normalized["created_at"],
             trade_plan_event_id=normalized["trade_plan_event_id"],
             model_cost_usd=str(normalized["model_cost_usd"]),
+            reserved_model_cost_usd=(
+                str(normalized["reserved_model_cost_usd"])
+                if "reserved_model_cost_usd" in normalized
+                else None
+            ),
             plan_checks=normalized["plan_checks"],
             evidence=normalized["evidence"],
             research=normalized["research"],
@@ -547,7 +568,7 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None
-    if normalized.get("schema_version") not in {1, 2, 3} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
+    if normalized.get("schema_version") not in {1, 2, 3, 4} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
         raise ValueError("invalid turn outcome")
     return expected
 

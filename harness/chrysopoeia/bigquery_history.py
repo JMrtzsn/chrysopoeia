@@ -37,7 +37,7 @@ WITH parsed AS (
     SAFE_CAST(JSON_VALUE(payload, '$.context.profile_version') AS INT64) AS profile_version
   FROM events
   WHERE JSON_VALUE(payload, '$.record_type') = 'turn_outcome'
-    AND SAFE_CAST(JSON_VALUE(payload, '$.schema_version') AS INT64) = 3
+    AND SAFE_CAST(JSON_VALUE(payload, '$.schema_version') AS INT64) IN (3, 4)
     AND JSON_VALUE(payload, '$.context.scope_key') = @scope_key
     AND JSON_VALUE(payload, '$.context.profile_id') = @profile_id
     AND SAFE_CAST(JSON_VALUE(payload, '$.context.profile_version') AS INT64) = @profile_version

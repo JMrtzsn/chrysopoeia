@@ -1,0 +1,486 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chrysopoeia.local/contracts/turn_outcome.v4.schema.json",
+  "title": "Harness-owned context-attributed turn_outcome event v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "event_id",
+    "turn_id",
+    "snapshot_id",
+    "market_id",
+    "created_at",
+    "status",
+    "reason",
+    "plan_checks",
+    "evidence",
+    "research",
+    "proposal",
+    "review",
+    "policy",
+    "trade_plan_event_id",
+    "model_cost_usd",
+    "reserved_model_cost_usd",
+    "context"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 4
+    },
+    "record_type": {
+      "const": "turn_outcome"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^outcome-[0-9a-f]{24}$"
+    },
+    "turn_id": {
+      "type": "string",
+      "pattern": "^turn-[0-9a-f]{24}$"
+    },
+    "snapshot_id": {
+      "$ref": "#/$defs/id"
+    },
+    "market_id": {
+      "$ref": "#/$defs/id"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 64
+    },
+    "status": {
+      "enum": [
+        "abstained",
+        "plan_check_rejected",
+        "reviewer_rejected",
+        "policy_rejected",
+        "plan_ready"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "plan_checks": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "research": {
+      "$ref": "#/$defs/research"
+    },
+    "proposal": {
+      "$ref": "#/$defs/proposal"
+    },
+    "review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/review"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/policy"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "trade_plan_event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^turn-[0-9a-f]{24}$"
+    },
+    "model_cost_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reserved_model_cost_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope_key",
+        "profile_id",
+        "profile_version",
+        "manifest_hash"
+      ],
+      "properties": {
+        "scope_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[a-z0-9][a-z0-9:._-]{0,199}$"
+        },
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[a-z0-9][a-z0-9:._-]{0,199}$"
+        },
+        "profile_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manifest_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "maxItems": 100,
+      "uniqueItems": true
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "url",
+        "title",
+        "source_kind",
+        "excerpt"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "source_kind": {
+          "enum": [
+            "market_snapshot",
+            "external"
+          ]
+        },
+        "excerpt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "query_count"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "query_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "reasons",
+        "plan"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/submitted_plan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "probability",
+        "amount",
+        "max_entry_price",
+        "exit_plan",
+        "citations",
+        "rationale"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "YES",
+            "NO"
+          ],
+          "default": "YES"
+        },
+        "action": {
+          "enum": [
+            "trade",
+            "abstain"
+          ]
+        },
+        "probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_entry_price": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "exit_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/exit_plan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "citations": {
+          "$ref": "#/$defs/references"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "submitted_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "market_id",
+        "action",
+        "probability",
+        "amount",
+        "max_entry_price",
+        "exit_plan",
+        "citations",
+        "rationale"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/id"
+        },
+        "market_id": {
+          "$ref": "#/$defs/id"
+        },
+        "outcome": {
+          "enum": [
+            "YES",
+            "NO"
+          ],
+          "default": "YES"
+        },
+        "action": {
+          "enum": [
+            "trade",
+            "abstain"
+          ]
+        },
+        "probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "amount": {
+          "type": "number"
+        },
+        "max_entry_price": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "exit_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/exit_plan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "citations": {
+          "$ref": "#/$defs/references"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "exit_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "take_profit_roi",
+        "stop_loss_roi",
+        "exit_by",
+        "hold_to_resolution"
+      ],
+      "properties": {
+        "take_profit_roi": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "stop_loss_roi": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "exclusiveMaximum": 0
+        },
+        "exit_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "hold_to_resolution": {
+          "type": "boolean"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved",
+        "reason",
+        "citations"
+      ],
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "citations": {
+          "$ref": "#/$defs/references"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "reason"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}

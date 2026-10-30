@@ -78,7 +78,7 @@ class TwoSidedTests(unittest.TestCase):
         result = asyncio.run(run_paper_cycle(config, snap, OperatingConfig(), trader, reviewer))
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["event"]["outcome"], "NO")
-        self.assertEqual(result["outcome_event"]["schema_version"], 3)
+        self.assertEqual(result["outcome_event"]["schema_version"], 4)
         self.assertEqual(
             result["outcome_event"]["context"]["scope_key"],
             "polymarket:series:btc-updown-5m",
@@ -176,6 +176,10 @@ class TwoSidedTests(unittest.TestCase):
         self.assertEqual(outcome["schema_version"], 2)
         self.assertEqual(outcome["proposal"]["probability"], 0.15)
         self.assertEqual(paper_cycle.validate_turn_outcome(outcome), outcome)
+        tampered = dict(outcome)
+        tampered["reserved_model_cost_usd"] = 0
+        with self.assertRaises(ValueError):
+            paper_cycle.validate_turn_outcome(tampered)
         schema = json.loads((ROOT / "contracts/turn_outcome.v2.schema.json").read_text())
         Draft202012Validator(schema, format_checker=FormatChecker()).validate(outcome)
 

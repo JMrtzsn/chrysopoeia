@@ -78,6 +78,11 @@ endpoint configured separately from the platform compute region.
   series). Up/Down markets are now capturable, with Up as the YES side. The initial five-window CLOB
   baseline scored 0.247; there are not yet agent forecasts in the local journal.
   Evidence is in `docs/verification.md`.
+- Reserved-cost `turn_outcome` v4 and Observer actual/reserved reporting: decided,
+  context-attributed cycles carry the existing reservation ceiling including
+  research; v1/v2/v3 remain compatible, and mixed-version Observer groups keep
+  reservations null rather than partial. Live verified 2026-10-30 with a real
+  CS2 outcome and exact Observer values; evidence is in `docs/verification.md`.
 
 The recorded commands and evidence for harness milestones are in
 `docs/verification.md`.
@@ -126,6 +131,8 @@ Consumer journals stay the financial ledgers. Local and benchmark runs must
 publish to the topic (`CHRYSOPOEIA_EVENT_SINK`) or the observer cannot see
 them; a per-campaign/session tag on events would be a coordinated schema
 change. The Harness-local insight CLI is dropped as the central surface.
+Observer implementation and verification are owned by `../observer/`; see its
+README and roadmap. Harness ownership remains event production and schemas.
 
 Operator approval (2026-10-19): improve BTC 5m forecasts with deterministic
 window context and later entry. (1) Attach a snapshot-bound baseline evidence

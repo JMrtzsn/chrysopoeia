@@ -45,9 +45,72 @@ class TurnOutcomeTests(unittest.TestCase):
             research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
         )
 
-    def test_context_attributed_outcome_uses_the_v3_contract(self) -> None:
+    def test_context_attributed_outcome_with_reservation_uses_the_v4_contract(self) -> None:
         outcome = build_turn_outcome(
-            proposal={
+            **self._context_outcome_arguments(),
+            reserved_model_cost_usd="0.75",
+        )
+        schema = json.loads(
+            Path(__file__)
+            .parents[2]
+            .joinpath("contracts", "turn_outcome.v4.schema.json")
+            .read_text()
+        )
+
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(outcome)
+        self.assertEqual(outcome["schema_version"], 4)
+        self.assertEqual(outcome["reserved_model_cost_usd"], 0.75)
+        self.assertEqual(validate_turn_outcome(outcome), outcome)
+
+    def test_context_attributed_outcome_without_reservation_remains_v3(self) -> None:
+        outcome = build_turn_outcome(**self._context_outcome_arguments())
+
+        self.assertEqual(outcome["schema_version"], 3)
+        self.assertNotIn("reserved_model_cost_usd", outcome)
+        self.assertEqual(validate_turn_outcome(outcome), outcome)
+        v4 = build_turn_outcome(
+            **self._context_outcome_arguments(), reserved_model_cost_usd="0.10"
+        )
+        self.assertEqual(v4["event_id"], outcome["event_id"])
+        self.assertEqual(v4["turn_id"], outcome["turn_id"])
+        self.assertEqual((v4["model_cost_usd"], v4["reserved_model_cost_usd"]), (0.25, 0.1))
+
+    def test_reservation_requires_context_and_is_strictly_validated(self) -> None:
+        for invalid in ("bad", "-0.01", "NaN", "Infinity"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                build_turn_outcome(
+                    **self._context_outcome_arguments(),
+                    reserved_model_cost_usd=invalid,
+                )
+            tampered = build_turn_outcome(
+                **self._context_outcome_arguments(), reserved_model_cost_usd="0.75"
+            )
+            tampered["reserved_model_cost_usd"] = invalid
+            with self.subTest(serialized=invalid), self.assertRaises(ValueError):
+                validate_turn_outcome(tampered)
+
+        context_free = self._context_outcome_arguments()
+        context_free["context"] = None
+        with self.assertRaises(ValueError):
+            build_turn_outcome(**context_free, reserved_model_cost_usd="0.75")
+
+        outcome = build_turn_outcome(
+            **self._context_outcome_arguments(), reserved_model_cost_usd="0.75"
+        )
+        outcome["schema_version"] = 3
+        with self.assertRaises(ValueError):
+            validate_turn_outcome(outcome)
+
+        missing = build_turn_outcome(
+            **self._context_outcome_arguments(), reserved_model_cost_usd="0.75"
+        )
+        missing.pop("reserved_model_cost_usd")
+        with self.assertRaises(ValueError):
+            validate_turn_outcome(missing)
+
+    def _context_outcome_arguments(self) -> dict[str, object]:
+        return {
+            "proposal": {
                 "snapshot_id": "snapshot-context",
                 "market_id": "123",
                 "action": "abstain",
@@ -58,30 +121,20 @@ class TurnOutcomeTests(unittest.TestCase):
                 "citations": [],
                 "rationale": "No reliable edge.",
             },
-            review=None,
-            policy=None,
-            status="abstained",
-            reason="trader_abstained",
-            created_at="2026-10-09T00:00:00+00:00",
-            trade_plan_event_id=None,
-            model_cost_usd="0.25",
-            context={
+            "review": None,
+            "policy": None,
+            "status": "abstained",
+            "reason": "trader_abstained",
+            "created_at": "2026-10-09T00:00:00+00:00",
+            "trade_plan_event_id": None,
+            "model_cost_usd": "0.25",
+            "context": {
                 "scope_key": "polymarket:series:btc-updown-5m",
                 "profile_id": "crypto.btcusd.5m.updown",
                 "profile_version": 1,
                 "manifest_hash": "a" * 64,
             },
-        )
-        schema = json.loads(
-            Path(__file__)
-            .parents[2]
-            .joinpath("contracts", "turn_outcome.v3.schema.json")
-            .read_text()
-        )
-
-        Draft202012Validator(schema, format_checker=FormatChecker()).validate(outcome)
-        self.assertEqual(outcome["schema_version"], 3)
-        self.assertEqual(validate_turn_outcome(outcome), outcome)
+        }
 
     def test_every_decided_status_conforms_to_shared_schema(self) -> None:
         schema = json.loads(
@@ -239,6 +292,20 @@ class TurnOutcomeTests(unittest.TestCase):
         record_turn_outcome(directory, outcome)
 
         self.assertEqual(replay(directory).turn_outcomes[outcome["turn_id"]], outcome)
+
+    def test_v4_outcome_uses_canonical_journal_and_outbox_paths(self) -> None:
+        directory = Path(tempfile.mkdtemp())
+        outcome = build_turn_outcome(
+            **self._context_outcome_arguments(), reserved_model_cost_usd="0.75"
+        )
+        open_session(directory, 1_000, 100)
+        admit_turn(directory, str(outcome["turn_id"]), "snapshot-context", "123")
+
+        record_turn_outcome(directory, outcome)
+        enqueue_event(directory, outcome)
+
+        self.assertEqual(replay(directory).turn_outcomes[outcome["turn_id"]], outcome)
+        self.assertEqual(pending_events(directory), [outcome])
 
     def test_validation_accepts_pre_plan_checks_v1_as_empty_history(self) -> None:
         legacy = self.outcome()

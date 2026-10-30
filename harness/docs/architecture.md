@@ -96,8 +96,12 @@ flowchart TD
   acceptance. The event is a verified request/plan, never an order, fill, open
   position, or completed execution. Every decided turn also emits a strict
   `turn_outcome` containing context scope/profile identity, proposal rationale, bounded deterministic plan-
-  check attempts, optional review, policy result, reason, and model cost; failed
-  and abandoned turns do not. Plan-check rejection reasons distinguish no check,
+  check attempts, optional review, policy result, reason, and model cost. New
+  context-attributed production outcomes are v4 and also record the same maximum
+  reserved-cost ceiling returned by the cycle summary, including research
+  allowance; actual-cost meaning is unchanged. V3 context history and v1/v2
+  context-free outcomes remain valid without inferred reservations. Failed and
+  abandoned turns do not emit archive outcomes. Plan-check rejection reasons distinguish no check,
   no passing check, and a proposal changed after its last passing check.
 - Deterministic routing selects a bundled or locally approved profile by market
   scope. The profile pins an immutable manifest hash, instructions, tool IDs,
@@ -105,7 +109,7 @@ flowchart TD
   allowlist; profile text is guidance, never authority.
 - The optional BigQuery history query runs before the trader only when
   `[history].enabled` and the archive table are configured. It filters the
-  context scope, profile ID/version/hash, enforces the archive's `publish_time`
+  context scope, profile ID/version/hash, accepts v3 and v4 decisions, enforces the archive's `publish_time`
   partition and a 100 MiB maximum scan, joins Consumer lifecycle outcomes by plan
   event ID, and adds only bounded aggregate evidence. Query failures are
   non-fatal; results do not authorize or change risk, policy, or accounting.

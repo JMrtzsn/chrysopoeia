@@ -350,6 +350,7 @@ def summarize_cycle(
         created_at=created_at,
         trade_plan_event_id=str(event["event_id"]) if isinstance(event, Mapping) else None,
         model_cost_usd=str(actual),
+        reserved_model_cost_usd=str(maximum) if profile is not None else None,
         plan_checks=state.get(PLAN_CHECKS_KEY, []),
         evidence=[
             {

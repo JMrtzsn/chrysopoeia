@@ -511,6 +511,11 @@ class CycleRunnerTests(unittest.TestCase):
                 self.assertEqual(summary["status"], status)
                 self.assertEqual(summary["reviewer_called"], action == "trade")
                 self.assertEqual(summary["maximum_reserved_cost_usd"], "0.9471552")
+                self.assertEqual(summary["outcome_event"]["schema_version"], 4)
+                self.assertEqual(
+                    Decimal(str(summary["outcome_event"]["reserved_model_cost_usd"])),
+                    Decimal(summary["maximum_reserved_cost_usd"]),
+                )
                 self.assertLessEqual(
                     Decimal(summary["actual_estimated_cost_usd"]), Decimal("0.9471552")
                 )

@@ -1,0 +1,56 @@
+# Insight observer
+
+Independent FastAPI service for read-only insight over the raw BigQuery event
+archive. `GET /v1/insights` runs a bounded query at read time; it does not keep a
+projection database, subscribe to events, or write anywhere. `GET /healthz` does
+not query the archive.
+
+Each result groups `turn_outcome` v3/v4 decisions by full context identity
+(`scope_key`, profile ID/version/manifest hash), joins archived Consumer outcomes
+by trade-plan event ID, and reports:
+
+- decisions, accepted plans, abstentions, Harness/Consumer rejections, fills, and
+  closed/settled trades;
+- win rate and realized paper P&L for completed trades;
+- actual estimated model/research cost recorded on decided Harness turns and,
+  only for v4-only groups, the sum of their reservation ceilings (including the
+  configured research allowance);
+- completed trades remaining before the 20-trade profile gate opens.
+
+Delivery duplicates are removed by `(record_type, event_id)`. Queries look back
+90 days, filter the required `publish_time` partition, cap billing at 100 MiB,
+time out after 20 seconds, and return at most 100 contexts. The response sets
+`truncated` when more contexts exist. Synthetic archive-verification records and
+unversioned/context-free legacy outcomes do not enter these aggregates.
+
+The archive is not authoritative. Only published events are visible: local runs
+without `CHRYSOPOEIA_EVENT_SINK`, Harness in-process fills/settlements, and failed
+turns without a `turn_outcome` are absent. V3-only and mixed v3/v4 groups return
+`reserved_model_cost_usd: null`; the observer never reports a partial v4
+reservation sum beside actual costs from all versions. Actual cost keeps its
+existing meaning and is an estimate, not a provider bill.
+
+## Run locally
+
+Requires Python 3.10+, `uv`, ambient Google credentials with BigQuery query and
+archive read access, and the fully qualified archive table:
+
+```sh
+uv sync --all-groups
+OBSERVER_ARCHIVE_TABLE=project.dataset.raw_events \
+OBSERVER_BIGQUERY_LOCATION=us-central1 \
+  uv run uvicorn observer.app:app --host 127.0.0.1 --port 8080 --workers 1
+```
+
+Then request `http://127.0.0.1:8080/v1/insights`. Local binding provides no
+authentication. Deployment and read-only IAM are separate Platform work.
+
+## Offline checks
+
+```sh
+uv run python -m unittest discover -s tests
+uv run ruff check .
+uv run ty check .
+```
+
+Tests inject fake BigQuery clients and make no network calls.

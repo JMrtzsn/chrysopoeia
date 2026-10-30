@@ -47,6 +47,7 @@ class BigQueryHistoryTests(unittest.TestCase):
         self.assertIn("$.context.scope_key", sql)
         self.assertIn("$.context.profile_id", sql)
         self.assertIn("consumer_outcome", sql)
+        self.assertIn("IN (3, 4)", sql)
         self.assertIn("PARTITION BY JSON_VALUE(payload, '$.record_type')", sql)
         self.assertEqual(job_config.maximum_bytes_billed, MAXIMUM_BYTES_BILLED)
         parameters = {item.name: item.value for item in job_config.query_parameters}

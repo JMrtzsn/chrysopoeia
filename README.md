@@ -141,8 +141,9 @@ pending. No platform resources, keys, or orders are involved.
 - [Platform deployment](platform/docs/deployment.md): Cloud Run shape, policy,
   and platform verification record.
 - [Paper consumer](consumer/README.md): independent push/sweep and ledger contract.
-- [Harness roadmap](harness/ROADMAP.md) and [platform roadmap](platform/ROADMAP.md):
-  independent work queues.
+- [Insight observer](observer/README.md): read-only, pull-based BigQuery aggregates.
+- [Harness roadmap](harness/ROADMAP.md), [platform roadmap](platform/ROADMAP.md),
+  and [observer roadmap](observer/ROADMAP.md): independent work queues.
 - [Harness proposals](harness/docs/proposals.md): unapproved feature proposals.
 
 ## Event-driven architecture
@@ -152,12 +153,12 @@ Current and planned (see roadmaps) patterns:
 
 | Pattern | Here |
 | --- | --- |
-| Domain events / event notification | One topic carries `trade_plan_ready`, context-tagged `turn_outcome` v3, and optional Consumer `consumer_outcome` lifecycle events; subscriptions filter by `record_type` |
+| Domain events / event notification | One topic carries `trade_plan_ready`, context-tagged `turn_outcome` v3/v4, and optional Consumer `consumer_outcome` lifecycle events; subscriptions filter by `record_type` |
 | Transactional outbox | Harness and Consumer journals retain events until confirmed delivery |
 | At-least-once delivery + idempotent consumer | Pub/Sub retries; consumers deduplicate by stable `event_id` |
 | Dead-letter queue | Consumer subscription dead-letters after ten attempts |
 | CQRS read model / projections | Raw Pub/Sub-to-BigQuery archive is deployed; bounded context-history reads are optional and live verification is pending |
-| Decision (outcome) logging | `turn_outcome` records context identity, decisions, review/policy results, and evidence; Consumer lifecycle outcomes are archived separately |
+| Decision (outcome) logging | `turn_outcome` v4 records the reservation ceiling (including research allowance) without changing actual-cost semantics; legacy v1/v2/v3 remain readable and failed turns remain excluded |
 | Retrieval-augmented context / closed learning loop | Bounded prior outcomes can be added as untrusted evidence; automatic profile creation/revision remains future work |
 
 This is not event sourcing: each unit's own ledger stays authoritative; analytics
@@ -166,6 +167,8 @@ copies are never used for balances, risk, or lifecycle decisions.
 ## Repository boundaries
 
 `harness/` owns the producer and versioned event schema. `consumer/` validates
-that schema as data and owns paper effects in a separate ledger. `platform/`
-owns conditional GCP resources and consumes pinned image digests; it imports
-neither package. See each folder's `AGENTS.md` for work-unit rules.
+that schema as data and owns paper effects in a separate ledger. `observer/`
+reads bounded BigQuery archive aggregates without importing either package or
+retaining a ledger/projection. `platform/` owns conditional GCP resources and
+consumes pinned image digests; it imports none of the packages. See each
+folder's `AGENTS.md` for work-unit rules.

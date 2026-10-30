@@ -4,14 +4,14 @@
 
 - `.agents-cli-spec.md`: product scope, safety contract, and acceptance.
 - `README.md`: orientation and local quickstart.
-- `harness/docs/` and `platform/docs/`: work-unit documentation. Keep it aligned
-  with the spec and implementation.
-- `harness/ROADMAP.md` and `platform/ROADMAP.md`: approved work order for each
-  independent work unit.
+- `harness/docs/`, `platform/docs/`, and `observer/README.md`: work-unit
+  documentation. Keep it aligned with the spec and implementation.
+- `harness/ROADMAP.md`, `platform/ROADMAP.md`, and `observer/ROADMAP.md`:
+  approved work order for each independent work unit.
 
 ## Ownership
 
-This monorepo has three work units:
+This monorepo has four work units:
 
 - `harness/`: proposal/review loop, deterministic trading and event-contract
   logic, paper accounting, CLI, tests, configuration, and offline gates. It
@@ -22,6 +22,9 @@ This monorepo has three work units:
 - `consumer/`: independent paper-only HTTP consumer, public quote checks, and a
   separate journal. It consumes the Harness-owned schema as data and never
   imports Harness or shares its ledger.
+- `observer/`: independent read-only insight service. It queries the BigQuery
+  event archive at read time, consumes event schemas as data without package
+  imports, and has no journal, projection store, or execution authority.
 
 Root `contracts/` contains versioned data contracts. Harness owns
 `trade_plan_ready`; consumers validate the schema without package imports.
