@@ -2,7 +2,7 @@
 
 Independent FastAPI service for read-only insight over the raw BigQuery event
 archive. `GET /v1/insights` runs a bounded query at read time; it does not keep a
-projection database, subscribe to events, or write anywhere. `GET /healthz` does
+projection database, subscribe to events, or write anywhere. `GET /health` does
 not query the archive.
 
 Each result groups `turn_outcome` v3/v4 decisions by full context identity
@@ -43,7 +43,19 @@ OBSERVER_BIGQUERY_LOCATION=us-central1 \
 ```
 
 Then request `http://127.0.0.1:8080/v1/insights`. Local binding provides no
-authentication. Deployment and read-only IAM are separate Platform work.
+authentication.
+
+## Container and deployment
+
+`./build.sh` builds the wheel, exports the frozen runtime requirements, builds
+`chrysopoeia-observer:local` for `linux/amd64`, and import-checks it with
+networking disabled. It never pushes; publication and the digest pin are a
+separate approved operation. Platform deploys the pinned digest as a private
+Cloud Run service with a dedicated identity that can only run BigQuery jobs and
+read the archive dataset; only the configured `observer_invoker_member` may
+invoke it. The service receives `GOOGLE_CLOUD_PROJECT`,
+`OBSERVER_ARCHIVE_TABLE`, and `OBSERVER_BIGQUERY_LOCATION`. See
+`../platform/docs/deployment.md`.
 
 ## Offline checks
 

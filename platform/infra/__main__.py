@@ -41,10 +41,18 @@ pubsub_topic = config.get("pubsub_topic")
 consumer_image_digest = config.get("consumer_image_digest")
 consumer_sweep_schedule = config.get("consumer_sweep_schedule") or "* * * * *"
 context_history_enabled = config.get_bool("context_history_enabled") or False
+observer_image_digest = config.get("observer_image_digest")
+observer_invoker_member = config.get("observer_invoker_member")
 if consumer_image_digest and not pubsub_topic:
     pubsub_topic = config.require("pubsub_topic")
 if context_history_enabled and not pubsub_topic:
     raise pulumi.RunError("context history requires the configured event archive topic")
+if observer_image_digest and not pubsub_topic:
+    raise pulumi.RunError("observer requires the configured event archive topic")
+if observer_image_digest and not observer_invoker_member:
+    raise pulumi.RunError("observer requires observer_invoker_member")
+if observer_invoker_member in {"allUsers", "allAuthenticatedUsers"}:
+    raise pulumi.RunError("observer invoker must be a private identity")
 
 bucket = gcp.storage.Bucket(
     "journals",
@@ -448,6 +456,88 @@ trigger_queue = gcp.cloudtasks.Queue(
 )
 pulumi.export("trigger_queue_name", trigger_queue.name)
 pulumi.export("trigger_sa_email", trigger.email)
+
+# Read-only archive Observer: private by IAM, no ledger, storage, or publishing.
+if observer_image_digest and pubsub_topic:
+    observer = gcp.serviceaccount.Account(
+        "observer",
+        gcp.serviceaccount.AccountArgs(
+            project=project_id,
+            account_id=f"chrysopoeia-observer-{operator}"[:30],
+            display_name=f"Chrysopoeia archive observer ({operator})",
+            description="Runs read-only queries against the event archive only.",
+        ),
+    )
+    observer_member = pulumi.Output.concat("serviceAccount:", observer.email)
+    gcp.projects.IAMMember(
+        "observer-bigquery-job-user",
+        gcp.projects.IAMMemberArgs(
+            project=project_id,
+            role="roles/bigquery.jobUser",
+            member=observer_member,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_api]),
+    )
+    gcp.bigquery.DatasetIamMember(
+        "observer-event-archive-reader",
+        gcp.bigquery.DatasetIamMemberArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            role="roles/bigquery.dataViewer",
+            member=observer_member,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_dataset]),
+    )
+    observer_service = gcp.cloudrunv2.Service(
+        "observer-service",
+        gcp.cloudrunv2.ServiceArgs(
+            project=project_id,
+            location=region,
+            name=f"chrysopoeia-observer-{operator}",
+            ingress="INGRESS_TRAFFIC_ALL",
+            deletion_protection=False,
+            template=gcp.cloudrunv2.ServiceTemplateArgs(
+                service_account=observer.email,
+                max_instance_request_concurrency=1,
+                scaling=gcp.cloudrunv2.ServiceTemplateScalingArgs(
+                    min_instance_count=0,
+                    max_instance_count=1,
+                ),
+                containers=[
+                    gcp.cloudrunv2.ServiceTemplateContainerArgs(
+                        image=observer_image_digest,
+                        envs=[
+                            gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                                name="GOOGLE_CLOUD_PROJECT", value=project_id
+                            ),
+                            gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                                name="OBSERVER_ARCHIVE_TABLE",
+                                value=pulumi.Output.concat(
+                                    project_id, ".", archive_dataset.dataset_id, ".raw_events"
+                                ),
+                            ),
+                            gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                                name="OBSERVER_BIGQUERY_LOCATION", value=region
+                            ),
+                        ],
+                    )
+                ],
+            ),
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[run_service]),
+    )
+    gcp.cloudrunv2.ServiceIamMember(
+        "observer-invoker",
+        gcp.cloudrunv2.ServiceIamMemberArgs(
+            project=project_id,
+            location=region,
+            name=observer_service.name,
+            role="roles/run.invoker",
+            member=observer_invoker_member,
+        ),
+    )
+    pulumi.export("observer_service_url", observer_service.uri)
+    pulumi.export("observer_runtime_email", observer.email)
 
 if consumer_image_digest and pubsub_topic:
     scheduler_service = gcp.projects.Service(

@@ -17,8 +17,9 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Chrysopoeia Observer")
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    # Cloud Run's front end reserves /healthz, so it never reaches the container.
+    @app.get("/health")
+    def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/v1/insights")

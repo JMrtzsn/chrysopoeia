@@ -9,6 +9,7 @@ financial ledger or an authority for risk, fills, balances, or lifecycle.
 ## Owned
 
 - `observer/`, `tests/`, `pyproject.toml`, `uv.lock`
+- `Dockerfile`, `.dockerignore`, `build.sh` (build-only; publishing is separate)
 - `README.md`, `ROADMAP.md`
 
 ## Boundaries

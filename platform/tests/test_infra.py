@@ -249,6 +249,40 @@ class InfraContractTests(unittest.TestCase):
             self.assertNotRegex(before, export)
             self.assertNotRegex(after, export)
 
+    def test_observer_is_optional_private_and_read_only(self) -> None:
+        source = Path(__file__).parents[1].joinpath("infra", "__main__.py").read_text()
+        guards = source.split('observer_invoker_member = config.get("observer_invoker_member")', 1)[
+            1
+        ].split("bucket = gcp.storage.Bucket(", 1)[0]
+        before, rest = source.split("if observer_image_digest and pubsub_topic:", 1)
+        resources = rest.split("if consumer_image_digest and pubsub_topic:", 1)[0]
+
+        self.assertIn('observer_image_digest = config.get("observer_image_digest")', source)
+        self.assertIn("observer requires the configured event archive topic", guards)
+        self.assertIn("observer requires observer_invoker_member", guards)
+        self.assertIn('{"allUsers", "allAuthenticatedUsers"}', guards)
+        self.assertIn('account_id=f"chrysopoeia-observer-{operator}"[:30]', resources)
+        self.assertEqual(
+            sorted(re.findall(r'role="([^"]+)"', resources)),
+            ["roles/bigquery.dataViewer", "roles/bigquery.jobUser", "roles/run.invoker"],
+        )
+        self.assertIn("gcp.bigquery.DatasetIamMember(", resources)
+        self.assertIn("member=observer_invoker_member", resources)
+        for name in ("GOOGLE_CLOUD_PROJECT", "OBSERVER_ARCHIVE_TABLE", "OBSERVER_BIGQUERY_LOCATION"):
+            self.assertIn(f'name="{name}"', resources)
+        self.assertIn("min_instance_count=0", resources)
+        self.assertIn("max_instance_count=1", resources)
+        self.assertIn("max_instance_request_concurrency=1", resources)
+        for forbidden in ("volume", "storage", "pubsub", "aiplatform", "cloudscheduler"):
+            self.assertNotIn(forbidden, resources)
+        for name, value in {
+            "observer_service_url": "observer_service.uri",
+            "observer_runtime_email": "observer.email",
+        }.items():
+            export = rf'pulumi\.export\(\s*"{name}",\s*{re.escape(value)}\s*\)'
+            self.assertRegex(resources, export)
+            self.assertNotRegex(before, export)
+
     def test_consumer_docs_state_single_writer_ceiling_and_unexercised_paths(self) -> None:
         docs = Path(__file__).parents[1].joinpath("docs", "deployment.md").read_text()
 

@@ -32,7 +32,7 @@ class ObserverAppTests(unittest.TestCase):
         archive = Mock()
         client = TestClient(create_app(table="project.dataset.raw_events", client=archive))
 
-        response = client.get("/healthz")
+        response = client.get("/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})

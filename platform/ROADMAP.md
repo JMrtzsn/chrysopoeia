@@ -154,6 +154,15 @@ runtime resources were replaced or deleted. Recovery steps are in
    turn; (d) run bounded cycles until a context has 20
    finalized outcomes, then verify the first agent-approved profile revision
    end to end. No scheduling is authorized by this entry alone.
+6. **Current-stack rollout with a private Observer** (coordinated operator
+   approval, 2026-10-31): rebuild and pin current Harness and Consumer images,
+   and add the optional Observer service, dedicated read-only identity, and
+   single invoker grant. Verification is no-model only: Harness `validate`,
+   Consumer revision readiness, and one deployed Observer query. No campaign,
+   enqueue, or forecasting spend is included. Deployed 2026-11-07 and verified
+   (see `docs/deployment.md`); the trigger queue is left paused. Cloud Run
+   reserves `/healthz`, so the Observer health route moved to `/health` and was
+   redeployed alone.
 
 ## Deferred
 

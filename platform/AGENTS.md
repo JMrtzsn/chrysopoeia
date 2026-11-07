@@ -39,6 +39,11 @@ Ordered platform work lives in `ROADMAP.md`.
 - Consumer resources exist only when both `consumer_image_digest` and
   `pubsub_topic` are configured. Its dedicated identity can access only its
   separate ledger bucket; a separate OIDC identity invokes the private service.
+- Observer resources exist only when `observer_image_digest` is configured; it
+  also requires `pubsub_topic` and a private `observer_invoker_member` (never
+  `allUsers`/`allAuthenticatedUsers`). Its dedicated identity has only
+  `roles/bigquery.jobUser` and archive-dataset `roles/bigquery.dataViewer`; it
+  has no storage, publishing, or Vertex access.
 
 ## Verification gates
 

@@ -48,12 +48,21 @@ future deployment. The BigQuery archive is an analytics copy, never a ledger.
   Observer returned its exact context, 0.180846 actual cost, and 1.43376
   reservation in one bounded BigQuery read.
 
+## Next
+
+1. **Private Cloud Run deployment** (coordinated operator approval 2026-10-31):
+   wheel-only image, dedicated read-only runtime identity, and a single
+   configured invoker; Platform owns the resources. Deployed 2026-11-07: one
+   authenticated deployed query returned 200 and unauthenticated access 403.
+   Cloud Run reserves `/healthz`, so the health route moved to `/health`
+   (redeployed `sha256:ac0de602…`; 200 authenticated, 403 unauthenticated).
+
 ## Deferred
 
 - v2 subscription and alerting, only when live alerts are needed.
 - Per-campaign/session grouping, which requires a coordinated event-schema tag.
-- Cloud billing export, dashboards, authentication/deployment shape, and any
-  authoritative storage, each requiring separate approval.
+- Cloud billing export, dashboards, and any authoritative storage, each
+  requiring separate approval.
 
 ## Updating this roadmap
 

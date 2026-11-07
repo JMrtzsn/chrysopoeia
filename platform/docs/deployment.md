@@ -165,6 +165,33 @@ Local producer usage and bounded scoring are documented in
 [`../../harness/docs/collection.md`](../../harness/docs/collection.md). No
 forecasting process or schedule starts when the archive is deployed.
 
+## Observer service
+
+When `observer_image_digest` is configured (with `pubsub_topic` and
+`observer_invoker_member`), Pulumi creates five resources: service account
+`chrysopoeia-observer-<operator>`, its project `roles/bigquery.jobUser`, its
+archive-dataset `roles/bigquery.dataViewer`, Cloud Run service
+`chrysopoeia-observer-<operator>` (scale zero to one, concurrency one, no
+volumes), and `roles/run.invoker` for the configured member only. The service
+gets `GOOGLE_CLOUD_PROJECT`, `OBSERVER_ARCHIVE_TABLE`, and
+`OBSERVER_BIGQUERY_LOCATION`, and exports `observer_service_url` and
+`observer_runtime_email`. It has no storage, publishing, Vertex, scheduler, or
+subscription access. Public members are rejected by the program.
+
+Private-by-IAM means the Consumer's pattern: Internet ingress with Cloud Run IAM,
+so unauthenticated requests are refused. Invoke it with the configured
+identity's token, for example
+`curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" "$URL/health"`.
+Build with `observer/build.sh`, then tag, push, and pin the digest.
+
+A rollout that changes the Consumer image must quiesce its writers first:
+keep the trigger queue paused with no tasks, ensure no Harness execution can
+publish, pause the Consumer sweep Scheduler, let in-flight pushes and sweeps
+finish, then apply and resume the Scheduler only after the new revision is the
+sole ready writer. No-model verification uses Harness `validate --json`,
+Consumer control-plane readiness, Observer `/health`, and exactly one deployed
+`/v1/insights` query.
+
 ### Permanent storage and infrastructure recreation
 
 The dataset and table are permanent fixtures, not disposable runtime resources.
@@ -242,6 +269,7 @@ can desynchronize state.
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
+| 2026-11-07 | Current-stack rollout with private Observer: `platform/build.sh` (Harness `sha256:219288bb…`), `consumer/build.sh` + no-network import check + push (`sha256:15a636b2…`), `observer/build.sh` + push (`sha256:da5dfa27…`); pin all three plus `observer_invoker_member`; trigger queue and Consumer sweep paused; `platform/run.sh deploy`; Scheduler resumed; one `run.sh job --args=validate,--json`; one authenticated Observer `/v1/insights` | Preview and apply matched: 5 Observer resources created, Harness job and Consumer service updated, 41 unchanged, no deletes. Consumer revision `00002-zt6` Ready with 100% traffic on the new digest before the sweep resumed; the next sweep returned 204 from it. Execution `chrysopoeia-cycle-local-htbtj` succeeded on the new Harness digest: platform profile valid, paper mode, BTC series, research disabled; no model, market, or event calls. Observer runs as `chrysopoeia-observer-local` with only project `roles/bigquery.jobUser` and archive-dataset READER; `roles/run.invoker` only for the configured operator. Unauthenticated `/v1/insights` returned 403. One authenticated request returned 200 (one BigQuery query, 90-day/100 MiB/20 s bounds): two contexts, CS2 v4 (actual 0.180846, reserved 1.43376) and BTC v3 (54 decisions, 2 completed, reserved null). Defect: Cloud Run's front end reserves `/healthz` and returns 404 before the container, so the health route is unusable when deployed. Fixed the same day: route renamed to `/health`, Observer image `sha256:ac0de602…` rebuilt, pushed, and applied with `--target` on the Observer service only (1 updated, 47 unchanged); authenticated `/health` 200 `{"status":"ok"}`, unauthenticated 403. Trigger queue left paused; no campaign or model spend. Credentials: the operator's gmail gcloud account; the default ingka account needed reauthentication. |
 | 2026-10-25 | Job-trigger queue: `platform/run.sh deploy` creating the Cloud Tasks API, queue `chrysopoeia-trigger-local`, least-privilege trigger identity (custom role `run.jobs.run` + `run.jobs.runWithOverrides`), and Cloud Tasks agent token-creator grant; `platform/run.sh enqueue 2 15 accum-pilot-20261025` pilot, then `enqueue 78 30 accum-20261025` | Apply: 7 created, 35 unchanged (plus one cosmetic consumer-service state normalization: dropped zero/empty scaling defaults; no service change). Pilot: both tasks dispatched at their schedule times and completed as executions `chrysopoeia-cycle-local-bf7tm`/`-ls6ng` with independent fresh journals on the bucket; queue drained. Approved campaign bound: 80 executions × $1.50 session budget = $120 absolute worst case, expected ~$8-10 actual model cost; each execution is a two-cycle paper session; any produced plans are consumer-filled in paper. Kill switches: `gcloud tasks queues pause/purge chrysopoeia-trigger-local`. Queue idle cost $0. |
 | 2026-10-25 | Consumer rollout (Harness self-learning step 3): `consumer/build.sh` (after fixing `.dockerignore` to whitelist the staged `consumer_outcome` schema — the 2026-10-10 build predated that file), push, `pulumi config set consumer_image_digest …@sha256:6807f5c7…`, `platform/run.sh deploy`; then two bounded harness `run` executions and three labeled synthetic `trade_plan_ready` publishes | Deploy created 15 consumer resources (service, filtered push subscription, dead-letter topic + retention sub, ledger bucket, identities, minute sweep); 21 unchanged. The two harness executions abstained (4/4 turns, $0.21739245 actual model cost — the trader declines coin-flip windows; no plan events produced). Synthetic publishes (snapshot_id `synthetic-verification-20261025`, excluded from gate metrics structurally: the history aggregate joins consumer outcomes to real harness turns): #1 rejected (`invalid trade plan event`, schema), #2 rejected (`event ID does not match` — consumer requires `turn-` + sha256 of `[snapshot_id, market_id]`), #3 `turn-9853f52d…` filled YES 10.204 shares @ 0.49, stake $5 + $0.10 fee on a fresh public quote, then settled by the minute sweep at market resolution NO with pnl −$5.10. All three lifecycle outcomes (`rejected`/`filled`/`settled`) published as `consumer_outcome` v1 and archived in BigQuery within ~2 s. Six transient sweep 503s (08:04–08:09) retried by Scheduler and self-recovered; dead-letter empty; ledger on the versioned consumer bucket. No real orders; Pub/Sub/Cloud Run/BigQuery cost ~$0. Model-produced deployed delivery remains pending a non-abstaining harness turn (accumulation step). The consumer stays deployed. |
 | 2026-10-22 | `pulumi config set context_history_enabled true` + `CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy`; `gcloud projects get-iam-policy`; `bq show` on the archive dataset | Apply created `roles/bigquery.jobUser` (project) and dataset `roles/bigquery.dataViewer` for the runner, updated the runner description and the job's archive table/location env vars; 17 unchanged. Both grants verified by IAM/bq reads. The runner SA did not run any query yet, and the pinned image predates the history feature, so the deployed query path remains unverified until the next image rollout. The optional Consumer publisher role activates only with a future `consumer_image_digest` rollout. Cost ~$0. |
