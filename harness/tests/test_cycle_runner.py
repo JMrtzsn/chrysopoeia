@@ -64,11 +64,15 @@ class FakeLlm(BaseLlm):
             yield LlmResponse(
                 content=types.Content(
                     role="model",
-                    parts=[types.Part(function_call=types.FunctionCall(
-                        id="plan-check",
-                        name="check_trade_plan",
-                        args={"plan": self.response},
-                    ))],
+                    parts=[
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                id="plan-check",
+                                name="check_trade_plan",
+                                args={"plan": self.response},
+                            )
+                        )
+                    ],
                 ),
                 usage_metadata=types.GenerateContentResponseUsageMetadata(
                     prompt_token_count=11, candidates_token_count=7
@@ -184,7 +188,9 @@ class CycleRunnerTests(unittest.TestCase):
                     "stop_loss_roi": -0.2,
                     "exit_by": "2026-10-01T00:00:00+00:00",
                     "hold_to_resolution": False,
-                } if action == "trade" else None,
+                }
+                if action == "trade"
+                else None,
             },
         )
         reviewer = FakeLlm(
@@ -201,49 +207,11 @@ class CycleRunnerTests(unittest.TestCase):
         )
         return trader, reviewer, calls
 
-    def test_window_baseline_is_attached_as_citable_evidence_when_enabled(self) -> None:
-        from dataclasses import replace as dc_replace
-
-        from chrysopoeia.configuration import VenueConfig
-        from chrysopoeia.paper_cycle import external_evidence
-
-        trader, reviewer, _ = self.models("abstain")
-        record = external_evidence(
-            self.snapshot,
-            "https://www.bitstamp.net/api/?market=BTC/USD",
-            "BTC 5m deterministic window baseline",
-            self.snapshot.captured_at,
-            excerpt="baseline_p_up=0.620",
-        )
-        config = replace(
-            self.config,
-            venue=VenueConfig(
-                "polymarket", 0.02, "paper-assumption:flat-2pct-v1",
-                "btc-updown-5m", 120.0, True,
-            ),
-            research=dc_replace(self.config.research, enabled=False),
-        )
-
-        with patch(
-            "chrysopoeia.window_baseline.baseline_evidence", return_value=record
-        ):
-            state, _, _ = asyncio.run(
-                run_paper_cycle_state(
-                    config,
-                    self.snapshot,
-                    OperatingConfig(),
-                    trader,
-                    reviewer,
-                    FakeLlm(model=config.models.context, calls=[], response={}),
-                )
-            )
-
-        self.assertEqual(
-            state["validated_external_evidence"][0]["evidence_id"], record.evidence_id
-        )
-
     def test_bigquery_history_becomes_bounded_context_evidence(self) -> None:
-        snapshot = replace(self.snapshot, source_url="https://polymarket.com/event/btc-updown-5m-1792600000")
+        snapshot = replace(
+            self.snapshot,
+            source_url="https://polymarket.com/event/btc-updown-5m-1792600000",
+        )
         profile = bundled_profiles()[0]
         history = {
             "scope_key": "polymarket:series:btc-updown-5m",
@@ -299,52 +267,85 @@ class CycleRunnerTests(unittest.TestCase):
         )
         self.assertEqual(summary["status"], "abstained")
 
-    def test_missing_proposal_records_cost_denial_and_call_count_in_failed_turn(self) -> None:
+    def test_missing_proposal_records_cost_denial_and_call_count_in_failed_turn(
+        self,
+    ) -> None:
         from chrysopoeia.accounting import open_session, replay
         from chrysopoeia.operations import run_journal_turn
 
         trader, reviewer, _ = self.models()
-        config = replace(self.config, cost=replace(self.config.cost, maximum_model_calls_per_cycle=1))
+        config = replace(
+            self.config, cost=replace(self.config.cost, maximum_model_calls_per_cycle=1)
+        )
 
         async def run(config, snapshot, operating, **kwargs):
-            return await run_paper_cycle(config, snapshot, operating, trader, reviewer, **kwargs)
+            return await run_paper_cycle(
+                config, snapshot, operating, trader, reviewer, **kwargs
+            )
 
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
             open_session(journal, 1000, 100)
             with self.assertRaises(RuntimeError):
-                asyncio.run(run_journal_turn(journal, config, self.snapshot, OperatingConfig(), run=run))
-            records = [json.loads(line) for line in (journal / "chrysopoeia.jsonl").read_text().splitlines()]
+                asyncio.run(
+                    run_journal_turn(
+                        journal, config, self.snapshot, OperatingConfig(), run=run
+                    )
+                )
+            records = [
+                json.loads(line)
+                for line in (journal / "chrysopoeia.jsonl").read_text().splitlines()
+            ]
             finished = records[-1]
             self.assertEqual(finished["record_type"], "turn_finished")
             self.assertEqual(finished["outcome"], "failed")
-            self.assertEqual(finished["failure"], {
-                "error_code": "MODEL_COST_POLICY_DENIED",
-                "message": "cycle model-call ceiling is exhausted",
-                "model_calls": 1,
-            })
+            self.assertEqual(
+                finished["failure"],
+                {
+                    "error_code": "MODEL_COST_POLICY_DENIED",
+                    "message": "cycle model-call ceiling is exhausted",
+                    "model_calls": 1,
+                },
+            )
             self.assertEqual(list(replay(journal).finished_turns.values()), ["failed"])
 
     def test_missing_proposal_diagnostics_do_not_persist_provider_text(self) -> None:
         from chrysopoeia.cycle_runner import _trader_failure
 
-        failure = _trader_failure("provider secret", "credential=secret private rationale", [])
-        self.assertEqual(failure, {
-            "error_code": "TRADER_OUTPUT_MISSING",
-            "message": "trader ended without a structured proposal; cause unavailable",
-            "model_calls": 0,
-        })
-        denied = _trader_failure("MODEL_COST_POLICY_DENIED", "private provider body", [])
-        self.assertEqual(denied["message"], "model call denied by cost policy; detail unavailable")
+        failure = _trader_failure(
+            "provider secret", "credential=secret private rationale", []
+        )
+        self.assertEqual(
+            failure,
+            {
+                "error_code": "TRADER_OUTPUT_MISSING",
+                "message": "trader ended without a structured proposal; cause unavailable",
+                "model_calls": 0,
+            },
+        )
+        denied = _trader_failure(
+            "MODEL_COST_POLICY_DENIED", "private provider body", []
+        )
+        self.assertEqual(
+            denied["message"], "model call denied by cost policy; detail unavailable"
+        )
 
-    def test_empty_trader_output_reports_unknown_cause_without_inventing_a_denial(self) -> None:
+    def test_empty_trader_output_reports_unknown_cause_without_inventing_a_denial(
+        self,
+    ) -> None:
         trader, reviewer, _ = self.models("abstain")
         trader.raw_response = ""
 
         with self.assertRaises(MissingTraderOutputError) as raised:
-            asyncio.run(run_paper_cycle(self.config, self.snapshot, OperatingConfig(), trader, reviewer))
+            asyncio.run(
+                run_paper_cycle(
+                    self.config, self.snapshot, OperatingConfig(), trader, reviewer
+                )
+            )
 
-        self.assertEqual(raised.exception.failure["error_code"], "TRADER_OUTPUT_MISSING")
+        self.assertEqual(
+            raised.exception.failure["error_code"], "TRADER_OUTPUT_MISSING"
+        )
         self.assertEqual(raised.exception.failure["model_calls"], 1)
 
     def test_cycle_requests_disable_thinking_and_keep_cost_output_ceiling(self) -> None:
@@ -377,11 +378,17 @@ class CycleRunnerTests(unittest.TestCase):
                 self.config, self.snapshot, OperatingConfig(), trader, reviewer
             )
         )
-        base = Decimal(summarize_cycle(self.config, self.snapshot, state)["actual_estimated_cost_usd"])
+        base = Decimal(
+            summarize_cycle(self.config, self.snapshot, state)[
+                "actual_estimated_cost_usd"
+            ]
+        )
         state["research"] = {"status": "ok", "reason": None, "query_count": 2}
 
         charged = Decimal(
-            summarize_cycle(self.config, self.snapshot, state)["actual_estimated_cost_usd"]
+            summarize_cycle(self.config, self.snapshot, state)[
+                "actual_estimated_cost_usd"
+            ]
         )
 
         self.assertEqual(charged - base, 2 * GROUNDING_QUERY_PRICE_USD)
@@ -389,10 +396,21 @@ class CycleRunnerTests(unittest.TestCase):
     def test_grounding_metadata_becomes_bounded_deduplicated_evidence(self) -> None:
         metadata = types.GroundingMetadata(
             grounding_chunks=[
-                types.GroundingChunk(web={"uri": "https://EXAMPLE.com:443/a", "title": " A\nreport "}),
-                types.GroundingChunk(web={"uri": "https://example.com/a", "title": "duplicate"}),
-                types.GroundingChunk(web={"uri": "http://example.com/b", "title": "bad"}),
-                *(types.GroundingChunk(web={"uri": f"https://example.com/{index}", "title": str(index)}) for index in range(10)),
+                types.GroundingChunk(
+                    web={"uri": "https://EXAMPLE.com:443/a", "title": " A\nreport "}
+                ),
+                types.GroundingChunk(
+                    web={"uri": "https://example.com/a", "title": "duplicate"}
+                ),
+                types.GroundingChunk(
+                    web={"uri": "http://example.com/b", "title": "bad"}
+                ),
+                *(
+                    types.GroundingChunk(
+                        web={"uri": f"https://example.com/{index}", "title": str(index)}
+                    )
+                    for index in range(10)
+                ),
             ],
             grounding_supports=[
                 types.GroundingSupport(
@@ -539,10 +557,16 @@ class CycleRunnerTests(unittest.TestCase):
                     },
                 )
                 if action == "abstain":
-                    self.assertEqual(summary["outcome_event"]["proposal"]["probability"], 0.4)
+                    self.assertEqual(
+                        summary["outcome_event"]["proposal"]["probability"], 0.4
+                    )
                 if action == "trade":
-                    self.assertEqual(summary["event"]["record_type"], "trade_plan_ready")
-                    self.assertEqual(summary["event"]["event_id"], "turn-acf2dcd35e81b75dc8316170")
+                    self.assertEqual(
+                        summary["event"]["record_type"], "trade_plan_ready"
+                    )
+                    self.assertEqual(
+                        summary["event"]["event_id"], "turn-acf2dcd35e81b75dc8316170"
+                    )
                     self.assertIsNone(summary["fill"])
                 else:
                     self.assertIsNone(summary["event"])
@@ -557,7 +581,9 @@ class CycleRunnerTests(unittest.TestCase):
             trader, reviewer, _ = self.models(action, approved)
             trader.checked = checked
             state, _, _ = asyncio.run(
-                run_paper_cycle_state(self.config, self.snapshot, OperatingConfig(), trader, reviewer)
+                run_paper_cycle_state(
+                    self.config, self.snapshot, OperatingConfig(), trader, reviewer
+                )
             )
 
             with self.subTest(expected=expected):
@@ -588,7 +614,9 @@ class CycleRunnerTests(unittest.TestCase):
                             self.config, self.snapshot, operating, trader, reviewer
                         )
                     )
-                self.assertEqual(raised.exception.failure["error_code"], "MODEL_COST_POLICY_DENIED")
+                self.assertEqual(
+                    raised.exception.failure["error_code"], "MODEL_COST_POLICY_DENIED"
+                )
 
     def test_operating_exposure_limits_control_deterministic_policy(self) -> None:
         trader, reviewer, _ = self.models()
@@ -622,7 +650,9 @@ class CycleRunnerTests(unittest.TestCase):
         self.assertIsNone(summary["event"])
         self.assertEqual(summary["outcome_event"]["plan_checks"], [])
 
-    def test_summary_uses_tool_selected_snapshot_and_rejects_target_switch(self) -> None:
+    def test_summary_uses_tool_selected_snapshot_and_rejects_target_switch(
+        self,
+    ) -> None:
         trader, reviewer, _ = self.models("abstain")
         state, _, _ = asyncio.run(
             run_paper_cycle_state(
@@ -710,7 +740,9 @@ class CycleRunnerTests(unittest.TestCase):
             ["market_snapshot"],
         )
 
-    def test_research_disables_thinking_and_keeps_event_grounding_metadata(self) -> None:
+    def test_research_disables_thinking_and_keeps_event_grounding_metadata(
+        self,
+    ) -> None:
         trader, reviewer, _ = self.models("abstain")
         context = GroundedLlm(
             model=self.config.models.context, calls=[], requests=[], response={}
@@ -840,16 +872,19 @@ class CycleRunnerTests(unittest.TestCase):
         else:
             self.assertFalse(supports_grounding(other))
 
-
     def test_research_provider_and_allowance_follow_the_context_model(self) -> None:
         from chrysopoeia.cycle_runner import research_allowance
         from chrysopoeia.models import resolve_research_provider
 
         self.assertEqual(resolve_research_provider(self.config.models), "google-search")
-        openrouter = replace(self.config.models, context="openrouter/openai/gpt-4.1-mini")
+        openrouter = replace(
+            self.config.models, context="openrouter/openai/gpt-4.1-mini"
+        )
         self.assertEqual(resolve_research_provider(openrouter), "openrouter-web")
         self.assertEqual(
-            resolve_research_provider(replace(self.config.models, context="ollama/llama3.1:8b")),
+            resolve_research_provider(
+                replace(self.config.models, context="ollama/llama3.1:8b")
+            ),
             "none",
         )
         self.assertEqual(

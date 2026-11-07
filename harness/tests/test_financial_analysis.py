@@ -13,7 +13,14 @@ from chrysopoeia.financial_analysis import (
 def candles(count: int = 60) -> list[Candle]:
     start = 1_760_000_000
     return [
-        Candle(start + index * 86_400, 100 + index, 102 + index, 99 + index, 101 + index, 10 + index)
+        Candle(
+            start + index * 86_400,
+            100 + index,
+            102 + index,
+            99 + index,
+            101 + index,
+            10 + index,
+        )
         for index in range(count)
     ]
 

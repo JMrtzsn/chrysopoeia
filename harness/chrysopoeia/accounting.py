@@ -292,7 +292,9 @@ def replay(directory: Path) -> Book:
             book.marks[market_id] = float(mark)
             value = record.get("mark_value")
             if value is None:
-                book.mark_values[market_id] = book.positions[market_id].shares * float(mark)
+                book.mark_values[market_id] = book.positions[market_id].shares * float(
+                    mark
+                )
             elif (
                 not isinstance(value, (int, float))
                 or isinstance(value, bool)
@@ -318,7 +320,9 @@ def replay(directory: Path) -> Book:
             book.mark_values.pop(market_id, None)
         elif kind == "position_closed":
             market_id = record.get("market_id")
-            position = book.positions.get(market_id) if isinstance(market_id, str) else None
+            position = (
+                book.positions.get(market_id) if isinstance(market_id, str) else None
+            )
             reason = record.get("reason")
             proceeds = record.get("gross_proceeds")
             fee = record.get("exit_fee")
@@ -368,11 +372,16 @@ def replay(directory: Path) -> Book:
             plan = position.exit_plan
             valid_trigger = (
                 (reason == "take_profit" and roi >= plan.take_profit_roi)
-                or (reason == "stop_loss" and plan.stop_loss_roi is not None and roi <= plan.stop_loss_roi)
+                or (
+                    reason == "stop_loss"
+                    and plan.stop_loss_roi is not None
+                    and roi <= plan.stop_loss_roi
+                )
                 or (
                     reason == "time"
                     and plan.exit_by is not None
-                    and triggered >= datetime.fromisoformat(plan.exit_by.replace("Z", "+00:00"))
+                    and triggered
+                    >= datetime.fromisoformat(plan.exit_by.replace("Z", "+00:00"))
                 )
             )
             if not valid_trigger:
@@ -394,13 +403,20 @@ def replay(directory: Path) -> Book:
         elif kind == "outbox_enqueued":
             raw_event = record.get("event")
             try:
-                if isinstance(raw_event, dict) and raw_event.get("record_type") == "turn_outcome":
+                if (
+                    isinstance(raw_event, dict)
+                    and raw_event.get("record_type") == "turn_outcome"
+                ):
                     from chrysopoeia.paper_cycle import validate_turn_outcome
 
                     validated = validate_turn_outcome(raw_event)
                     event_id = str(validated["event_id"])
                 else:
-                    event = parse_trade_plan(raw_event) if isinstance(raw_event, dict) else None
+                    event = (
+                        parse_trade_plan(raw_event)
+                        if isinstance(raw_event, dict)
+                        else None
+                    )
                     event_id = event.event_id if event else ""
             except ValueError:
                 event_id = ""
@@ -862,8 +878,16 @@ def close_position(
     _clean(triggered_at, "triggered_at")
     if reason not in {"take_profit", "stop_loss", "time"}:
         raise ValueError("unknown position close reason")
-    for value, name in ((price, "price"), (gross_proceeds, "gross_proceeds"), (exit_fee, "exit_fee")):
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
+    for value, name in (
+        (price, "price"),
+        (gross_proceeds, "gross_proceeds"),
+        (exit_fee, "exit_fee"),
+    ):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not isfinite(value)
+        ):
             raise ValueError(f"{name} must be finite")
     if not 0 < price < 1 or gross_proceeds <= 0 or not 0 <= exit_fee <= gross_proceeds:
         raise ValueError("invalid close quote")
@@ -877,7 +901,11 @@ def close_position(
     plan = position.exit_plan
     if not (
         (reason == "take_profit" and roi >= plan.take_profit_roi)
-        or (reason == "stop_loss" and plan.stop_loss_roi is not None and roi <= plan.stop_loss_roi)
+        or (
+            reason == "stop_loss"
+            and plan.stop_loss_roi is not None
+            and roi <= plan.stop_loss_roi
+        )
         or (
             reason == "time"
             and plan.exit_by is not None

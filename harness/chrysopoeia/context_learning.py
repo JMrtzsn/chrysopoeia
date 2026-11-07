@@ -23,7 +23,6 @@ from chrysopoeia.configuration import (
 )
 from chrysopoeia.context import (
     ContextIdentity,
-    context_identity_for_series,
     context_identity_for_source_url,
 )
 from chrysopoeia.context_profiles import (
@@ -61,7 +60,9 @@ class ContextResolution:
 def _summary_hash(profile: ContextProfile, summary: Mapping[str, object]) -> str:
     validated = ContextLearningSummary.model_validate(summary)
     if (validated.scope_key, validated.profile_id, validated.profile_version) != (
-        profile.scope_key, profile.profile_id, profile.profile_version
+        profile.scope_key,
+        profile.profile_id,
+        profile.profile_version,
     ):
         raise ValueError("context history does not match the active profile")
     return context_learning_summary_hash(validated)
@@ -81,10 +82,10 @@ def _reject_constant(_value: str) -> object:
 
 
 def _snapshot_context(
-    snapshot: MarketSnapshot | None, series: str
+    snapshot: MarketSnapshot | None,
 ) -> tuple[ContextIdentity | None, dict[str, str]]:
     if snapshot is None:
-        return context_identity_for_series(series), {}
+        return None, {}
     identity = context_identity_for_source_url(snapshot.source_url)
     details = {
         "market_id": snapshot.market_id,
@@ -159,7 +160,9 @@ async def _run_profile_agent(
     runner = Runner(app_name=app_name, node=agent, session_service=sessions)
     message = types.Content(
         role="user",
-        parts=[types.Part(text=json.dumps(payload, sort_keys=True, separators=(",", ":")))],
+        parts=[
+            types.Part(text=json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        ],
     )
     raw_output: object | None = None
     try:
@@ -181,12 +184,18 @@ async def _run_profile_agent(
         main_session = await sessions.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
         )
-        if role_session is not None and main_session is not None and LEDGER_KEY in role_session.state:
+        if (
+            role_session is not None
+            and main_session is not None
+            and LEDGER_KEY in role_session.state
+        ):
             await sessions.append_event(
                 main_session,
                 Event(
                     author="research",
-                    actions=EventActions(state_delta={LEDGER_KEY: role_session.state[LEDGER_KEY]}),
+                    actions=EventActions(
+                        state_delta={LEDGER_KEY: role_session.state[LEDGER_KEY]}
+                    ),
                 ),
             )
     if role_session is None:
@@ -262,8 +271,14 @@ async def _draft_and_review(
     )
     try:
         draft = await _run_profile_agent(
-            creator, "context_profile_draft", ContextProfileDraft, payload,
-            app_name=app_name, user_id=user_id, session_id=session_id, sessions=sessions,
+            creator,
+            "context_profile_draft",
+            ContextProfileDraft,
+            payload,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+            sessions=sessions,
         )
         if not isinstance(draft, ContextProfileDraft):
             raise ValueError("context profile draft is invalid")
@@ -272,8 +287,14 @@ async def _draft_and_review(
             "proposed_profile": draft.model_dump(),
         }
         review = await _run_profile_agent(
-            reviewer, "context_profile_review", ContextProfileReview, reviewer_payload,
-            app_name=app_name, user_id=user_id, session_id=session_id, sessions=sessions,
+            reviewer,
+            "context_profile_review",
+            ContextProfileReview,
+            reviewer_payload,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+            sessions=sessions,
         )
         if not isinstance(review, ContextProfileReview):
             raise ValueError("context profile review is invalid")
@@ -284,7 +305,9 @@ async def _draft_and_review(
         return None
 
 
-def _initial_summary_hash(identity: ContextIdentity, snapshot: MarketSnapshot | None) -> str:
+def _initial_summary_hash(
+    identity: ContextIdentity, snapshot: MarketSnapshot | None
+) -> str:
     values = {
         "scope_key": identity.scope_key,
         "profile_id": identity.profile_id,
@@ -298,7 +321,9 @@ def _initial_summary_hash(identity: ContextIdentity, snapshot: MarketSnapshot | 
             else None
         ),
     }
-    return sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return sha256(
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def build_history_evidence(
@@ -310,10 +335,18 @@ def build_history_evidence(
     excerpt = {
         key: summary.get(key)
         for key in (
-            "profile_version", "lookback_days", "decision_count", "plan_ready_count",
-            "abstained_count", "rejected_count", "consumer_rejected_count",
-            "filled_count", "completed_trade_count", "winning_trade_count",
-            "realized_pnl_usd", "outcome_watermark",
+            "profile_version",
+            "lookback_days",
+            "decision_count",
+            "plan_ready_count",
+            "abstained_count",
+            "rejected_count",
+            "consumer_rejected_count",
+            "filled_count",
+            "completed_trade_count",
+            "winning_trade_count",
+            "realized_pnl_usd",
+            "outcome_watermark",
         )
     }
     return external_evidence(
@@ -336,7 +369,7 @@ async def resolve_context_profile(
     user_id: str,
     session_id: str,
 ) -> ContextResolution:
-    identity, snapshot_details = _snapshot_context(snapshot, config.venue.series)
+    identity, snapshot_details = _snapshot_context(snapshot)
     if identity is None:
         return ContextResolution(None, None, None)
     catalog = ContextCatalog(local_catalog_path())
@@ -371,17 +404,28 @@ async def resolve_context_profile(
             active.scope_key, active.profile_id, active.profile_version, initial_hash
         ):
             result = await _draft_and_review(
-                config=config, context_model=context_model, reviewer_model=reviewer_model,
-                sessions=sessions, app_name=app_name, user_id=user_id, session_id=session_id,
-                identity=active.identity, snapshot_details=snapshot_details,
-                current=active, summary=None,
+                config=config,
+                context_model=context_model,
+                reviewer_model=reviewer_model,
+                sessions=sessions,
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id,
+                identity=active.identity,
+                snapshot_details=snapshot_details,
+                current=active,
+                summary=None,
             )
             if result is not None:
                 draft, review = result
                 if review.approved:
                     try:
                         customized = build_context_profile(
-                            ContextIdentity(active.scope_key, active.profile_id, active.profile_version + 1),
+                            ContextIdentity(
+                                active.scope_key,
+                                active.profile_id,
+                                active.profile_version + 1,
+                            ),
                             draft,
                             created_at=datetime.now(timezone.utc).isoformat(),
                             source_market_id=snapshot_details.get("market_id"),
@@ -397,26 +441,37 @@ async def resolve_context_profile(
                             and customized.evidence_sources == active.evidence_sources
                         ):
                             catalog.record_iteration(
-                                scope_key=active.scope_key, profile_id=active.profile_id,
-                                profile_version=active.profile_version, summary_hash=initial_hash,
-                                outcome_watermark=snapshot.captured_at, decision="unchanged",
+                                scope_key=active.scope_key,
+                                profile_id=active.profile_id,
+                                profile_version=active.profile_version,
+                                summary_hash=initial_hash,
+                                outcome_watermark=snapshot.captured_at,
+                                decision="unchanged",
                                 recorded_at=datetime.now(timezone.utc).isoformat(),
                             )
                         else:
-                            catalog.record_profile(customized, previous_version=active.profile_version)
+                            catalog.record_profile(
+                                customized, previous_version=active.profile_version
+                            )
                             active = customized
                     except (TypeError, ValueError, ProfileError):
                         catalog.record_iteration(
-                            scope_key=active.scope_key, profile_id=active.profile_id,
-                            profile_version=active.profile_version, summary_hash=initial_hash,
-                            outcome_watermark=snapshot.captured_at, decision="rejected",
+                            scope_key=active.scope_key,
+                            profile_id=active.profile_id,
+                            profile_version=active.profile_version,
+                            summary_hash=initial_hash,
+                            outcome_watermark=snapshot.captured_at,
+                            decision="rejected",
                             recorded_at=datetime.now(timezone.utc).isoformat(),
                         )
                 else:
                     catalog.record_iteration(
-                        scope_key=active.scope_key, profile_id=active.profile_id,
-                        profile_version=active.profile_version, summary_hash=initial_hash,
-                        outcome_watermark=snapshot.captured_at, decision="rejected",
+                        scope_key=active.scope_key,
+                        profile_id=active.profile_id,
+                        profile_version=active.profile_version,
+                        summary_hash=initial_hash,
+                        outcome_watermark=snapshot.captured_at,
+                        decision="rejected",
                         recorded_at=datetime.now(timezone.utc).isoformat(),
                     )
     if active is None:
@@ -428,39 +483,57 @@ async def resolve_context_profile(
         ):
             return ContextResolution(None, None, None)
         initial_hash = _initial_summary_hash(identity, snapshot)
-        if catalog.was_evaluated(identity.scope_key, identity.profile_id, 1, initial_hash):
+        if catalog.was_evaluated(
+            identity.scope_key, identity.profile_id, 1, initial_hash
+        ):
             return ContextResolution(None, None, None)
         result = await _draft_and_review(
-            config=config, context_model=context_model, reviewer_model=reviewer_model,
-            sessions=sessions, app_name=app_name, user_id=user_id, session_id=session_id,
-            identity=identity, snapshot_details=snapshot_details, current=None, summary=None,
+            config=config,
+            context_model=context_model,
+            reviewer_model=reviewer_model,
+            sessions=sessions,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+            identity=identity,
+            snapshot_details=snapshot_details,
+            current=None,
+            summary=None,
         )
         if result is None:
             return ContextResolution(None, None, None)
         draft, review = result
         if not review.approved:
             catalog.record_iteration(
-                scope_key=identity.scope_key, profile_id=identity.profile_id,
-                profile_version=1, summary_hash=initial_hash,
-                outcome_watermark=snapshot.captured_at, decision="rejected",
+                scope_key=identity.scope_key,
+                profile_id=identity.profile_id,
+                profile_version=1,
+                summary_hash=initial_hash,
+                outcome_watermark=snapshot.captured_at,
+                decision="rejected",
                 recorded_at=datetime.now(timezone.utc).isoformat(),
             )
             return ContextResolution(None, None, None)
         try:
             active = build_context_profile(
-                ContextIdentity(identity.scope_key, identity.profile_id, 1), draft,
+                ContextIdentity(identity.scope_key, identity.profile_id, 1),
+                draft,
                 created_at=datetime.now(timezone.utc).isoformat(),
                 source_market_id=snapshot.market_id,
                 source_snapshot_id=snapshot.snapshot_id,
                 source_url=snapshot.source_url,
-                approved_by="context_profile_reviewer", approval_reason=review.reason,
+                approved_by="context_profile_reviewer",
+                approval_reason=review.reason,
             )
             catalog.record_profile(active, previous_version=0)
         except (TypeError, ValueError, ProfileError):
             catalog.record_iteration(
-                scope_key=identity.scope_key, profile_id=identity.profile_id,
-                profile_version=1, summary_hash=initial_hash,
-                outcome_watermark=snapshot.captured_at, decision="rejected",
+                scope_key=identity.scope_key,
+                profile_id=identity.profile_id,
+                profile_version=1,
+                summary_hash=initial_hash,
+                outcome_watermark=snapshot.captured_at,
+                decision="rejected",
                 recorded_at=datetime.now(timezone.utc).isoformat(),
             )
             return ContextResolution(None, None, None)
@@ -474,7 +547,9 @@ async def resolve_context_profile(
                 query_context_history(active.identity, as_of, table=table)
             ).model_dump()
             if "outcome_history" in active.evidence_sources:
-                history_evidence = build_history_evidence(snapshot, active, summary, table)
+                history_evidence = build_history_evidence(
+                    snapshot, active, summary, table
+                )
         except Exception:
             summary = None
             history_evidence = None
@@ -484,7 +559,8 @@ async def resolve_context_profile(
         and config.context_learning.enabled
         and context_model is not None
         and reviewer_model is not None
-        and int(summary.get("completed_trade_count", 0)) >= MIN_FINALIZED_OUTCOMES_FOR_REVISION
+        and int(summary.get("completed_trade_count", 0))
+        >= MIN_FINALIZED_OUTCOMES_FOR_REVISION
         and isinstance(summary.get("outcome_watermark"), str)
     ):
         summary_hash = _summary_hash(active, summary)
@@ -496,23 +572,36 @@ async def resolve_context_profile(
             str(summary["outcome_watermark"]),
         ):
             result = await _draft_and_review(
-                config=config, context_model=context_model, reviewer_model=reviewer_model,
-                sessions=sessions, app_name=app_name, user_id=user_id, session_id=session_id,
-                identity=active.identity, snapshot_details=snapshot_details,
-                current=active, summary=summary,
+                config=config,
+                context_model=context_model,
+                reviewer_model=reviewer_model,
+                sessions=sessions,
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id,
+                identity=active.identity,
+                snapshot_details=snapshot_details,
+                current=active,
+                summary=summary,
             )
             if result is not None:
                 draft, review = result
                 if review.approved:
                     try:
                         revised = build_context_profile(
-                            ContextIdentity(active.scope_key, active.profile_id, active.profile_version + 1),
+                            ContextIdentity(
+                                active.scope_key,
+                                active.profile_id,
+                                active.profile_version + 1,
+                            ),
                             draft,
                             created_at=datetime.now(timezone.utc).isoformat(),
                             sample_count=int(summary["completed_trade_count"]),
                             source_watermark=str(summary["outcome_watermark"]),
                             source_summary_hash=summary_hash,
-                            source_summary=ContextLearningSummary.model_validate(summary),
+                            source_summary=ContextLearningSummary.model_validate(
+                                summary
+                            ),
                             source_market_id=snapshot.market_id,
                             source_snapshot_id=snapshot.snapshot_id,
                             source_url=snapshot.source_url,
@@ -526,26 +615,37 @@ async def resolve_context_profile(
                             and revised.evidence_sources == active.evidence_sources
                         ):
                             catalog.record_iteration(
-                                scope_key=active.scope_key, profile_id=active.profile_id,
-                                profile_version=active.profile_version, summary_hash=summary_hash,
+                                scope_key=active.scope_key,
+                                profile_id=active.profile_id,
+                                profile_version=active.profile_version,
+                                summary_hash=summary_hash,
                                 outcome_watermark=str(summary["outcome_watermark"]),
-                                decision="unchanged", recorded_at=datetime.now(timezone.utc).isoformat(),
+                                decision="unchanged",
+                                recorded_at=datetime.now(timezone.utc).isoformat(),
                             )
                         else:
-                            catalog.record_profile(revised, previous_version=active.profile_version)
+                            catalog.record_profile(
+                                revised, previous_version=active.profile_version
+                            )
                             active = revised
                     except (TypeError, ValueError, ProfileError):
                         catalog.record_iteration(
-                            scope_key=active.scope_key, profile_id=active.profile_id,
-                            profile_version=active.profile_version, summary_hash=summary_hash,
+                            scope_key=active.scope_key,
+                            profile_id=active.profile_id,
+                            profile_version=active.profile_version,
+                            summary_hash=summary_hash,
                             outcome_watermark=str(summary["outcome_watermark"]),
-                            decision="rejected", recorded_at=datetime.now(timezone.utc).isoformat(),
+                            decision="rejected",
+                            recorded_at=datetime.now(timezone.utc).isoformat(),
                         )
                 else:
                     catalog.record_iteration(
-                        scope_key=active.scope_key, profile_id=active.profile_id,
-                        profile_version=active.profile_version, summary_hash=summary_hash,
+                        scope_key=active.scope_key,
+                        profile_id=active.profile_id,
+                        profile_version=active.profile_version,
+                        summary_hash=summary_hash,
                         outcome_watermark=str(summary["outcome_watermark"]),
-                        decision="rejected", recorded_at=datetime.now(timezone.utc).isoformat(),
+                        decision="rejected",
+                        recorded_at=datetime.now(timezone.utc).isoformat(),
                     )
     return ContextResolution(active, summary, history_evidence)

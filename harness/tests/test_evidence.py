@@ -71,7 +71,11 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(
             record,
             external_evidence(
-                snapshot(), record.url, record.title, record.retrieved_at, record.excerpt
+                snapshot(),
+                record.url,
+                record.title,
+                record.retrieved_at,
+                record.excerpt,
             ),
         )
         for change in (

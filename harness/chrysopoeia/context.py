@@ -24,18 +24,9 @@ class ContextIdentity:
         return asdict(self)
 
 
-_SERIES_CONTEXTS = {
-    "btc-updown-5m": ContextIdentity(
-        "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1
-    ),
-}
-
-
-def context_identity_for_series(series: str) -> ContextIdentity:
-    try:
-        return _SERIES_CONTEXTS[series]
-    except (KeyError, TypeError):
-        raise ValueError("market series has no registered context profile") from None
+_BTC_5M_CONTEXT = ContextIdentity(
+    "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1
+)
 
 
 def context_identity_for_source_url(source_url: str) -> ContextIdentity | None:
@@ -44,8 +35,11 @@ def context_identity_for_source_url(source_url: str) -> ContextIdentity | None:
     except ValueError:
         return None
     slug = urlsplit(canonical).path.removeprefix("/event/").lower()
-    if slug.startswith("btc-updown-5m-") and slug.removeprefix("btc-updown-5m-").isdigit():
-        return _SERIES_CONTEXTS["btc-updown-5m"]
+    if (
+        slug.startswith("btc-updown-5m-")
+        and slug.removeprefix("btc-updown-5m-").isdigit()
+    ):
+        return _BTC_5M_CONTEXT
     recurring_crypto = re.fullmatch(
         r"([a-z0-9]{2,12})-updown-(\d{1,4}[mhd])-(\d+)", slug
     )

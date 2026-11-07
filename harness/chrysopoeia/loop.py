@@ -39,18 +39,8 @@ class LoopParams:
     daily_cloud_cost_budget: float = 5.0
     stop_file: Path | None = None
     stop_flag: StopFlag | None = None
-    series: str | None = None
-    series_offset_seconds: float = 0.0
-
-
-def _sleep_seconds(params: LoopParams, current: datetime, end: datetime) -> float:
-    if params.series is None:
-        return params.interval_seconds
-    base = int(current.timestamp()) // 300 * 300
-    target = base + params.series_offset_seconds
-    if target <= current.timestamp():
-        target += 300
-    return max(0.0, min(target - current.timestamp(), (end - current).total_seconds()))
+    markets: str | None = None
+    scored_only: bool = False
 
 
 def _stop_reason(
@@ -102,10 +92,6 @@ async def run_loop(
     fetch: Fetch = _fetch,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     """Run a bounded session and return its final report and iteration records."""
-    if params.series not in (None, "btc-updown-5m") or (
-        params.series is not None and params.interval_seconds != 300
-    ):
-        raise ValueError("series requires btc-updown-5m and a 300-second interval")
     requested_end = now().astimezone(timezone.utc) + timedelta(
         minutes=params.window_minutes
     )
@@ -125,6 +111,7 @@ async def run_loop(
         params.maximum_total_exposure,
         params.maximum_loss,
         params.daily_cloud_cost_budget,
+        params.scored_only,
     )
     iterations: list[dict[str, object]] = []
     cycles = len(book.admitted_turns)
@@ -143,15 +130,6 @@ async def run_loop(
             reason = "cost_budget"
         if reason is not None:
             return _report(book, reason, cycles), iterations
-
-        if params.series is not None:
-            start = int(now().timestamp()) // 300 * 300
-            target = start + params.series_offset_seconds
-            if now().timestamp() < target:
-                await sleep(
-                    min(target - now().timestamp(), (window_end - now()).total_seconds())
-                )
-                continue
 
         iteration: dict[str, object] = {"iteration": len(iterations) + 1, "errors": []}
         errors = iteration["errors"]
@@ -182,8 +160,7 @@ async def run_loop(
         try:
             candidates = discover_markets(
                 limit=20,
-                series=params.series,
-                series_offset_seconds=params.series_offset_seconds,
+                markets=params.markets,
                 now=now(),
                 fetch=fetch,
             )
@@ -205,7 +182,7 @@ async def run_loop(
         if selected is None:
             iteration["status"] = "idle"
             iterations.append(iteration)
-            await sleep(_sleep_seconds(params, now(), window_end))
+            await sleep(params.interval_seconds)
             continue
         try:
             snapshot = load_market_snapshot(
@@ -223,7 +200,7 @@ async def run_loop(
             errors.append(f"capture unavailable: {selected.market_id}")
             iteration["status"] = "failed"
             iterations.append(iteration)
-            await sleep(_sleep_seconds(params, now(), window_end))
+            await sleep(params.interval_seconds)
             continue
         try:
             result = await run_journal_turn(params.journal, config, snapshot, operating)
@@ -232,5 +209,4 @@ async def run_loop(
             iteration["status"] = "failed"
         cycles = len(replay(params.journal).admitted_turns)
         iterations.append(iteration)
-        if params.series is None or cycles < params.max_cycles:
-            await sleep(_sleep_seconds(params, now(), window_end))
+        await sleep(params.interval_seconds)

@@ -61,7 +61,9 @@ class PaperConsumerTests(unittest.TestCase):
         self.operating = OperatingConfig(bankroll=1_000)
 
     @staticmethod
-    def snapshot(snapshot_id: str, *, price: float = 0.42, **changes: object) -> MarketSnapshot:
+    def snapshot(
+        snapshot_id: str, *, price: float = 0.42, **changes: object
+    ) -> MarketSnapshot:
         values = {
             "market_id": "12345",
             "bankroll": 1_000,
@@ -94,7 +96,9 @@ class PaperConsumerTests(unittest.TestCase):
         )
         return result, load
 
-    def test_accepted_event_fills_from_fresh_quote_and_preserves_both_snapshot_identities(self) -> None:
+    def test_accepted_event_fills_from_fresh_quote_and_preserves_both_snapshot_identities(
+        self,
+    ) -> None:
         result, load = self.consume()
 
         self.assertEqual(result["status"], "filled")
@@ -109,7 +113,9 @@ class PaperConsumerTests(unittest.TestCase):
         self.assertEqual(fill_record["snapshot_id"], "plan-snapshot")
         self.assertEqual(fill_record["quote_snapshot_id"], "quote-snapshot")
 
-    def test_completed_duplicate_returns_prior_outcome_without_fetch_or_write(self) -> None:
+    def test_completed_duplicate_returns_prior_outcome_without_fetch_or_write(
+        self,
+    ) -> None:
         first, _load = self.consume()
         before = journal_path(self.journal).read_bytes()
         load = Mock()
@@ -138,13 +144,18 @@ class PaperConsumerTests(unittest.TestCase):
             (None, {"policy_references": ()}, "terms"),
         )
         for fresh, changes, reason in cases:
-            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(reason=reason),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 self.journal = Path(directory)
                 open_session(self.journal, 1_000, 100)
                 result, _load = self.consume(fresh, **changes)
                 self.assertEqual(result["status"], "rejected")
                 self.assertIn(reason, result["reason"])
-                self.assertEqual(set(replay(self.journal).finished_turns.values()), {"rejected"})
+                self.assertEqual(
+                    set(replay(self.journal).finished_turns.values()), {"rejected"}
+                )
                 self.assertFalse(replay(self.journal).positions)
                 if changes:
                     _load.assert_not_called()
@@ -157,7 +168,10 @@ class PaperConsumerTests(unittest.TestCase):
             (self.snapshot("fresh", total_exposure=95), {}, "total exposure"),
         )
         for fresh, changes, reason in cases:
-            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(reason=reason),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 self.journal = Path(directory)
                 open_session(self.journal, 1_000, 100)
                 result, _load = self.consume(fresh, **changes)
@@ -241,14 +255,24 @@ class PaperConsumerTests(unittest.TestCase):
                 paper_fee_source="paper-assumption:no-fee-v1",
             )
 
-    def test_cli_consumes_event_with_mocked_public_quote_and_reports_duplicate(self) -> None:
+    def test_cli_consumes_event_with_mocked_public_quote_and_reports_duplicate(
+        self,
+    ) -> None:
         source = self.journal / "event.json"
         source.write_text(json.dumps(asdict(self.event)))
         fresh = self.snapshot("quote-snapshot")
-        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli(), MockQuote(fresh) as load:
+        with (
+            patch("chrysopoeia.cli.datetime", wraps=datetime) as clock,
+            MockCli(),
+            MockQuote(fresh) as load,
+        ):
             clock.now.return_value = self.now
-            first = cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
-            second = cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
+            first = cli.main(
+                ("consume", "--event", str(source), "--journal", str(self.journal))
+            )
+            second = cli.main(
+                ("consume", "--event", str(source), "--journal", str(self.journal))
+            )
 
         self.assertEqual((first, second), (0, 0))
         self.assertEqual(load.call_count, 1)
@@ -256,18 +280,31 @@ class PaperConsumerTests(unittest.TestCase):
     def test_cli_rejects_unsafe_event_input_and_sanitizes_quote_failure(self) -> None:
         source = self.journal / "event.json"
         source.write_text('{"schema_version":1,"schema_version":1}')
-        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli() as output:
+        with (
+            patch("chrysopoeia.cli.datetime", wraps=datetime) as clock,
+            MockCli() as output,
+        ):
             clock.now.return_value = self.now
             with self.assertRaisesRegex(SystemExit, "2"):
-                cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
+                cli.main(
+                    ("consume", "--event", str(source), "--journal", str(self.journal))
+                )
         self.assertEqual(output.stderr.getvalue(), "consume failed: invalid event\n")
 
         source.write_text(json.dumps(asdict(self.event)))
-        with patch("chrysopoeia.cli.datetime", wraps=datetime) as clock, MockCli() as output, MockQuote(side_effect=RuntimeError("private token")):
+        with (
+            patch("chrysopoeia.cli.datetime", wraps=datetime) as clock,
+            MockCli() as output,
+            MockQuote(side_effect=RuntimeError("private token")),
+        ):
             clock.now.return_value = self.now
             with self.assertRaisesRegex(SystemExit, "2"):
-                cli.main(("consume", "--event", str(source), "--journal", str(self.journal)))
-        self.assertEqual(output.stderr.getvalue(), "consume failed: market data unavailable\n")
+                cli.main(
+                    ("consume", "--event", str(source), "--journal", str(self.journal))
+                )
+        self.assertEqual(
+            output.stderr.getvalue(), "consume failed: market data unavailable\n"
+        )
         self.assertNotIn("private token", output.stderr.getvalue())
 
 

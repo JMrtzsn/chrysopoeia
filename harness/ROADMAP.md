@@ -89,6 +89,17 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Coordinated operator approval (2026-11-07): retire BTC 5m automation and make
+CS2/Dota 2 match winners the automated venue, scored-only. `[venue].markets =
+"esports-match-winner"` replaces `[venue].series`; discovery keeps only
+upcoming match-winner markets (start at least 10 minutes away); deterministic
+policy records approved plans as `policy_rejected`/`scored_only` with no plan or
+fill; `run` refuses non-scored-only profiles. The BTC series, offset,
+window-baseline, and BTC-only prompt code are removed; BTC context routing stays
+for archived outcomes. This supersedes the BTC-only restrictions recorded below.
+Offline implementation is complete; a bounded live `run` check and a Platform
+image rebuild remain, each separately approved.
+
 Operator direction (2026-10-28): BTC 5m runs are stopped as a default. The
 accumulation campaign was halted 2026-10-26 and no further BTC executions run
 unless explicitly approved for verification. The venue direction is match and

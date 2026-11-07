@@ -30,78 +30,71 @@ def record(identifier: int = 1, **changes: object) -> dict[str, object]:
     return value
 
 
+def esports(
+    identifier: int, slug: str, question: str, start: datetime
+) -> dict[str, object]:
+    return record(
+        identifier,
+        eventSlug=slug,
+        question=question,
+        outcomes=["Team A", "Team B"],
+        gameStartTime=start.strftime("%Y-%m-%d %H:%M:%S+00"),
+    )
+
+
 class MarketDiscoveryTests(unittest.TestCase):
-    def test_series_selects_only_the_current_updown_window_with_one_bounded_read(
+    def test_esports_binding_keeps_only_upcoming_cs2_and_dota2_match_winners(
         self,
     ) -> None:
-        current = NOW + timedelta(seconds=75)
-        slug = f"btc-updown-5m-{int(NOW.timestamp())}"
-        calls = []
+        later = NOW + timedelta(hours=2)
         page = [
-            record(2),
-            record(3, eventSlug=slug),
-            record(
+            esports(
                 1,
-                eventSlug=slug,
-                outcomes=["Up", "Down"],
-                endDate=(NOW + timedelta(seconds=300)).isoformat(),
+                "cs2-nemi1-vit-2026-09-13",
+                "Counter-Strike: Nemiga vs Vitality (BO3)",
+                later,
             ),
+            esports(
+                2,
+                "dota2-iac-pckcp-2026-09-13",
+                "Dota 2: InterActive vs PuckChamp (BO3)",
+                later,
+            ),
+            esports(
+                3,
+                "dota2-iac-pckcp-2026-09-13-game2",
+                "Dota 2: InterActive vs PuckChamp - Game 2 Winner",
+                later,
+            ),
+            esports(
+                4,
+                "lol-ig1-gen-2026-09-13",
+                "LoL: Invictus Gaming vs Gen.G (BO5)",
+                later,
+            ),
+            esports(
+                5,
+                "cs2-nxs1-forzer-2026-09-13",
+                "Counter-Strike: Nexus vs FORZE",
+                NOW + timedelta(minutes=5),
+            ),
+            record(
+                6,
+                eventSlug="cs2-abc-def-2026-09-13",
+                question="Counter-Strike: Abc vs Def",
+            ),
+            record(7),
         ]
 
-        def fetch(url: str, timeout: float, max_bytes: int) -> bytes:
-            calls.append((url, timeout, max_bytes))
-            return json.dumps(page).encode()
-
-        candidates = discover_markets(series="btc-updown-5m", now=current, fetch=fetch)
-
-        self.assertEqual([item.market_id for item in candidates], ["1"])
-        self.assertEqual(parse_qs(urlparse(calls[0][0]).query), {"slug": [slug]})
-        self.assertEqual([(t, size) for _, t, size in calls], [(5.0, 256 * 1024)])
-        with self.assertRaises(PolymarketError):
-            discover_markets(series="unknown", now=current, fetch=fetch)
-        self.assertEqual(len(calls), 1)
-
-    def test_series_offset_targets_the_in_progress_window_and_skips_closing_windows(
-        self,
-    ) -> None:
-        slug = f"btc-updown-5m-{int(NOW.timestamp())}"
-        end = (NOW + timedelta(seconds=300)).isoformat()
-        page = [record(1, eventSlug=slug, outcomes=["Up", "Down"], endDate=end)]
-
-        def fetch(*_: object) -> bytes:
-            return json.dumps(page).encode()
-
         candidates = discover_markets(
-            series="btc-updown-5m",
-            series_offset_seconds=120,
-            now=NOW + timedelta(seconds=135),
-            fetch=fetch,
+            markets="esports-match-winner",
+            now=NOW,
+            fetch=lambda *_: json.dumps(page).encode(),
         )
-        self.assertEqual([item.market_id for item in candidates], ["1"])
 
-        early = discover_markets(
-            series="btc-updown-5m",
-            series_offset_seconds=120,
-            now=NOW + timedelta(seconds=75),
-            fetch=fetch,
-        )
-        self.assertEqual(early, ())
-
-        closing = discover_markets(
-            series="btc-updown-5m",
-            series_offset_seconds=120,
-            now=NOW + timedelta(seconds=285),
-            fetch=fetch,
-        )
-        self.assertEqual(closing, ())
-
+        self.assertEqual([item.market_id for item in candidates], ["1", "2"])
         with self.assertRaises(PolymarketError):
-            discover_markets(
-                series="btc-updown-5m",
-                series_offset_seconds=300,
-                now=NOW,
-                fetch=fetch,
-            )
+            discover_markets(markets="btc-updown-5m", now=NOW, fetch=lambda *_: b"[]")
 
     def test_paginates_ordered_near_term_gamma_markets_and_preserves_volume_order(
         self,
@@ -218,7 +211,9 @@ class MarketDiscoveryTests(unittest.TestCase):
             record(16, id="\u0661"),
             "not an object",
         ]
-        body = json.dumps([record(1), record(17, outcomes=["Spirit", "FURIA"]), *invalid]).encode()
+        body = json.dumps(
+            [record(1), record(17, outcomes=["Spirit", "FURIA"]), *invalid]
+        ).encode()
 
         candidates = discover_markets(limit=20, now=NOW, fetch=lambda *_: body)
 

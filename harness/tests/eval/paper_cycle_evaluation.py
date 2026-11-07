@@ -350,8 +350,12 @@ def grade(
 
 async def _run_live() -> dict[str, object]:
     models = (
-        resolve_model(DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.trader),
-        resolve_model(DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.reviewer),
+        resolve_model(
+            DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.trader
+        ),
+        resolve_model(
+            DEFAULT_HARNESS_CONFIG.models, DEFAULT_HARNESS_CONFIG.models.reviewer
+        ),
     )
     return grade(*await run_cycle(*models, owned_models=models))
 
@@ -366,12 +370,8 @@ def main() -> int:
         return 0
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
         raise SystemExit("paper-cycle evaluation requires Vertex ADC, not an API key")
-    if (
-        not os.environ.get("GOOGLE_CLOUD_PROJECT")
-    ):
-        raise SystemExit(
-            "paper-cycle evaluation requires a Vertex ADC project"
-        )
+    if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        raise SystemExit("paper-cycle evaluation requires a Vertex ADC project")
     summary = run_live()
     print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return 0 if summary["pass"] else 1

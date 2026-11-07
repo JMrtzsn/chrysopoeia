@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
+import re
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
@@ -25,7 +26,11 @@ MAX_METADATA_FUTURE_SKEW = timedelta(seconds=5)
 MAX_BOOK_LEVELS = 50
 DISCOVERY_HORIZON = timedelta(days=30)
 DEFAULT_TIMEOUT = 5.0
-MIN_SERIES_SECONDS_REMAINING = 30
+# Pre-match forecasts only: skip matches starting within this lead.
+MIN_MATCH_START_LEAD = timedelta(minutes=10)
+# Match-winner markets only; map/game child markets carry a slug suffix.
+ESPORTS_MATCH_SLUG = re.compile(r"(cs2|dota2)-[a-z0-9]+-[a-z0-9]+-\d{4}-\d{2}-\d{2}")
+ESPORTS_QUESTION_PREFIXES = ("Counter-Strike: ", "Dota 2: ")
 DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024
 Fetch = Callable[[str, float, int], bytes]
 # First outcome is the "YES side" the harness buys; Up/Down markets map Up to it.
@@ -326,50 +331,43 @@ def _candidate(data: object, current: datetime) -> tuple[MarketCandidate, dateti
         return None
 
 
+def _esports_match_starts_after(item: object, candidate: MarketCandidate, earliest: datetime) -> bool:
+    slug = candidate.source_url.rsplit("/", 1)[-1]
+    if ESPORTS_MATCH_SLUG.fullmatch(slug) is None or not candidate.question.startswith(
+        ESPORTS_QUESTION_PREFIXES
+    ):
+        return False
+    start = item.get("gameStartTime") if isinstance(item, dict) else None
+    if not isinstance(start, str) or len(start) > 64:
+        return False
+    # Gamma reports e.g. "2026-11-07 22:00:00+00"; Python 3.10 needs "+00:00".
+    text = start.replace(" ", "T", 1)
+    if re.search(r"[+-]\d{2}$", text):
+        text += ":00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed >= earliest
+
+
 def discover_markets(
     *,
     limit: int = 10,
-    series: str | None = None,
-    series_offset_seconds: float = 0,
+    markets: str | None = None,
     now: datetime | None = None,
     fetch: Fetch = _fetch,
 ) -> tuple[MarketCandidate, ...]:
-    """Discover eligible markets, or only the current supported series window."""
+    """Discover eligible markets, optionally only upcoming esports match winners."""
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
         raise PolymarketError("Polymarket discovery limit must be between 1 and 20")
-    if series not in (None, "btc-updown-5m"):
-        raise PolymarketError("Polymarket discovery series is unsupported")
-    if (
-        isinstance(series_offset_seconds, bool)
-        or not isinstance(series_offset_seconds, (int, float))
-        or not 0 <= series_offset_seconds < 300
-    ):
-        raise PolymarketError("Polymarket discovery series offset is unsupported")
+    if markets not in (None, "esports-match-winner"):
+        raise PolymarketError("Polymarket discovery markets are unsupported")
     current = now or datetime.now(timezone.utc)
     if not isinstance(current, datetime) or current.tzinfo is None:
         raise PolymarketError("Polymarket adapter current time must include a UTC offset")
     current = current.astimezone(timezone.utc)
-    if series is not None:
-        start = int(current.timestamp()) // 300 * 300
-        slug = f"{series}-{start}"
-        page = _fetch_json_list(
-            f"https://{API_HOST}/markets?{urlencode({'slug': slug})}",
-            DEFAULT_TIMEOUT,
-            DEFAULT_MAX_RESPONSE_BYTES,
-            fetch,
-        )
-        for item in page[:25]:
-            parsed = _candidate(item, current)
-            if parsed is not None:
-                candidate, end = parsed
-                if (
-                    candidate.source_url == f"https://polymarket.com/event/{slug}"
-                    and end.timestamp() == start + 300
-                    and current.timestamp() >= start + series_offset_seconds
-                    and end.timestamp() - current.timestamp() >= MIN_SERIES_SECONDS_REMAINING
-                ):
-                    return (candidate,)
-        return ()
+    earliest_start = current + MIN_MATCH_START_LEAD
     found: dict[str, tuple[MarketCandidate, datetime]] = {}
     for offset in (0, 25, 50):
         query = urlencode(
@@ -393,6 +391,10 @@ def discover_markets(
             if parsed is None:
                 continue
             candidate, end = parsed
+            if markets is not None and not _esports_match_starts_after(
+                item, candidate, earliest_start
+            ):
+                continue
             previous = found.get(candidate.market_id)
             if previous is not None and previous[0] != candidate:
                 raise PolymarketError(

@@ -240,7 +240,9 @@ async def run_journal_turn(
             outcome = "filled"
         else:
             if result.get("fill") is not None:
-                raise ValueError("producer result contains a fill without a trade plan event")
+                raise ValueError(
+                    "producer result contains a fill without a trade plan event"
+                )
             status = result.get("status")
             outcome = status if status in {"abstained", "rejected"} else "failed"
         finish_turn(journal, turn_id, outcome, model_cost_usd=str(cost))
@@ -301,7 +303,11 @@ def mark_positions(
             fetch=fetch,
             paper_fee_rate=paper_fee_rate,
             paper_fee_source=paper_fee_source,
-            **({"include_no_book": True} if position.trade_plan and position.trade_plan.outcome == "NO" else {}),
+            **(
+                {"include_no_book": True}
+                if position.trade_plan and position.trade_plan.outcome == "NO"
+                else {}
+            ),
         )
         if position.trade_plan:
             fresh = outcome_snapshot(fresh, position.trade_plan.outcome)
@@ -354,7 +360,11 @@ def evaluate_exits(
             fetch=fetch,
             paper_fee_rate=paper_fee_rate,
             paper_fee_source=paper_fee_source,
-            **({"include_no_book": True} if position.trade_plan and position.trade_plan.outcome == "NO" else {}),
+            **(
+                {"include_no_book": True}
+                if position.trade_plan and position.trade_plan.outcome == "NO"
+                else {}
+            ),
         )
         if position.trade_plan:
             fresh = outcome_snapshot(fresh, position.trade_plan.outcome)

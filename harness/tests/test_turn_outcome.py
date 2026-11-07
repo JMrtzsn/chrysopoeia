@@ -42,10 +42,16 @@ class TurnOutcomeTests(unittest.TestCase):
             trade_plan_event_id=None,
             model_cost_usd="0.25",
             evidence=[],
-            research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
+            research={
+                "status": "unavailable",
+                "reason": "no grounding",
+                "query_count": 0,
+            },
         )
 
-    def test_context_attributed_outcome_with_reservation_uses_the_v4_contract(self) -> None:
+    def test_context_attributed_outcome_with_reservation_uses_the_v4_contract(
+        self,
+    ) -> None:
         outcome = build_turn_outcome(
             **self._context_outcome_arguments(),
             reserved_model_cost_usd="0.75",
@@ -73,7 +79,9 @@ class TurnOutcomeTests(unittest.TestCase):
         )
         self.assertEqual(v4["event_id"], outcome["event_id"])
         self.assertEqual(v4["turn_id"], outcome["turn_id"])
-        self.assertEqual((v4["model_cost_usd"], v4["reserved_model_cost_usd"]), (0.25, 0.1))
+        self.assertEqual(
+            (v4["model_cost_usd"], v4["reserved_model_cost_usd"]), (0.25, 0.1)
+        )
 
     def test_reservation_requires_context_and_is_strictly_validated(self) -> None:
         for invalid in ("bad", "-0.01", "NaN", "Infinity"):
@@ -216,16 +224,24 @@ class TurnOutcomeTests(unittest.TestCase):
                     created_at="2026-10-09T00:00:00+00:00",
                     trade_plan_event_id=trade_event_id,
                     model_cost_usd="0.25",
-                    evidence=[{
-                        "evidence_id": "evidence",
-                        "url": "https://example.com/report",
-                        "title": "Report",
-                        "source_kind": "external",
-                        "excerpt": "Supporting text",
-                    }],
+                    evidence=[
+                        {
+                            "evidence_id": "evidence",
+                            "url": "https://example.com/report",
+                            "title": "Report",
+                            "source_kind": "external",
+                            "excerpt": "Supporting text",
+                        }
+                    ],
                     research={"status": "ok", "reason": None, "query_count": 1},
                     plan_checks=(
-                        [{"passed": False, "reasons": ["minimum edge not met"], "plan": selected}]
+                        [
+                            {
+                                "passed": False,
+                                "reasons": ["minimum edge not met"],
+                                "plan": selected,
+                            }
+                        ]
                         if status == "plan_check_rejected"
                         else []
                     ),
@@ -277,7 +293,11 @@ class TurnOutcomeTests(unittest.TestCase):
                 trade_plan_event_id=cycle_turn_id("snapshot-1", "123"),
                 model_cost_usd="0.25",
                 evidence=[],
-                research={"status": "unavailable", "reason": "no grounding", "query_count": 0},
+                research={
+                    "status": "unavailable",
+                    "reason": "no grounding",
+                    "query_count": 0,
+                },
             )
 
     def test_journal_records_outcome_without_sink_and_replay_is_idempotent(

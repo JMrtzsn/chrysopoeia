@@ -62,7 +62,14 @@ class EventPublishingTests(unittest.TestCase):
         self.assertEqual(set(envelope), {"message", "subscription", "deliveryAttempt"})
         self.assertEqual(
             set(envelope["message"]),
-            {"data", "messageId", "message_id", "publishTime", "publish_time", "attributes"},
+            {
+                "data",
+                "messageId",
+                "message_id",
+                "publishTime",
+                "publish_time",
+                "attributes",
+            },
         )
         self.assertEqual(
             envelope["message"]["attributes"],
@@ -103,7 +110,9 @@ class EventPublishingTests(unittest.TestCase):
         )
         client.publish.return_value.result.assert_called_once_with(timeout=30)
 
-    def test_drain_publishes_oldest_first_and_stops_without_ack_on_failure(self) -> None:
+    def test_drain_publishes_oldest_first_and_stops_without_ack_on_failure(
+        self,
+    ) -> None:
         directory = Path(tempfile.mkdtemp())
         values = [event("s1", "m1"), event("s2", "m2"), event("s3", "m3")]
         for value in values:

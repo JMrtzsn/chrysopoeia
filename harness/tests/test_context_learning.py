@@ -27,7 +27,12 @@ ROOT = Path(__file__).parents[1]
 
 def snapshot(source_url: str) -> MarketSnapshot:
     return MarketSnapshot(
-        "snapshot-1", "market-1", 0.4, 1000, 0, 0,
+        "snapshot-1",
+        "market-1",
+        0.4,
+        1000,
+        0,
+        0,
         question="Will Arsenal beat Chelsea?",
         resolution_rules="The match winner resolves YES.",
         end_time="2027-01-01T00:00:00+00:00",
@@ -49,7 +54,12 @@ def draft(
         learning_summary=learning_summary,
         instructions=instructions,
         tool_ids=["analyze_polymarket_history"],
-        evidence_sources=["market_snapshot", "public_web", "series_history", "outcome_history"],
+        evidence_sources=[
+            "market_snapshot",
+            "public_web",
+            "series_history",
+            "outcome_history",
+        ],
         rationale="Use same-context completed outcomes as descriptive evidence.",
     )
 
@@ -86,27 +96,44 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
                 cost_policy=self.config.cost_policy,
             )
             config = agent.generate_content_config
-            self.assertEqual(config.thinking_config.thinking_budget, CONTEXT_LEARNING_THINKING_BUDGET)
+            self.assertEqual(
+                config.thinking_config.thinking_budget, CONTEXT_LEARNING_THINKING_BUDGET
+            )
             ceiling = config.max_output_tokens
             policy_ceiling = self.config.cost.maximum_output_tokens_per_call
             assert isinstance(ceiling, int) and isinstance(policy_ceiling, int)
             self.assertEqual(ceiling, CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING)
             self.assertLessEqual(ceiling, policy_ceiling)
 
-    async def test_unknown_market_gets_local_profile_only_after_agent_approval(self) -> None:
+    async def test_unknown_market_gets_local_profile_only_after_agent_approval(
+        self,
+    ) -> None:
         config = replace(
             self.config,
             context_learning=ContextLearningConfig(enabled=True),
         )
-        approved = ContextProfileReview(approved=True, reason="The tools and guidance are bounded.")
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            "os.environ", {"CHRYSOPOEIA_CONTEXT_CATALOG": str(Path(directory) / "profiles.jsonl")}
-        ), patch(
-            "chrysopoeia.context_learning._draft_and_review",
-            new=AsyncMock(return_value=(draft(), approved)),
-        ) as agents:
+        approved = ContextProfileReview(
+            approved=True, reason="The tools and guidance are bounded."
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {
+                    "CHRYSOPOEIA_CONTEXT_CATALOG": str(
+                        Path(directory) / "profiles.jsonl"
+                    )
+                },
+            ),
+            patch(
+                "chrysopoeia.context_learning._draft_and_review",
+                new=AsyncMock(return_value=(draft(), approved)),
+            ) as agents,
+        ):
             result = await resolve_context_profile(
-                config, snapshot("https://polymarket.com/event/arsenal-vs-chelsea"), **self.args
+                config,
+                snapshot("https://polymarket.com/event/arsenal-vs-chelsea"),
+                **self.args,
             )
             saved = ContextCatalog(local_catalog_path()).latest(
                 "polymarket:event:arsenal-vs-chelsea", "polymarket.event"
@@ -119,7 +146,9 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved.profile_version, 2)
         agents.assert_awaited_once()
 
-    async def test_real_curator_and_reviewer_agents_write_profile_with_cost_records(self) -> None:
+    async def test_real_curator_and_reviewer_agents_write_profile_with_cost_records(
+        self,
+    ) -> None:
         config = replace(
             self.config,
             context_learning=ContextLearningConfig(enabled=True),
@@ -139,7 +168,10 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
         reviewer = FakeLlm(
             model=config.models.reviewer,
             calls=calls,
-            response={"approved": True, "reason": "The profile is bounded and evidence-focused."},
+            response={
+                "approved": True,
+                "reason": "The profile is bounded and evidence-focused.",
+            },
         )
         sessions = InMemorySessionService()
         await sessions.create_session(
@@ -152,8 +184,16 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
                 "model_cost_policy": config.cost_policy,
             },
         )
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            "os.environ", {"CHRYSOPOEIA_CONTEXT_CATALOG": str(Path(directory) / "profiles.jsonl")}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {
+                    "CHRYSOPOEIA_CONTEXT_CATALOG": str(
+                        Path(directory) / "profiles.jsonl"
+                    )
+                },
+            ),
         ):
             result = await resolve_context_profile(
                 config,
@@ -199,15 +239,25 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
             "realized_pnl_usd": 2.5,
             "outcome_watermark": "2026-10-21T23:00:00+00:00",
         }
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            "os.environ",
-            {
-                "CHRYSOPOEIA_CONTEXT_CATALOG": str(Path(directory) / "profiles.jsonl"),
-                "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
-            },
-        ), patch(
-            "chrysopoeia.context_learning.query_context_history", return_value=history
-        ), patch("chrysopoeia.context_learning._draft_and_review", new=AsyncMock()) as agents:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {
+                    "CHRYSOPOEIA_CONTEXT_CATALOG": str(
+                        Path(directory) / "profiles.jsonl"
+                    ),
+                    "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
+                },
+            ),
+            patch(
+                "chrysopoeia.context_learning.query_context_history",
+                return_value=history,
+            ),
+            patch(
+                "chrysopoeia.context_learning._draft_and_review", new=AsyncMock()
+            ) as agents,
+        ):
             result = await resolve_context_profile(
                 config,
                 snapshot("https://polymarket.com/event/btc-updown-5m-1792600000"),
@@ -217,7 +267,9 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.profile.profile_version, 1)
         agents.assert_not_awaited()
 
-    async def test_approved_revision_activates_only_the_next_profile_version(self) -> None:
+    async def test_approved_revision_activates_only_the_next_profile_version(
+        self,
+    ) -> None:
         config = replace(
             self.config,
             context_learning=ContextLearningConfig(enabled=True),
@@ -241,19 +293,36 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
             "realized_pnl_usd": 2.5,
             "outcome_watermark": "2026-10-21T23:00:00+00:00",
         }
-        approved = ContextProfileReview(approved=True, reason="The revision is evidence-bounded.")
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            "os.environ",
-            {
-                "CHRYSOPOEIA_CONTEXT_CATALOG": str(Path(directory) / "profiles.jsonl"),
-                "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
-            },
-        ), patch(
-            "chrysopoeia.context_learning.query_context_history", return_value=history
-        ), patch(
-            "chrysopoeia.context_learning._draft_and_review",
-            new=AsyncMock(return_value=(draft("Emphasize window-specific momentum and cite its history."), approved)),
-        ) as agents:
+        approved = ContextProfileReview(
+            approved=True, reason="The revision is evidence-bounded."
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {
+                    "CHRYSOPOEIA_CONTEXT_CATALOG": str(
+                        Path(directory) / "profiles.jsonl"
+                    ),
+                    "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
+                },
+            ),
+            patch(
+                "chrysopoeia.context_learning.query_context_history",
+                return_value=history,
+            ),
+            patch(
+                "chrysopoeia.context_learning._draft_and_review",
+                new=AsyncMock(
+                    return_value=(
+                        draft(
+                            "Emphasize window-specific momentum and cite its history."
+                        ),
+                        approved,
+                    )
+                ),
+            ) as agents,
+        ):
             result = await resolve_context_profile(
                 config,
                 snapshot("https://polymarket.com/event/btc-updown-5m-1792600000"),
@@ -271,7 +340,9 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.history_evidence)
         agents.assert_awaited_once()
 
-    async def test_rejected_revision_is_not_retried_for_the_same_outcome_watermark(self) -> None:
+    async def test_rejected_revision_is_not_retried_for_the_same_outcome_watermark(
+        self,
+    ) -> None:
         config = replace(
             self.config,
             context_learning=ContextLearningConfig(enabled=True),
@@ -295,19 +366,29 @@ class ContextLearningTests(unittest.IsolatedAsyncioTestCase):
             "realized_pnl_usd": 2.5,
             "outcome_watermark": "2026-10-21T23:00:00+00:00",
         }
-        rejected = ContextProfileReview(approved=False, reason="The evidence is not strong enough.")
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            "os.environ",
-            {
-                "CHRYSOPOEIA_CONTEXT_CATALOG": str(Path(directory) / "profiles.jsonl"),
-                "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
-            },
-        ), patch(
-            "chrysopoeia.context_learning.query_context_history", return_value=history
-        ), patch(
-            "chrysopoeia.context_learning._draft_and_review",
-            new=AsyncMock(return_value=(draft(), rejected)),
-        ) as agents:
+        rejected = ContextProfileReview(
+            approved=False, reason="The evidence is not strong enough."
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {
+                    "CHRYSOPOEIA_CONTEXT_CATALOG": str(
+                        Path(directory) / "profiles.jsonl"
+                    ),
+                    "CHRYSOPOEIA_HISTORY_TABLE": "project.dataset.raw_events",
+                },
+            ),
+            patch(
+                "chrysopoeia.context_learning.query_context_history",
+                return_value=history,
+            ),
+            patch(
+                "chrysopoeia.context_learning._draft_and_review",
+                new=AsyncMock(return_value=(draft(), rejected)),
+            ) as agents,
+        ):
             first = await resolve_context_profile(
                 config,
                 snapshot("https://polymarket.com/event/btc-updown-5m-1792600000"),

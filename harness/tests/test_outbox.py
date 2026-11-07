@@ -78,8 +78,13 @@ class OutboxTests(unittest.TestCase):
         with self.assertRaises(JournalError):
             acknowledge_event(self.directory, "missing")
 
-        records = [json.loads(line) for line in journal_path(self.directory).read_text().splitlines()]
-        self.assertEqual([record["record_type"] for record in records], ["outbox_enqueued"])
+        records = [
+            json.loads(line)
+            for line in journal_path(self.directory).read_text().splitlines()
+        ]
+        self.assertEqual(
+            [record["record_type"] for record in records], ["outbox_enqueued"]
+        )
 
     def invoke(self, *arguments: str) -> tuple[int, str, str]:
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -94,9 +99,13 @@ class OutboxTests(unittest.TestCase):
         value = event()
         enqueue_event(self.directory, value)
 
-        code, output, error = self.invoke("outbox-pending", "--journal", str(self.directory))
+        code, output, error = self.invoke(
+            "outbox-pending", "--journal", str(self.directory)
+        )
         self.assertEqual((code, error), (0, ""))
-        self.assertEqual(output, json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+        self.assertEqual(
+            output, json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+        )
 
         code, output, error = self.invoke(
             "outbox-ack", "--journal", str(self.directory), str(value["event_id"])
@@ -104,7 +113,9 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual((code, output, error), (0, "", ""))
         self.assertEqual(pending_events(self.directory), [])
 
-    def test_enabled_cycle_without_journal_fails_before_configuration_or_model_work(self) -> None:
+    def test_enabled_cycle_without_journal_fails_before_configuration_or_model_work(
+        self,
+    ) -> None:
         with patch.dict(
             os.environ,
             {"CHRYSOPOEIA_EVENT_SINK": "pubsub:projects/p/topics/t"},

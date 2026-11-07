@@ -28,7 +28,12 @@ def validate_sink(value: str) -> str:
     """Return a valid sink or raise without exposing its value."""
     if value.startswith("pubsub:projects/"):
         parts = value.removeprefix("pubsub:").split("/")
-        if len(parts) == 4 and parts[0] == "projects" and parts[2] == "topics" and all(parts):
+        if (
+            len(parts) == 4
+            and parts[0] == "projects"
+            and parts[2] == "topics"
+            and all(parts)
+        ):
             return value
     parsed = urlparse(value)
     if (

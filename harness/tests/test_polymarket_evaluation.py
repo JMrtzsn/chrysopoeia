@@ -12,7 +12,9 @@ def at(seconds: int) -> datetime:
     return datetime.fromtimestamp(seconds, timezone.utc)
 
 
-def turn(market_id: str, seconds: int, probability: float, action: str, slug: str) -> dict:
+def turn(
+    market_id: str, seconds: int, probability: float, action: str, slug: str
+) -> dict:
     return {
         "market_id": market_id,
         "created_at": at(seconds).isoformat(),
@@ -35,7 +37,9 @@ def load_market(market_id: str) -> ResolvedMarket:
 
 
 def load_prices(token_id: str, start: datetime, end: datetime):
-    return (HistoricalPrice(int(end.timestamp()) - 10, {"11": 0.6, "21": 0.4}[token_id]),)
+    return (
+        HistoricalPrice(int(end.timestamp()) - 10, {"11": 0.6, "21": 0.4}[token_id]),
+    )
 
 
 class PolymarketEvaluationTests(unittest.TestCase):
@@ -45,7 +49,10 @@ class PolymarketEvaluationTests(unittest.TestCase):
             return_value=SimpleNamespace(turn_outcomes=turns),
         ):
             return evaluate_journal(
-                Path("unused"), load_market=load_market, load_prices=load_prices, **kwargs
+                Path("unused"),
+                load_market=load_market,
+                load_prices=load_prices,
+                **kwargs,
             )
 
     def test_brier_score_rewards_probabilities_close_to_outcomes(self) -> None:
@@ -93,7 +100,9 @@ class PolymarketEvaluationTests(unittest.TestCase):
         self.assertEqual(late["late_forecasts_skipped"], 1)
 
     def test_abstention_placeholder_probability_is_not_scored(self) -> None:
-        result = self.evaluate({"a": turn("1", 1100, 0.0, "abstain", "btc-updown-5m-1000")})
+        result = self.evaluate(
+            {"a": turn("1", 1100, 0.0, "abstain", "btc-updown-5m-1000")}
+        )
         self.assertEqual(result["scored_markets"], 0)
         self.assertEqual(result["abstentions_without_estimate"], 1)
 

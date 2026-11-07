@@ -44,7 +44,11 @@ class ContextProfileTests(unittest.TestCase):
             learning_summary="Twenty completed trades provide directional but uncertain context.",
             instructions="Compare current BTC window evidence with its recent history.",
             tool_ids=["analyze_crypto_history"],
-            evidence_sources=["market_snapshot", "financial_analysis", "outcome_history"],
+            evidence_sources=[
+                "market_snapshot",
+                "financial_analysis",
+                "outcome_history",
+            ],
             rationale="Recent completed trades suggest focusing on window movement.",
         )
         summary = ContextLearningSummary(
@@ -129,4 +133,6 @@ class ContextProfileTests(unittest.TestCase):
             catalog = ContextCatalog(path)
 
             with self.assertRaises(ProfileError):
-                catalog.latest("polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown")
+                catalog.latest(
+                    "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown"
+                )

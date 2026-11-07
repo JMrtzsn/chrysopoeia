@@ -163,6 +163,11 @@ runtime resources were replaced or deleted. Recovery steps are in
    (see `docs/deployment.md`); the trigger queue is left paused. Cloud Run
    reserves `/healthz`, so the Observer health route moved to `/health` and was
    redeployed alone.
+7. **Esports scored-only platform profile** (coordinated operator approval,
+   2026-11-07): the bundled Harness `platform.toml` now forecasts CS2/Dota 2
+   match winners scored-only (no plans, so the Consumer stays idle) with
+   research on and a $3 two-cycle ceiling. Requires a separately approved
+   Harness image rebuild, pin, and no-model `validate`; no Platform code change.
 
 ## Deferred
 

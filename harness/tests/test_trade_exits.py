@@ -19,9 +19,7 @@ from chrysopoeia.trading import BookLevel, ExitPlan, MarketSnapshot
 NOW = datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
 
 
-def market_snapshot(
-    bids: tuple[BookLevel, ...], now: datetime = NOW
-) -> MarketSnapshot:
+def market_snapshot(bids: tuple[BookLevel, ...], now: datetime = NOW) -> MarketSnapshot:
     return MarketSnapshot(
         "exit-snapshot",
         "market-1",
@@ -104,7 +102,9 @@ class ExitEvaluationTests(unittest.TestCase):
         self.assertEqual(report["win_rate"], 1)
         before = len(journal_path(self.journal).read_text().splitlines())
         self.evaluate((BookLevel(0.5, 25),))
-        self.assertEqual(len(journal_path(self.journal).read_text().splitlines()), before)
+        self.assertEqual(
+            len(journal_path(self.journal).read_text().splitlines()), before
+        )
 
     def test_stop_loss_closes_the_full_position_after_a_gap(self) -> None:
         result = self.evaluate((BookLevel(0.28, 25),))
@@ -114,17 +114,18 @@ class ExitEvaluationTests(unittest.TestCase):
         self.assertNotIn("market-1", replay(self.journal).positions)
 
     def test_time_exit_closes_at_the_current_quote_after_deadline(self) -> None:
-        result = self.evaluate(
-            (BookLevel(0.4, 25),), NOW + timedelta(hours=2)
-        )
+        result = self.evaluate((BookLevel(0.4, 25),), NOW + timedelta(hours=2))
 
         self.assertEqual(result[0]["exit_reason"], "time")
         self.assertNotIn("market-1", replay(self.journal).positions)
 
     def test_missing_or_insufficient_bid_depth_keeps_position_open(self) -> None:
         for bids in ((), (BookLevel(0.5, 10),)):
-            with self.subTest(bids=bids), self.assertRaisesRegex(
-                ValueError, "insufficient executable YES bid depth"
+            with (
+                self.subTest(bids=bids),
+                self.assertRaisesRegex(
+                    ValueError, "insufficient executable YES bid depth"
+                ),
             ):
                 self.evaluate(bids, NOW + timedelta(hours=2))
             self.assertIn("market-1", replay(self.journal).positions)

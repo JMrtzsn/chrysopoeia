@@ -1,81 +1,64 @@
-# Local BTC 5m collection
+# Esports scored-only collection
 
-`run --config configs/btc5m.toml` selects the current UTC five-minute window from
-the clock. BTC 5m Up/Down is the only automated market during development:
-`[venue].series` is required and the volume-ranked fallback is unreachable from
-the CLI. The run starts immediately, then waits for each next five-minute
-boundary (not 300 seconds after model completion). The profile sets
-`[venue].series = "btc-updown-5m"` and
-`[session].interval_seconds = 300`; incompatible cadence fails config validation.
-Missing captures wait until the next boundary; admitted markets, including
-failed turns, are not retried.
-Slow cycles can skip windows. `[session].max_cycles` bounds admitted turns, not guaranteed
-forecasts: discovery/capture failures do not count, but the deadline still applies.
-BTC 5m is the only automated market in development; there is no non-series run.
+Automated sessions forecast CS2 and Dota 2 match-winner markets only, and they
+never trade. Every bundled profile sets `[venue] markets = "esports-match-winner"`
+and `[session] scored_only = true`; `run` refuses any profile that is not
+scored-only. BTC 5m automation is retired; older BTC journals and archived
+events remain scoreable.
 
-The Platform-owned raw archive is deployed before any forecasting session.
-It stores published outcome/plan events, not every journal record, model failure,
-paper fill, mark, or settlement. Keep the local journal for scoring, failure
-coverage, booked model costs, and paper accounting. Never treat archived plans
-as fills. See [Platform storage](../../platform/docs/deployment.md#event-archive).
+Discovery reuses the bounded volume-ranked Gamma read (at most three 25-record
+pages, 5 s and 256 KiB each) and keeps a market only when its event slug is a
+match winner (`cs2-<team>-<team>-YYYY-MM-DD` or `dota2-...`, no map/game
+suffix), its question starts with `Counter-Strike: ` or `Dota 2: `, and Gamma's
+`gameStartTime` is at least 10 minutes away. Each cycle forecasts the first
+eligible market not yet admitted in the journal; with none, the cycle idles until
+the next interval. Coverage depends on esports appearing in the top 75 markets by
+24-hour volume.
+
+Scored-only is enforced by deterministic policy, not the prompt: a plan the
+reviewer approves and the risk policy would allow is recorded as
+`policy_rejected` with reason `scored_only`. The `turn_outcome` (with its
+probability) is journaled and published; no `trade_plan_ready` event, Harness
+paper fill, or Consumer fill is produced. `polymarket-eval` scores every decided
+turn regardless of status.
+
+The Platform-owned raw archive stores published outcome events, not every
+journal record or model failure. Keep the local journal for scoring, failure
+coverage, and booked model costs. See
+[Platform storage](../../platform/docs/deployment.md#event-archive).
 
 ## Explicitly start a bounded session
 
 No collection starts automatically. Before running, obtain approval for cycle,
-deadline, loss, daily model-cost, and session cost limits. The bundled BTC profile
-sets 20 cycles, a 110-minute window, $15 session/daily model ceilings, and a
-$100 paper loss limit on $1,000 paper capital. Selecting it is not approval to
-spend. Edit a local TOML copy for different approved bounds; old setting flags
-are rejected rather than override the file. Set `JOURNAL` to a new persistent
-local directory.
-From `harness/`, with ambient ADC:
+deadline, daily model-cost, and session cost limits. `configs/esports.toml`
+enables grounded research with a 32768-token input ceiling, so one cycle reserves
+up to about $1.43; selecting it is not approval to spend. Edit a local TOML copy
+for different approved bounds; old setting flags are rejected. Set `JOURNAL` to a
+new persistent local directory. From `harness/`, with ambient ADC:
 
 ```sh
 GOOGLE_CLOUD_PROJECT=PROJECT_ID \
 CHRYSOPOEIA_EVENT_SINK=pubsub:projects/PROJECT_ID/topics/chrysopoeia-events \
-uv run chrysopoeia run --config configs/btc5m.toml \
+uv run chrysopoeia run --config configs/esports.toml \
   --journal "${JOURNAL:?choose a persistent local journal}" \
   --stop-file "$JOURNAL/stop"
 ```
 
-The session uses the checked-in model configuration and local paper simulator.
-The BTC profile disables the pre-trader research step (`[research] enabled =
-false`) because web news rarely moves a five-minute window and grounded search
-was ~70% of measured cycle cost; the trader still uses 1-minute OHLCV analysis.
-A verified local cycle cost $0.0443 with research off versus $0.2127 with it on.
+Inspect settings without model or network calls using
+`uv run chrysopoeia validate --config configs/esports.toml --json`. Use one
+writer per journal. Delivery failures leave pending outbox events for a later
+drain; inspect `outbox-pending --journal "$JOURNAL"` and never acknowledge an
+event without confirmed delivery.
 
-The BTC profiles also set `[venue] forecast_offset_seconds = 120` and
-`window_baseline = true`. The offset is the minimum elapsed time in a window
-before forecasting, so a session started afterwards forecasts immediately and
-may land closer to the close. Each cycle attaches one snapshot-bound evidence
-record, "BTC 5m deterministic window baseline", with the window open, latest
-public last price, delta in bps, seconds remaining, recent 1-minute volatility,
-and a normal-approximation P(Up). It is measured evidence, not an instruction:
-the trader may ignore it, and deterministic policy still decides. If the
-exchange history or ticker is unavailable, the cycle proceeds without it.
-Inspect all settings without model/network calls using
-`uv run chrysopoeia validate --config configs/btc5m.toml --json`.
-This does not run a Cloud Run job or deploy a consumer. Use one writer per local
-journal. The publisher needs topic-scoped Pub/Sub publishing permission; it
-does not need BigQuery write access. Delivery failures leave pending outbox
-events for a later drain, so inspect `outbox-pending --journal "$JOURNAL"`.
-Do not manually acknowledge events unless delivery has been confirmed.
+## Score
 
-## Score and account separately
-
-After resolution, score the journal; a concrete window URL supplies the series
-prefix, not a historical forecast input:
+After matches resolve:
 
 ```sh
-uv run chrysopoeia polymarket-eval --journal "$JOURNAL" \
-  --series-url https://polymarket.com/event/btc-updown-5m-1792306500
-uv run chrysopoeia book --journal "$JOURNAL"
+uv run chrysopoeia polymarket-eval --journal "$JOURNAL"
 ```
 
-Report agent and same-time market Brier on paired samples, forecasts divided by
-attempted windows, proposed-trade coverage, actual paper fills, failed/missing/
-late/pending windows, booked model costs, and paper P&L separately. The evaluator's
-`trade_coverage` counts proposals, not fills. Failed turns may book conservative
-reservations rather than confirmed provider spend. The final open paper position
-may need `settle --journal "$JOURNAL" --market <id>` once Gamma resolves it.
-BigQuery scoring, historical backfill, and scheduled collection are not included.
+Report agent and same-time market Brier on paired samples, forecasts per
+attempted cycle, failed/missing/late/pending markets, and booked model costs.
+Failed turns may book conservative reservations rather than confirmed spend.
+Small samples are not evidence of edge.

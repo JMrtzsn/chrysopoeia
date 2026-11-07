@@ -24,6 +24,7 @@ from chrysopoeia.configuration import (
     HarnessConfig,
     load_harness_config,
 )
+from chrysopoeia.cycle_runner import reserved_ceiling
 
 VALID = {
     "session": {
@@ -35,6 +36,7 @@ VALID = {
         "cost_budget": "5",
         "interval_seconds": 300,
         "daily_cloud_cost_budget": 5,
+        "scored_only": True,
     },
     "risk": {
         "maximum_market_exposure": 0.01,
@@ -47,7 +49,7 @@ VALID = {
         "adapter": "polymarket",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
-        "series": "btc-updown-5m",
+        "markets": "esports-match-winner",
     },
     "models": {
         "location": "us",
@@ -86,50 +88,57 @@ class HarnessConfigurationTests(unittest.TestCase):
             ("session", "cost_budget", "NaN"),
             ("session", "cost_budget", "-1"),
             ("session", "interval_seconds", -1),
-            ("session", "interval_seconds", 30),
             ("session", "daily_cloud_cost_budget", 0),
+            ("session", "scored_only", "true"),
             ("risk", "maximum_market_exposure", 0.2),
             ("risk", "maximum_total_exposure", 2),
             ("risk", "market_exposure", 1),
             ("risk", "total_exposure", 1001),
-            ("venue", "series", "unsupported"),
+            ("venue", "markets", "btc-updown-5m"),
         ):
             value = {name: fields.copy() for name, fields in VALID.items()}
             value[table][key] = invalid
-            with self.subTest(table=table, key=key), self.assertRaises(ConfigurationError):
+            with (
+                self.subTest(table=table, key=key),
+                self.assertRaises(ConfigurationError),
+            ):
                 HarnessConfig.from_mapping(value)
+        trading = {name: fields.copy() for name, fields in VALID.items()}
+        del trading["session"]["scored_only"]
+        self.assertFalse(HarnessConfig.from_mapping(trading).operating.scored_only)
         for table in ("session", "risk"):
             value = {name: fields.copy() for name, fields in VALID.items()}
             del value[table]
             with self.assertRaises(ConfigurationError):
                 HarnessConfig.from_mapping(value)
         base = Path(__file__).parents[1] / "configs"
-        btc = load_harness_config(base / "btc5m.toml")
-        self.assertEqual((btc.venue.series, btc.session.interval_seconds), ("btc-updown-5m", 300))
-        self.assertEqual(btc.session.max_cycles, 20)
+        self.assertFalse((base / "btc5m.toml").exists())
+        for name in ("esports.toml", "platform.toml"):
+            profile = load_harness_config(base / name)
+            self.assertEqual(profile.venue.markets, "esports-match-winner")
+            self.assertTrue(profile.operating.scored_only)
+            self.assertTrue(profile.research.enabled)
+            self.assertEqual(profile.cost.maximum_input_tokens_per_call, 32768)
         platform = load_harness_config(base / "platform.toml")
         self.assertEqual(platform.session.max_cycles, 2)
-        self.assertEqual(platform.venue.series, "btc-updown-5m")
-        self.assertFalse(platform.research.enabled)
-        self.assertFalse(btc.research.enabled)
         self.assertTrue(platform.history.enabled)
-        self.assertFalse(btc.history.enabled)
         self.assertTrue(platform.context_learning.enabled)
-        self.assertFalse(btc.context_learning.enabled)
         self.assertEqual(platform.cost.maximum_output_tokens_per_call, 3072)
-        self.assertEqual(btc.venue.forecast_offset_seconds, 120.0)
-        self.assertTrue(btc.venue.window_baseline)
-        self.assertTrue(platform.venue.window_baseline)
+        self.assertLessEqual(
+            reserved_ceiling(platform) * platform.session.max_cycles,
+            platform.session.cost_budget,
+        )
         for key, invalid in (
-            ("forecast_offset_seconds", -1),
-            ("forecast_offset_seconds", 300),
-            ("forecast_offset_seconds", True),
-            ("forecast_offset_seconds", "120"),
-            ("window_baseline", "true"),
+            ("series", "btc-updown-5m"),
+            ("forecast_offset_seconds", 120),
+            ("window_baseline", True),
         ):
             value = {name: fields.copy() for name, fields in VALID.items()}
             value["venue"][key] = invalid
-            with self.subTest(key=key, invalid=invalid), self.assertRaises(ConfigurationError):
+            with (
+                self.subTest(key=key, invalid=invalid),
+                self.assertRaises(ConfigurationError),
+            ):
                 HarnessConfig.from_mapping(value)
         self.assertTrue(HarnessConfig.from_mapping(VALID).research.enabled)
         self.assertFalse(HarnessConfig.from_mapping(VALID).history.enabled)
@@ -142,7 +151,10 @@ class HarnessConfigurationTests(unittest.TestCase):
         for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
             value = {name: fields.copy() for name, fields in VALID.items()}
             value["context_learning"] = invalid
-            with self.subTest(context_learning=invalid), self.assertRaises(ConfigurationError):
+            with (
+                self.subTest(context_learning=invalid),
+                self.assertRaises(ConfigurationError),
+            ):
                 HarnessConfig.from_mapping(value)
         for invalid in ({"enabled": "false"}, {"enabled": 0}, {}):
             value = {name: fields.copy() for name, fields in VALID.items()}
@@ -150,11 +162,16 @@ class HarnessConfigurationTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ConfigurationError):
                 HarnessConfig.from_mapping(value)
         with self.assertRaises(ConfigurationError):
-            HarnessConfig.from_mapping({
-                **{name: fields.copy() for name, fields in VALID.items()},
-                "venue": {"adapter": "polymarket", "paper_fee_rate": 0.02,
-                          "paper_fee_source": "paper-assumption:flat-2pct-v1"},
-            })
+            HarnessConfig.from_mapping(
+                {
+                    **{name: fields.copy() for name, fields in VALID.items()},
+                    "venue": {
+                        "adapter": "polymarket",
+                        "paper_fee_rate": 0.02,
+                        "paper_fee_source": "paper-assumption:flat-2pct-v1",
+                    },
+                }
+            )
 
     def test_context_learning_requires_a_thinking_sized_output_ceiling(self) -> None:
         from chrysopoeia.configuration import CONTEXT_LEARNING_OUTPUT_TOKEN_CEILING
@@ -199,7 +216,9 @@ class HarnessConfigurationTests(unittest.TestCase):
         config = load_harness_config(Path(__file__).parents[1] / "chrysopoeia.toml")
         self.assertEqual(config, HarnessConfig.from_mapping(VALID))
 
-    def test_all_gemini_agents_use_vertex_us_without_initializing_a_client(self) -> None:
+    def test_all_gemini_agents_use_vertex_us_without_initializing_a_client(
+        self,
+    ) -> None:
         agents = build_agents(HarnessConfig.from_mapping(VALID))
 
         for agent in agents.model_agents:
@@ -293,12 +312,17 @@ class HarnessConfigurationTests(unittest.TestCase):
         second = build_agents(HarnessConfig.from_mapping(second_mapping))
 
         self.assertEqual(
-            [agent.model.model for agent in first.model_agents], ["gemini-first-model"] * 4
+            [agent.model.model for agent in first.model_agents],
+            ["gemini-first-model"] * 4,
         )
         self.assertEqual(
-            [agent.model.model for agent in second.model_agents], ["gemini-second-model"] * 4
+            [agent.model.model for agent in second.model_agents],
+            ["gemini-second-model"] * 4,
         )
-        for agents, model in ((first, "gemini-first-model"), (second, "gemini-second-model")):
+        for agents, model in (
+            (first, "gemini-first-model"),
+            (second, "gemini-second-model"),
+        ):
             callbacks = [agent.before_model_callback for agent in agents.model_agents]
             self.assertTrue(all(callback is callbacks[0] for callback in callbacks))
             self.assertEqual(callbacks[0].keywords["default_policy"]["model"], model)
@@ -306,10 +330,16 @@ class HarnessConfigurationTests(unittest.TestCase):
         second_state: dict[str, object] = {}
         first.configure_operation(SimpleNamespace(state=first_state))
         second.configure_operation(SimpleNamespace(state=second_state))
-        self.assertEqual(first_state["model_cost_policy"]["model"], "gemini-first-model")
-        self.assertEqual(second_state["model_cost_policy"]["model"], "gemini-second-model")
+        self.assertEqual(
+            first_state["model_cost_policy"]["model"], "gemini-first-model"
+        )
+        self.assertEqual(
+            second_state["model_cost_policy"]["model"], "gemini-second-model"
+        )
         first_state["model_cost_policy"]["model"] = "mutated"
-        self.assertEqual(second_state["model_cost_policy"]["model"], "gemini-second-model")
+        self.assertEqual(
+            second_state["model_cost_policy"]["model"], "gemini-second-model"
+        )
         second_state["market_snapshot"] = {}
         with patch(
             "chrysopoeia.agent.load_market_snapshot", side_effect=ValueError
@@ -372,7 +402,9 @@ class HarnessConfigurationTests(unittest.TestCase):
             agents.root_agent.before_model_callback,
         )
         self.assertIsNone(
-            asyncio.run(callback(callback_context, LlmRequest(model="gemini-alternate-model")))
+            asyncio.run(
+                callback(callback_context, LlmRequest(model="gemini-alternate-model"))
+            )
         )
         record = state["model_cost_ledger"][0]
         self.assertEqual(
@@ -389,7 +421,8 @@ class HarnessConfigurationTests(unittest.TestCase):
         agents.configure_operation(SimpleNamespace(state=operation_state))
         self.assertEqual(operation_state["model_cost_policy"], config.cost_policy)
         self.assertEqual(
-            [agent.model.model for agent in agents.model_agents], ["gemini-alternate-model"] * 4
+            [agent.model.model for agent in agents.model_agents],
+            ["gemini-alternate-model"] * 4,
         )
         self.assertEqual(
             evaluation.reserved_ceiling(config, model_calls=2),

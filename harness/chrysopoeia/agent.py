@@ -261,7 +261,7 @@ def build_trader_tools(
             return {"ok": False, "reason": "market discovery limit reached"}
         state["market_discovery_calls"] = 1
         try:
-            candidates = list(discover(limit=5, series=config.venue.series))
+            candidates = list(discover(limit=5, markets=config.venue.markets))
         except Exception:
             return {"ok": False, "reason": "market discovery unavailable"}
         terms = query.casefold().split()
@@ -837,12 +837,6 @@ def build_agents(
         if context_profile is not None
         else ""
     )
-    btc_guidance = (
-        "For short BTC Up/Down windows, call analyze_crypto_history(exchange_id=\"bitstamp\", symbol=\"BTC/USD\", interval=\"1m\") before estimating. "
-        if context_profile is None
-        or context_profile.profile_id == "crypto.btcusd.5m.updown"
-        else ""
-    )
     trader_instruction = (
         f"Use only these registered tools: {', '.join(tool_names)}. "
         + profile_guidance
@@ -855,8 +849,7 @@ def build_agents(
         "Call check_trade_plan with the exact plan you intend to return. If it fails, read the reasons, revise, and re-check until it passes or the check limit is reached. "
         "After a pass, return exactly the last passed plan unchanged, including rationale. Abstain if no plan check passes. "
         "Probability is your genuine estimate that YES (Up for Up/Down markets) resolves true, including when buying NO or abstaining; never use 0 or 1 as a placeholder. "
-        + btc_guidance
-        + "Choose outcome=YES to buy Yes/Up or outcome=NO to buy No/Down. NO's win probability is 1-probability. Use the actual chosen outcome's ask book, not 1 minus the YES ask. "
+        "Choose outcome=YES to buy Yes/Up or outcome=NO to buy No/Down. NO's win probability is 1-probability. Use the actual chosen outcome's ask book, not 1 minus the YES ask. "
         "For NO use no_maximum_amount and no_max_entry_price_for_maximum_amount. Abstain if neither side offers sufficient edge. "
         'Return action="abstain" and amount=0 with no trade terms when evidence or edge does not justify a trade; otherwise return '
         'action="trade" with a positive amount and a complete exit_plan. ROI thresholds are net of fees and costs. Do not force trading. '

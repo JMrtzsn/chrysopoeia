@@ -79,7 +79,11 @@ def evaluate_journal(
         raw = proposal.get("probability")
         try:
             created_at = _parse_time(outcome.get("created_at"))
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not 0 <= raw <= 1:
+            if (
+                isinstance(raw, bool)
+                or not isinstance(raw, (int, float))
+                or not 0 <= raw <= 1
+            ):
                 continue
         except ValueError:
             continue

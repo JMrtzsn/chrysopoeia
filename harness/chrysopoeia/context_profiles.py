@@ -20,7 +20,13 @@ REGISTERED_CONTEXT_TOOLS = frozenset(
     }
 )
 REGISTERED_EVIDENCE_SOURCES = frozenset(
-    {"market_snapshot", "public_web", "financial_analysis", "series_history", "outcome_history"}
+    {
+        "market_snapshot",
+        "public_web",
+        "financial_analysis",
+        "series_history",
+        "outcome_history",
+    }
 )
 _TOOL_EVIDENCE_SOURCES = {
     "analyze_stock_history": "financial_analysis",
@@ -51,21 +57,29 @@ class ContextProfileDraft(StrictModel):
     @field_validator("learning_summary", "instructions", "rationale")
     @classmethod
     def validate_text(cls, value: str) -> str:
-        if not value.strip() or any(ord(char) < 32 and char not in "\n\t" for char in value):
+        if not value.strip() or any(
+            ord(char) < 32 and char not in "\n\t" for char in value
+        ):
             raise ValueError("profile text is invalid")
         return value.strip()
 
     @field_validator("tool_ids")
     @classmethod
     def validate_tool_ids(cls, values: list[str]) -> list[str]:
-        if len(values) != len(set(values)) or not set(values) <= REGISTERED_CONTEXT_TOOLS:
+        if (
+            len(values) != len(set(values))
+            or not set(values) <= REGISTERED_CONTEXT_TOOLS
+        ):
             raise ValueError("profile contains an unregistered tool")
         return values
 
     @field_validator("evidence_sources")
     @classmethod
     def validate_evidence_sources(cls, values: list[str]) -> list[str]:
-        if len(values) != len(set(values)) or not set(values) <= REGISTERED_EVIDENCE_SOURCES:
+        if (
+            len(values) != len(set(values))
+            or not set(values) <= REGISTERED_EVIDENCE_SOURCES
+        ):
             raise ValueError("profile contains an unregistered evidence source")
         return values
 
@@ -86,7 +100,9 @@ class ContextProfileReview(StrictModel):
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, value: str) -> str:
-        if not value.strip() or any(ord(char) < 32 and char not in "\n\t" for char in value):
+        if not value.strip() or any(
+            ord(char) < 32 and char not in "\n\t" for char in value
+        ):
             raise ValueError("profile review reason is invalid")
         return value.strip()
 
@@ -132,7 +148,11 @@ class ContextLearningSummary(StrictModel):
     @field_validator("realized_pnl_usd")
     @classmethod
     def validate_realized_pnl(cls, value: float) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
             raise ValueError("context summary P&L is invalid")
         return float(value)
 
@@ -177,24 +197,34 @@ class ContextProfile(StrictModel):
             raise ValueError("profile identity is invalid")
         return value
 
-    @field_validator("learning_summary", "instructions", "proposal_rationale", "approval_reason")
+    @field_validator(
+        "learning_summary", "instructions", "proposal_rationale", "approval_reason"
+    )
     @classmethod
     def validate_profile_text(cls, value: str) -> str:
-        if not value.strip() or any(ord(char) < 32 and char not in "\n\t" for char in value):
+        if not value.strip() or any(
+            ord(char) < 32 and char not in "\n\t" for char in value
+        ):
             raise ValueError("profile text is invalid")
         return value.strip()
 
     @field_validator("tool_ids")
     @classmethod
     def validate_profile_tools(cls, values: list[str]) -> list[str]:
-        if len(values) != len(set(values)) or not set(values) <= REGISTERED_CONTEXT_TOOLS:
+        if (
+            len(values) != len(set(values))
+            or not set(values) <= REGISTERED_CONTEXT_TOOLS
+        ):
             raise ValueError("profile contains an unregistered tool")
         return values
 
     @field_validator("evidence_sources")
     @classmethod
     def validate_profile_sources(cls, values: list[str]) -> list[str]:
-        if len(values) != len(set(values)) or not set(values) <= REGISTERED_EVIDENCE_SOURCES:
+        if (
+            len(values) != len(set(values))
+            or not set(values) <= REGISTERED_EVIDENCE_SOURCES
+        ):
             raise ValueError("profile contains an unregistered evidence source")
         return values
 
@@ -217,7 +247,9 @@ class ContextProfile(StrictModel):
         if value is not None and (
             not value.strip()
             or len(value) > 200
-            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
+            or any(
+                char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value
+            )
         ):
             raise ValueError("profile source identity is invalid")
         return value
@@ -258,7 +290,11 @@ class ContextProfile(StrictModel):
             raise ValueError("profile manifest hash does not match")
         if (self.source_summary is None) != (self.source_summary_hash is None):
             raise ValueError("profile summary and its hash must be stored together")
-        source_fields = (self.source_market_id, self.source_snapshot_id, self.source_url)
+        source_fields = (
+            self.source_market_id,
+            self.source_snapshot_id,
+            self.source_url,
+        )
         if any(value is not None for value in source_fields) and any(
             value is None for value in source_fields
         ):
@@ -270,7 +306,8 @@ class ContextProfile(StrictModel):
             or self.source_summary.completed_trade_count != self.sample_count
             or self.source_summary.outcome_watermark != self.source_watermark
             or self.source_summary_hash is None
-            or self.source_summary_hash != context_learning_summary_hash(self.source_summary)
+            or self.source_summary_hash
+            != context_learning_summary_hash(self.source_summary)
         ):
             raise ValueError("profile outcome summary provenance is inconsistent")
         return self
@@ -339,7 +376,9 @@ def build_context_profile(
         "source_url": source_url,
         "source_watermark": source_watermark,
         "source_summary_hash": source_summary_hash,
-        "source_summary": source_summary.model_dump() if source_summary is not None else None,
+        "source_summary": source_summary.model_dump()
+        if source_summary is not None
+        else None,
         "proposal_rationale": draft.rationale,
         "approved_by": approved_by,
         "approval_reason": approval_reason,
@@ -367,7 +406,13 @@ def bundled_profiles() -> tuple[ContextProfile, ...]:
             "windows as descriptive base-rate evidence, not as a guaranteed forecast."
         ),
         tool_ids=["analyze_crypto_history", "analyze_polymarket_history"],
-        evidence_sources=["market_snapshot", "public_web", "financial_analysis", "series_history", "outcome_history"],
+        evidence_sources=[
+            "market_snapshot",
+            "public_web",
+            "financial_analysis",
+            "series_history",
+            "outcome_history",
+        ],
         rationale="Bundled BTC five-minute market context.",
     )
     event_draft = ContextProfileDraft(
@@ -437,6 +482,8 @@ def bundled_profile_for_identity(identity: ContextIdentity) -> ContextProfile | 
         ),
         None,
     )
+
+
 class ContextCatalog:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -463,7 +510,10 @@ class ContextCatalog:
                 if not isinstance(record, dict):
                     raise ValueError
                 if record.get("record_type") == "context_profile":
-                    if set(record) != {"schema_version", "record_type", "profile"} or record.get("schema_version") != 1:
+                    if (
+                        set(record) != {"schema_version", "record_type", "profile"}
+                        or record.get("schema_version") != 1
+                    ):
                         raise ValueError
                     profile = ContextProfile.model_validate(record["profile"])
                     key = (profile.scope_key, profile.profile_id)
@@ -473,14 +523,19 @@ class ContextCatalog:
                         or profile.manifest_hash == previous[1]
                     ):
                         raise ValueError("context profile versions are not monotonic")
-                    latest_versions[key] = (profile.profile_version, profile.manifest_hash)
+                    latest_versions[key] = (
+                        profile.profile_version,
+                        profile.manifest_hash,
+                    )
                 elif record.get("record_type") == "profile_iteration":
                     self._validate_iteration(record)
                 else:
                     raise ValueError
                 records.append(record)
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-            raise ProfileError("local context catalog is corrupt or unavailable") from None
+            raise ProfileError(
+                "local context catalog is corrupt or unavailable"
+            ) from None
         return records
 
     @staticmethod
@@ -499,13 +554,21 @@ class ContextCatalog:
     @staticmethod
     def _validate_iteration(record: dict[str, object]) -> None:
         if set(record) != {
-            "schema_version", "record_type", "scope_key", "profile_id",
-            "profile_version", "summary_hash", "outcome_watermark", "decision",
+            "schema_version",
+            "record_type",
+            "scope_key",
+            "profile_id",
+            "profile_version",
+            "summary_hash",
+            "outcome_watermark",
+            "decision",
             "recorded_at",
         }:
             raise ValueError("invalid profile iteration record")
         if record.get("schema_version") != 1 or record.get("decision") not in {
-            "rejected", "unchanged", "approved"
+            "rejected",
+            "unchanged",
+            "approved",
         }:
             raise ValueError("invalid profile iteration record")
         scope_key = record.get("scope_key")
@@ -641,7 +704,9 @@ class ContextCatalog:
             raise ProfileError("context profile version already has different content")
         latest = self.latest(profile.scope_key, profile.profile_id)
         if latest is not None and latest.profile_version != previous_version:
-            raise ProfileError("context profile changed while a revision was being approved")
+            raise ProfileError(
+                "context profile changed while a revision was being approved"
+            )
         self._append(
             {
                 "schema_version": 1,
@@ -652,7 +717,9 @@ class ContextCatalog:
 
     def _append(self, record: dict[str, object]) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        data = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        data = (
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
         current_size = self.path.stat().st_size if self.path.exists() else 0
         if current_size + len(data) > MAX_CATALOG_BYTES:
             raise ProfileError("local context catalog would exceed its size limit")
@@ -670,5 +737,7 @@ def local_catalog_path() -> Path:
     if configured:
         return Path(configured).expanduser()
     xdg_state = os.environ.get("XDG_STATE_HOME")
-    root = Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "share"
+    root = (
+        Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "share"
+    )
     return root / "chrysopoeia" / "context_profiles.jsonl"

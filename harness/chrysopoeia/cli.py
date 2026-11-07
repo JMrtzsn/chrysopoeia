@@ -81,9 +81,7 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
             "execution": "paper-only",
             "paper_fee_rate": config.venue.paper_fee_rate,
             "paper_fee_source": config.venue.paper_fee_source,
-            "series": config.venue.series,
-            "forecast_offset_seconds": config.venue.forecast_offset_seconds,
-            "window_baseline": config.venue.window_baseline,
+            "markets": config.venue.markets,
         },
         "models": {
             "location": config.models.location,
@@ -96,7 +94,10 @@ def _summary(config: HarnessConfig, command: str, label: str) -> dict[str, objec
         "research": {"enabled": config.research.enabled},
         "history": {"enabled": config.history.enabled},
         "context_learning": {"enabled": config.context_learning.enabled},
-        "session": {**asdict(config.session), "cost_budget": str(config.session.cost_budget)},
+        "session": {
+            **asdict(config.session),
+            "cost_budget": str(config.session.cost_budget),
+        },
         "risk": asdict(config.risk),
     }
 
@@ -161,12 +162,22 @@ def serialize_market_snapshot(snapshot: MarketSnapshot) -> dict[str, object]:
             ],
             "fee_rate": snapshot.fee_rate,
             "fee_source": snapshot.fee_source,
-            **({
-                "no_token_id": snapshot.no_token_id,
-                "no_asks": [{"price": level.price, "size": level.size} for level in snapshot.no_asks],
-                "no_bids": [{"price": level.price, "size": level.size} for level in snapshot.no_bids],
-                "no_book_captured_at": snapshot.no_book_captured_at,
-            } if snapshot.no_token_id else {}),
+            **(
+                {
+                    "no_token_id": snapshot.no_token_id,
+                    "no_asks": [
+                        {"price": level.price, "size": level.size}
+                        for level in snapshot.no_asks
+                    ],
+                    "no_bids": [
+                        {"price": level.price, "size": level.size}
+                        for level in snapshot.no_bids
+                    ],
+                    "no_book_captured_at": snapshot.no_book_captured_at,
+                }
+                if snapshot.no_token_id
+                else {}
+            ),
         },
     }
 
@@ -273,9 +284,11 @@ def load_capture_snapshot(
         or envelope["venue"] != "polymarket"
         or envelope["mode"] != "paper"
         or not isinstance(envelope["snapshot"], dict)
-        or set(envelope["snapshot"]) not in (
+        or set(envelope["snapshot"])
+        not in (
             _SNAPSHOT_KEYS,
-            _SNAPSHOT_KEYS | {"no_token_id", "no_asks", "no_bids", "no_book_captured_at"},
+            _SNAPSHOT_KEYS
+            | {"no_token_id", "no_asks", "no_bids", "no_book_captured_at"},
         )
     ):
         raise ValueError("invalid snapshot")
@@ -316,8 +329,19 @@ def load_capture_snapshot(
             fee_rate,
             fee_source,
             _capture_text(value["captured_at"]),
-            **({key: value[key] for key in ("no_token_id", "no_asks", "no_bids", "no_book_captured_at")}
-               if "no_token_id" in value else {}),
+            **(
+                {
+                    key: value[key]
+                    for key in (
+                        "no_token_id",
+                        "no_asks",
+                        "no_bids",
+                        "no_book_captured_at",
+                    )
+                }
+                if "no_token_id" in value
+                else {}
+            ),
         )
         if snapshot.snapshot_id != market_snapshot_identity(snapshot):
             raise ValueError
@@ -505,9 +529,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 0
             try:
-                mark_config = load_harness_config(
-                    args.config or default_config_path()
-                )
+                mark_config = load_harness_config(args.config or default_config_path())
                 marked = mark_positions(
                     args.journal,
                     tuple(journal_state.positions),
@@ -640,7 +662,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         from chrysopoeia.loop import LoopParams, StopFlag, run_loop
 
         if config.risk.market_exposure or config.risk.total_exposure:
-            parser.exit(2, "run failed: existing exposures are cycle-only; run uses its journal\n")
+            parser.exit(
+                2,
+                "run failed: existing exposures are cycle-only; run uses its journal\n",
+            )
+        if not config.session.scored_only:
+            parser.exit(
+                2,
+                "run failed: automated runs are scored-only; set [session] scored_only = true\n",
+            )
         flag = StopFlag()
         previous = {}
         try:
@@ -662,8 +692,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         config.session.daily_cloud_cost_budget,
                         args.stop_file,
                         flag,
-                        config.venue.series,
-                        config.venue.forecast_offset_seconds,
+                        config.venue.markets,
+                        config.session.scored_only,
                     ),
                     config,
                     sleep=asyncio.sleep,
@@ -714,7 +744,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "discover":
         try:
             candidates = discover_markets(
-                series=config.venue.series,
+                markets=config.venue.markets,
                 fetch=polymarket_fetch,
             )
             result = {
@@ -763,7 +793,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError
             draft_value = json.loads(args.draft) if args.draft is not None else None
             request = PaperCycleRequest(context=args.context, draft=draft_value)
-            draft = request.draft.model_dump(exclude_none=True) if request.draft else None
+            draft = (
+                request.draft.model_dump(exclude_none=True) if request.draft else None
+            )
         except (UnicodeError, json.JSONDecodeError, ValueError):
             parser.exit(2, "cycle failed: invalid context or draft\n")
         try:
@@ -811,8 +843,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.journal is None:
                 result = asyncio.run(
                     run_paper_cycle(
-                        config, snapshot, operating, evidence=evidence,
-                        context=args.context, draft=draft,
+                        config,
+                        snapshot,
+                        operating,
+                        evidence=evidence,
+                        context=args.context,
+                        draft=draft,
                     )
                 )
             else:

@@ -77,77 +77,27 @@ def abstained(cost: str = "0.01") -> dict[str, object]:
 
 
 class LoopTests(unittest.IsolatedAsyncioTestCase):
-    async def test_series_offset_sleeps_into_the_window_before_forecasting(self) -> None:
-        current = NOW + timedelta(seconds=75)
-        sleeps = []
-
-        async def sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-            nonlocal current
-            current += timedelta(seconds=seconds)
-
-        with (
-            patch("chrysopoeia.loop.discover_markets", return_value=(candidate("1"),)) as discover,
-            patch("chrysopoeia.loop.load_market_snapshot", return_value=snapshot("1")),
-            patch(
-                "chrysopoeia.cycle_runner.run_paper_cycle",
-                AsyncMock(return_value=abstained()),
-            ),
-        ):
-            await run_loop(
-                self.params(
-                    series="btc-updown-5m",
-                    series_offset_seconds=120,
-                    interval_seconds=300,
-                ),
-                self.config,
-                now=lambda: current,
-                sleep=sleep,
-            )
-
-        self.assertEqual(sleeps, [45])
-        self.assertEqual(discover.call_args.kwargs["series_offset_seconds"], 120)
-
-    async def test_series_waits_for_next_boundary_without_retrying_failed_window(
+    async def test_esports_session_binds_discovery_and_runs_scored_only_turns(
         self,
     ) -> None:
-        current = NOW + timedelta(seconds=75)
-        captures = []
-
-        def capture(*_: object, **__: object):
-            captures.append(current)
-            if len(captures) == 1:
-                raise PolymarketError("unavailable")
-            return snapshot("2")
-
-        async def sleep(seconds: float) -> None:
-            nonlocal current
-            self.assertEqual(seconds, 225)
-            current += timedelta(seconds=seconds)
-
+        cycle = AsyncMock(return_value=abstained())
         with (
             patch(
-                "chrysopoeia.loop.discover_markets", return_value=(candidate("2"),)
+                "chrysopoeia.loop.discover_markets", return_value=(candidate("1"),)
             ) as discover,
-            patch("chrysopoeia.loop.load_market_snapshot", side_effect=capture),
-            patch(
-                "chrysopoeia.cycle_runner.run_paper_cycle",
-                AsyncMock(return_value=abstained()),
-            ),
+            patch("chrysopoeia.loop.load_market_snapshot", return_value=snapshot("1")),
+            patch("chrysopoeia.cycle_runner.run_paper_cycle", cycle),
         ):
-            report, iterations = await run_loop(
-                self.params(series="btc-updown-5m", interval_seconds=300),
+            report, _ = await run_loop(
+                self.params(markets="esports-match-winner", scored_only=True),
                 self.config,
-                now=lambda: current,
-                sleep=sleep,
+                now=lambda: NOW,
+                sleep=AsyncMock(),
             )
 
-        self.assertEqual(
-            captures, [NOW + timedelta(seconds=75), NOW + timedelta(seconds=300)]
-        )
         self.assertEqual(report["cycles_run"], 1)
-        self.assertEqual(iterations[0]["status"], "failed")
-        self.assertEqual(discover.call_args.kwargs["series"], "btc-updown-5m")
+        self.assertEqual(discover.call_args.kwargs["markets"], "esports-match-winner")
+        self.assertTrue(cycle.call_args.args[2].scored_only)
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -315,7 +265,17 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         admit_turn(self.journal, "old", "snap", "9")
         record_fill(
             self.journal,
-            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
+            Position(
+                "9",
+                "snap",
+                NOW.isoformat(),
+                0.4,
+                10,
+                25,
+                0.2,
+                10.2,
+                ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00"),
+            ),
             "old",
         )
         finish_turn(self.journal, "old", "filled")
@@ -354,7 +314,17 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         admit_turn(self.journal, "old", "snap", "9")
         record_fill(
             self.journal,
-            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
+            Position(
+                "9",
+                "snap",
+                NOW.isoformat(),
+                0.4,
+                10,
+                25,
+                0.2,
+                10.2,
+                ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00"),
+            ),
             "old",
         )
         finish_turn(self.journal, "old", "filled")
@@ -460,6 +430,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
                 "hold_to_resolution": False,
             },
         }
+
         async def filled_cycle(
             _config: object, current: MarketSnapshot, _operating: object, **_: object
         ) -> dict[str, object]:
@@ -487,21 +458,41 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
 
             outcome = build_turn_outcome(
                 proposal={
-                    "snapshot_id": current.snapshot_id, "market_id": current.market_id,
-                    "action": "trade", "probability": 0.46, "amount": 4.0,
-                    "max_entry_price": 0.41, "exit_plan": fill["exit_plan"],
-                    "citations": ["market_snapshot"], "rationale": "Evidence supports a trade.",
+                    "snapshot_id": current.snapshot_id,
+                    "market_id": current.market_id,
+                    "action": "trade",
+                    "probability": 0.46,
+                    "amount": 4.0,
+                    "max_entry_price": 0.41,
+                    "exit_plan": fill["exit_plan"],
+                    "citations": ["market_snapshot"],
+                    "rationale": "Evidence supports a trade.",
                 },
                 review={
-                    "snapshot_id": current.snapshot_id, "market_id": current.market_id,
-                    "approved": True, "reason": "supported", "citations": ["market_snapshot"],
+                    "snapshot_id": current.snapshot_id,
+                    "market_id": current.market_id,
+                    "approved": True,
+                    "reason": "supported",
+                    "citations": ["market_snapshot"],
                 },
-                policy={"allowed": True, "reason": "approved by review and deterministic risk policy"},
-                status="plan_ready", reason="approved by review and deterministic risk policy",
-                created_at=current.captured_at, trade_plan_event_id=event["event_id"],
+                policy={
+                    "allowed": True,
+                    "reason": "approved by review and deterministic risk policy",
+                },
+                status="plan_ready",
+                reason="approved by review and deterministic risk policy",
+                created_at=current.captured_at,
+                trade_plan_event_id=event["event_id"],
                 model_cost_usd="0.01",
             )
-            return {**abstained(), "status": "filled", "event": event, "fill": fill, "outcome_event": outcome}
+            return {
+                **abstained(),
+                "status": "filled",
+                "event": event,
+                "fill": fill,
+                "outcome_event": outcome,
+            }
+
         with (
             patch(
                 "chrysopoeia.loop.discover_markets",
@@ -537,14 +528,30 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         )
         records = [
             json.loads(line)
-            for line in self.journal.joinpath("chrysopoeia.jsonl").read_text().splitlines()
+            for line in self.journal.joinpath("chrysopoeia.jsonl")
+            .read_text()
+            .splitlines()
         ]
-        for event_id in (cycle_turn_id(snapshot("1").snapshot_id, "1"), cycle_turn_id(snapshot("2").snapshot_id, "2")):
-            enqueue = next(i for i, record in enumerate(records) if record.get("event", {}).get("event_id") == event_id)
-            fill_record = next(i for i, record in enumerate(records) if record.get("turn_id") == event_id and record["record_type"] == "fill_recorded")
+        for event_id in (
+            cycle_turn_id(snapshot("1").snapshot_id, "1"),
+            cycle_turn_id(snapshot("2").snapshot_id, "2"),
+        ):
+            enqueue = next(
+                i
+                for i, record in enumerate(records)
+                if record.get("event", {}).get("event_id") == event_id
+            )
+            fill_record = next(
+                i
+                for i, record in enumerate(records)
+                if record.get("turn_id") == event_id
+                and record["record_type"] == "fill_recorded"
+            )
             self.assertLess(enqueue, fill_record)
 
-    async def test_loop_evaluates_open_brackets_before_discovering_a_new_market(self) -> None:
+    async def test_loop_evaluates_open_brackets_before_discovering_a_new_market(
+        self,
+    ) -> None:
         open_session(
             self.journal,
             1_000,
@@ -556,7 +563,17 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         admit_turn(self.journal, "old", "snap", "9")
         record_fill(
             self.journal,
-            Position("9", "snap", NOW.isoformat(), 0.4, 10, 25, 0.2, 10.2, ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00")),
+            Position(
+                "9",
+                "snap",
+                NOW.isoformat(),
+                0.4,
+                10,
+                25,
+                0.2,
+                10.2,
+                ExitPlan(0.1, -0.2, "2026-09-30T13:00:00+00:00"),
+            ),
             "old",
         )
         finish_turn(self.journal, "old", "filled")
@@ -565,7 +582,10 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             patch("chrysopoeia.loop.evaluate_exits", return_value=[]) as exits,
             patch("chrysopoeia.loop.discover_markets", return_value=(candidate("1"),)),
             patch("chrysopoeia.loop.load_market_snapshot", return_value=snapshot("1")),
-            patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=abstained())),
+            patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value=abstained()),
+            ),
         ):
             await run_loop(
                 self.params(max_cycles=2),

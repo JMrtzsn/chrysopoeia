@@ -34,9 +34,10 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
 - Session capital/limits/cadence and risk limits come only from required
-  `[session]`/`[risk]` config sections. `[venue].series` is required and must be
-  `btc-updown-5m`; BTC 5m is the only automated venue market during development,
-  so CLI discovery and `run` cannot select other markets. Explicit
+  `[session]`/`[risk]` config sections. `[venue].markets` is required and must
+  be `esports-match-winner`; automated `run` forecasts CS2/Dota 2 match winners
+  only and refuses profiles without `[session] scored_only = true`, so it never
+  emits plans or fills. Explicit
   `capture`/`cycle` targets remain verification inputs. CLI setting overrides are
   not supported. Keep `--config`, `--journal`, target/input/output flags, JSON
   formatting, and `--stop-file` as invocation controls. The Platform profile is

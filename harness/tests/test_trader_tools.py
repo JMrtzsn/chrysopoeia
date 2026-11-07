@@ -14,7 +14,7 @@ from chrysopoeia.agent import (
     build_trader_tools,
 )
 from chrysopoeia.configuration import load_harness_config
-from chrysopoeia.context import context_identity_for_series
+from chrysopoeia.context import ContextIdentity
 from chrysopoeia.context_profiles import bundled_profiles
 from chrysopoeia.financial_analysis import Candle
 from chrysopoeia.paper_cycle import LAST_SUCCESSFUL_PLAN_KEY, PLAN_CHECKS_KEY
@@ -28,14 +28,24 @@ from chrysopoeia.trading import BookLevel, MarketSnapshot, OperatingConfig
 
 class TraderToolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = load_harness_config(__import__("pathlib").Path(__file__).parents[1] / "chrysopoeia.toml")
+        self.config = load_harness_config(
+            __import__("pathlib").Path(__file__).parents[1] / "chrysopoeia.toml"
+        )
         self.snapshot = MarketSnapshot(
-            "snapshot", "123", 0.4, 1_000, 0, 0,
-            question="Will it rain?", resolution_rules="Rain is measured.",
+            "snapshot",
+            "123",
+            0.4,
+            1_000,
+            0,
+            0,
+            question="Will it rain?",
+            resolution_rules="Rain is measured.",
             end_time="2027-01-01T00:00:00+00:00",
             captured_at="2026-09-01T00:00:00+00:00",
-            source_url="https://polymarket.com/event/rain", yes_token_id="yes",
-            asks=(BookLevel(0.4, 100),), fee_rate=0.02,
+            source_url="https://polymarket.com/event/rain",
+            yes_token_id="yes",
+            asks=(BookLevel(0.4, 100),),
+            fee_rate=0.02,
             fee_source="paper-assumption:flat-2pct-v1",
             book_captured_at="2026-09-01T00:00:00+00:00",
         )
@@ -47,8 +57,20 @@ class TraderToolTests(unittest.TestCase):
         def discover(**_kwargs):
             self.discovery_calls += 1
             return (
-                MarketCandidate("123", "Will it rain?", self.snapshot.end_time, self.snapshot.source_url, "123"),
-                MarketCandidate("456", "Will it snow?", self.snapshot.end_time, "https://polymarket.com/event/snow", "456"),
+                MarketCandidate(
+                    "123",
+                    "Will it rain?",
+                    self.snapshot.end_time,
+                    self.snapshot.source_url,
+                    "123",
+                ),
+                MarketCandidate(
+                    "456",
+                    "Will it snow?",
+                    self.snapshot.end_time,
+                    "https://polymarket.com/event/snow",
+                    "456",
+                ),
             )
 
         def load(market, _bankroll, market_exposure, total_exposure, **_kwargs):
@@ -61,16 +83,26 @@ class TraderToolTests(unittest.TestCase):
                 total_exposure=total_exposure,
             )
 
-        self.find, self.get, self.check = build_trader_tools(self.config, discover=discover, load=load)
+        self.find, self.get, self.check = build_trader_tools(
+            self.config, discover=discover, load=load
+        )
 
     def plan(self, **changes):
         value = {
-            "snapshot_id": "snapshot", "market_id": "123", "action": "trade",
-            "probability": 0.46, "amount": 9.0,
-            "citations": ["market_snapshot:snapshot"], "max_entry_price": 0.41,
+            "snapshot_id": "snapshot",
+            "market_id": "123",
+            "action": "trade",
+            "probability": 0.46,
+            "amount": 9.0,
+            "citations": ["market_snapshot:snapshot"],
+            "max_entry_price": 0.41,
             "rationale": "Evidence supports a modest edge.",
-            "exit_plan": {"take_profit_roi": 0.1, "stop_loss_roi": -0.2,
-                          "exit_by": "2026-10-01T00:00:00+00:00", "hold_to_resolution": False},
+            "exit_plan": {
+                "take_profit_roi": 0.1,
+                "stop_loss_roi": -0.2,
+                "exit_by": "2026-10-01T00:00:00+00:00",
+                "hold_to_resolution": False,
+            },
         }
         value.update(changes)
         return value
@@ -79,9 +111,15 @@ class TraderToolTests(unittest.TestCase):
         result = self.find("snow", self.context)
         self.assertEqual([item["market_id"] for item in result["candidates"]], ["456"])
         self.assertEqual(self.discovery_calls, 1)
-        self.assertEqual(self.find("rain", self.context), {"ok": False, "reason": "market discovery limit reached"})
+        self.assertEqual(
+            self.find("rain", self.context),
+            {"ok": False, "reason": "market discovery limit reached"},
+        )
         self.assertEqual(self.discovery_calls, 1)
-        self.assertEqual(self.find("x" * 201, SimpleNamespace(state={})), {"ok": False, "reason": "invalid market query"})
+        self.assertEqual(
+            self.find("x" * 201, SimpleNamespace(state={})),
+            {"ok": False, "reason": "invalid market query"},
+        )
 
     def test_context_agent_limits_searches_in_its_instruction(self) -> None:
         instruction = build_agents(self.config).context_agent.instruction
@@ -96,11 +134,15 @@ class TraderToolTests(unittest.TestCase):
 
         result = self.get("123", self.context)
 
-        expected = context_identity_for_series("btc-updown-5m").as_dict()
+        expected = ContextIdentity(
+            "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1
+        ).as_dict()
         self.assertEqual(self.state["market_context"], expected)
         self.assertEqual(result["market_context"], expected)
 
-        self.snapshot = replace(self.snapshot, source_url="https://polymarket.com/event/rain")
+        self.snapshot = replace(
+            self.snapshot, source_url="https://polymarket.com/event/rain"
+        )
         unsupported_state = {"operating_config": asdict(OperatingConfig())}
         self.get("123", SimpleNamespace(state=unsupported_state))
         self.assertEqual(
@@ -133,10 +175,13 @@ class TraderToolTests(unittest.TestCase):
         result = check(self.plan(), SimpleNamespace(state=state))
         self.assertFalse(result["passed"])
         self.assertEqual(
-            result["reasons"], ["no approved context profile is available for this market"]
+            result["reasons"],
+            ["no approved context profile is available for this market"],
         )
 
-    def test_non_empty_discovery_returns_only_matches_including_zero_results(self) -> None:
+    def test_non_empty_discovery_returns_only_matches_including_zero_results(
+        self,
+    ) -> None:
         self.assertEqual(self.find("hail", self.context)["candidates"], [])
 
         self.state.clear()
@@ -149,7 +194,10 @@ class TraderToolTests(unittest.TestCase):
         self.assertEqual(self.state["market_snapshot"], asdict(self.snapshot))
         for _ in range(4):
             self.get("bad", self.context)
-        self.assertEqual(self.get("123", self.context), {"ok": False, "reason": "market snapshot lookup limit reached"})
+        self.assertEqual(
+            self.get("123", self.context),
+            {"ok": False, "reason": "market snapshot lookup limit reached"},
+        )
         self.assertEqual(self.load_calls, 1)
         self.assertEqual(self.state["market_snapshot_lookups"], 5)
 
@@ -158,11 +206,17 @@ class TraderToolTests(unittest.TestCase):
 
         self.assertEqual(plan_inputs["snapshot_id"], "snapshot")
         self.assertEqual(plan_inputs["market_id"], "123")
-        self.assertEqual(plan_inputs["valid_citation_ids"], ["market_snapshot:snapshot"])
+        self.assertEqual(
+            plan_inputs["valid_citation_ids"], ["market_snapshot:snapshot"]
+        )
         self.assertEqual(plan_inputs["captured_at"], self.snapshot.captured_at)
         self.assertEqual(plan_inputs["end_time"], self.snapshot.end_time)
-        self.assertEqual(plan_inputs["exit_by_window"]["exclusive_start"], self.snapshot.captured_at)
-        self.assertEqual(plan_inputs["exit_by_window"]["exclusive_end"], self.snapshot.end_time)
+        self.assertEqual(
+            plan_inputs["exit_by_window"]["exclusive_start"], self.snapshot.captured_at
+        )
+        self.assertEqual(
+            plan_inputs["exit_by_window"]["exclusive_end"], self.snapshot.end_time
+        )
         self.assertEqual(plan_inputs["current_executable_yes_ask"], 0.4)
         self.assertEqual(plan_inputs["best_ask"], 0.4)
         self.assertAlmostEqual(plan_inputs["maximum_amount"], 10 / 1.02)
@@ -183,16 +237,20 @@ class TraderToolTests(unittest.TestCase):
         self.find, self.get, self.check = build_trader_tools(
             self.config,
             discover=lambda **_kwargs: (),
-            load=lambda _market, _bankroll, market_exposure, total_exposure, **_kwargs: replace(
-                self.snapshot,
-                market_exposure=market_exposure,
-                total_exposure=total_exposure,
+            load=lambda _market, _bankroll, market_exposure, total_exposure, **_kwargs: (
+                replace(
+                    self.snapshot,
+                    market_exposure=market_exposure,
+                    total_exposure=total_exposure,
+                )
             ),
         )
         plan_inputs = self.get("123", self.context)["plan_inputs"]
         plan = deepcopy(plan_inputs["template"])
         plan.update(
-            probability=plan_inputs["current_executable_yes_ask"] + plan_inputs["minimum_net_edge"] + 0.01,
+            probability=plan_inputs["current_executable_yes_ask"]
+            + plan_inputs["minimum_net_edge"]
+            + 0.01,
             amount=plan_inputs["maximum_amount"],
             max_entry_price=plan_inputs["max_entry_price_for_maximum_amount"],
             rationale="Canonical evidence supports sufficient YES edge.",
@@ -226,19 +284,27 @@ class TraderToolTests(unittest.TestCase):
         )
         captured = self.get("123", self.context)["market_snapshot"]
 
-        self.assertEqual((captured["market_exposure"], captured["total_exposure"]), (7, 90))
+        self.assertEqual(
+            (captured["market_exposure"], captured["total_exposure"]), (7, 90)
+        )
         self.assertFalse(self.check(self.plan(), self.context)["passed"])
 
     def test_get_uses_authoritative_exposure_without_an_active_snapshot(self) -> None:
         self.state["portfolio_exposure"] = {
-            "market_id": "123", "market_exposure": 7, "total_exposure": 90,
+            "market_id": "123",
+            "market_exposure": 7,
+            "total_exposure": 90,
         }
 
         captured = self.get("123", self.context)["market_snapshot"]
 
-        self.assertEqual((captured["market_exposure"], captured["total_exposure"]), (7, 90))
+        self.assertEqual(
+            (captured["market_exposure"], captured["total_exposure"]), (7, 90)
+        )
 
-    def test_check_fails_then_passes_and_exactly_five_attempts_are_allowed(self) -> None:
+    def test_check_fails_then_passes_and_exactly_five_attempts_are_allowed(
+        self,
+    ) -> None:
         self.get("123", self.context)
         failed = self.check(self.plan(probability=0.44), self.context)
         passed = self.check(self.plan(), self.context)
@@ -260,7 +326,10 @@ class TraderToolTests(unittest.TestCase):
         )
         for _ in range(3):
             self.check(self.plan(probability=0.44), self.context)
-        self.assertEqual(self.check(self.plan(), self.context), {"passed": False, "reasons": ["trade plan check limit reached"]})
+        self.assertEqual(
+            self.check(self.plan(), self.context),
+            {"passed": False, "reasons": ["trade plan check limit reached"]},
+        )
 
     def test_malformed_plan_is_safe_and_counted(self) -> None:
         self.get("123", self.context)
@@ -291,7 +360,9 @@ class TraderToolTests(unittest.TestCase):
     def test_missing_fields_direct_the_trader_to_the_complete_template(self) -> None:
         self.get("123", self.context)
 
-        reasons = self.check({"snapshot_id": "snapshot", "market_id": "123"}, self.context)["reasons"]
+        reasons = self.check(
+            {"snapshot_id": "snapshot", "market_id": "123"}, self.context
+        )["reasons"]
 
         self.assertIn(
             "plan schema error: start from plan_inputs.template and submit all fields",
@@ -312,20 +383,44 @@ class TraderToolTests(unittest.TestCase):
 
         self.assertLessEqual(len(reasons), 5)
         self.assertTrue(all(len(reason) <= 200 for reason in reasons))
-        self.assertTrue(any("snapshot_id: String should have at most 200 characters" in reason for reason in reasons))
-        self.assertTrue(any("action: Input should be 'trade' or 'abstain'" in reason for reason in reasons))
-        self.assertTrue(any("probability: Input should be a valid number" in reason for reason in reasons))
+        self.assertTrue(
+            any(
+                "snapshot_id: String should have at most 200 characters" in reason
+                for reason in reasons
+            )
+        )
+        self.assertTrue(
+            any(
+                "action: Input should be 'trade' or 'abstain'" in reason
+                for reason in reasons
+            )
+        )
+        self.assertTrue(
+            any(
+                "probability: Input should be a valid number" in reason
+                for reason in reasons
+            )
+        )
         self.assertNotIn("x" * 50, " ".join(reasons))
 
     def test_check_reports_missing_snapshot_without_internal_details(self) -> None:
         result = self.check(self.plan(), self.context)
 
-        self.assertEqual(result, {"passed": False, "reasons": ["capture a market snapshot before checking a plan"]})
+        self.assertEqual(
+            result,
+            {
+                "passed": False,
+                "reasons": ["capture a market snapshot before checking a plan"],
+            },
+        )
 
     def test_canonical_agent_exposes_only_read_only_trader_tools(self) -> None:
         agents = build_agents(self.config)
         self.assertEqual(
-            [getattr(tool, "name", tool.__name__) for tool in agents.trader_agent.tools],
+            [
+                getattr(tool, "name", tool.__name__)
+                for tool in agents.trader_agent.tools
+            ],
             [
                 "find_markets",
                 "get_market",
@@ -340,8 +435,16 @@ class TraderToolTests(unittest.TestCase):
     def test_financial_analysis_tool_schemas_are_bounded_and_symbol_based(self) -> None:
         from google.adk.tools import FunctionTool
 
-        stock_schema = FunctionTool(analyze_stock_history)._get_declaration().parameters_json_schema
-        crypto_schema = FunctionTool(analyze_crypto_history)._get_declaration().parameters_json_schema
+        stock_schema = (
+            FunctionTool(analyze_stock_history)
+            ._get_declaration()
+            .parameters_json_schema
+        )
+        crypto_schema = (
+            FunctionTool(analyze_crypto_history)
+            ._get_declaration()
+            .parameters_json_schema
+        )
         self.assertEqual(set(stock_schema["properties"]), {"symbol", "limit"})
         self.assertEqual(
             set(crypto_schema["properties"]),
@@ -350,7 +453,9 @@ class TraderToolTests(unittest.TestCase):
 
     def test_financial_tool_adds_snapshot_bound_citable_analysis(self) -> None:
         candles = [
-            Candle(1_760_000_000 + i * 86_400, 100 + i, 102 + i, 99 + i, 101 + i, 10 + i)
+            Candle(
+                1_760_000_000 + i * 86_400, 100 + i, 102 + i, 99 + i, 101 + i, 10 + i
+            )
             for i in range(20)
         ]
         self.state["market_snapshot"] = asdict(self.snapshot)
@@ -390,12 +495,15 @@ class TraderToolTests(unittest.TestCase):
         value = {
             "market_snapshot": asdict(self.snapshot),
             paper_cycle.EVIDENCE_KEY: [
-                item.model_dump() for item in paper_cycle._canonical_evidence(self.snapshot)
+                item.model_dump()
+                for item in paper_cycle._canonical_evidence(self.snapshot)
             ],
         }
         context = SimpleNamespace(state=State(value=value, delta={}))
         history = {
-            "symbol": "BTC/USD", "currency": "USD", "interval": "1m",
+            "symbol": "BTC/USD",
+            "currency": "USD",
+            "interval": "1m",
             "source": "bitstamp via CCXT public OHLCV",
             "source_url": "https://www.bitstamp.net/?market=BTC%2FUSD",
             "candles": candles,
@@ -417,7 +525,9 @@ class TraderToolTests(unittest.TestCase):
             {"ok": False, "reason": "financial-analysis call limit reached"},
         )
 
-    def test_polymarket_history_tool_returns_snapshot_bound_resolved_context(self) -> None:
+    def test_polymarket_history_tool_returns_snapshot_bound_resolved_context(
+        self,
+    ) -> None:
         start = datetime(2026, 8, 31, 23, 55, tzinfo=timezone.utc)
         end = datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
         history = PolymarketSeriesHistory(
@@ -425,8 +535,30 @@ class TraderToolTests(unittest.TestCase):
             "btc-up-or-down-5m",
             "https://gamma-api.polymarket.com/events?series_id=10684",
             (
-                SeriesOutcome("1", "btc-updown-5m-1", "BTC Up or Down", start, end, end, True, "11", "12", "https://data.chain.link/btc"),
-                SeriesOutcome("2", "btc-updown-5m-2", "BTC Up or Down", start, end, end, False, "21", "22", "https://data.chain.link/btc"),
+                SeriesOutcome(
+                    "1",
+                    "btc-updown-5m-1",
+                    "BTC Up or Down",
+                    start,
+                    end,
+                    end,
+                    True,
+                    "11",
+                    "12",
+                    "https://data.chain.link/btc",
+                ),
+                SeriesOutcome(
+                    "2",
+                    "btc-updown-5m-2",
+                    "BTC Up or Down",
+                    start,
+                    end,
+                    end,
+                    False,
+                    "21",
+                    "22",
+                    "https://data.chain.link/btc",
+                ),
             ),
         )
         self.state["market_snapshot"] = asdict(self.snapshot)
@@ -448,7 +580,11 @@ class TraderToolTests(unittest.TestCase):
     def test_polymarket_history_tool_schema_is_bounded(self) -> None:
         from google.adk.tools import FunctionTool
 
-        schema = FunctionTool(analyze_polymarket_history)._get_declaration().parameters_json_schema
+        schema = (
+            FunctionTool(analyze_polymarket_history)
+            ._get_declaration()
+            .parameters_json_schema
+        )
         self.assertEqual(set(schema["properties"]), {"limit"})
         self.assertEqual(schema["properties"]["limit"]["default"], 10)
 
@@ -475,6 +611,7 @@ class TraderToolTests(unittest.TestCase):
         self.assertIn("never equal to either endpoint", instruction)
         self.assertIn("hold_to_resolution", instruction)
         self.assertIn("cite only the listed", instruction)
+
     def test_plan_check_tool_publishes_structured_plan_schema(self) -> None:
         from google.adk.tools import FunctionTool
 
@@ -482,9 +619,7 @@ class TraderToolTests(unittest.TestCase):
         plan = schema["$defs"][schema["properties"]["plan"]["$ref"].split("/")[-1]]
 
         self.assertEqual(plan["properties"]["citations"]["type"], "array")
-        self.assertEqual(
-            plan["properties"]["citations"]["items"]["type"], "string"
-        )
+        self.assertEqual(plan["properties"]["citations"]["items"]["type"], "string")
 
 
 if __name__ == "__main__":

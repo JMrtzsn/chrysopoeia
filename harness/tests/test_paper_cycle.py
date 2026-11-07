@@ -41,6 +41,7 @@ from chrysopoeia.paper_cycle import (
     EVIDENCE_KEY,
     LAST_SUCCESSFUL_PLAN_KEY,
     LAST_SUCCESSFUL_SNAPSHOT_KEY,
+    OUTCOME_STATUS_KEY,
     PAPER_CYCLE_DECISION_KEY,
     PAPER_CYCLE_FILL_KEY,
     PAPER_CYCLE_REPORT_KEY,
@@ -528,6 +529,19 @@ class PaperCycleTests(unittest.TestCase):
         self.assertTrue(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
         self.assertEqual(state[PAPER_CYCLE_REPORT_KEY], report)
         self.assertEqual({key: state[key] for key in preserved}, preserved)
+
+    def test_scored_only_session_blocks_an_approved_plan_before_any_event_or_fill(self) -> None:
+        state = cycle_state()
+        state["operating_config"] = asdict(OperatingConfig(scored_only=True))
+
+        report = finalize_paper_cycle(state, ReviewOutput.model_validate(state[REVIEW_KEY]))
+
+        self.assertEqual((report["status"], report["reason"]), ("rejected", "scored_only"))
+        self.assertIsNone(state[TRADE_PLAN_READY_KEY])
+        self.assertIsNone(state[PAPER_CYCLE_FILL_KEY])
+        self.assertEqual(state[OUTCOME_STATUS_KEY], "policy_rejected")
+        self.assertFalse(state[PAPER_CYCLE_DECISION_KEY]["allowed"])
+        self.assertEqual(state[PAPER_CYCLE_DECISION_KEY]["reason"], "scored_only")
 
     def test_finalizer_rejects_unchecked_or_changed_plan_and_snapshot(self) -> None:
         for change in ("missing", "plan", "snapshot"):

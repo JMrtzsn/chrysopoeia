@@ -312,7 +312,16 @@ class AccountingTests(unittest.TestCase):
         self.book()
         _record_fill(self.directory, _position())
 
-        close_position(self.directory, "m1", "take_profit", "exit-snapshot", 0.5, 12.5, 0.25, "2026-09-15T12:00:00+00:00")
+        close_position(
+            self.directory,
+            "m1",
+            "take_profit",
+            "exit-snapshot",
+            0.5,
+            12.5,
+            0.25,
+            "2026-09-15T12:00:00+00:00",
+        )
         closed = replay(self.directory)
 
         self.assertNotIn("m1", closed.positions)
@@ -322,11 +331,22 @@ class AccountingTests(unittest.TestCase):
             (0, 1, 1),
         )
         with self.assertRaises(JournalError):
-            close_position(self.directory, "m1", "take_profit", "exit-snapshot", 0.5, 12.5, 0.25, "2026-09-15T12:00:00+00:00")
+            close_position(
+                self.directory,
+                "m1",
+                "take_profit",
+                "exit-snapshot",
+                0.5,
+                12.5,
+                0.25,
+                "2026-09-15T12:00:00+00:00",
+            )
         with self.assertRaises(JournalError):
             settle(self.directory, closed, "m1", "resolved_yes")
 
-    def test_close_cannot_claim_a_trigger_that_the_approved_plan_did_not_reach(self) -> None:
+    def test_close_cannot_claim_a_trigger_that_the_approved_plan_did_not_reach(
+        self,
+    ) -> None:
         self.book()
         _record_fill(self.directory, _position())
         before = len(journal_path(self.directory).read_text().splitlines())
@@ -343,7 +363,9 @@ class AccountingTests(unittest.TestCase):
                 "2026-09-15T12:00:00+00:00",
             )
 
-        self.assertEqual(len(journal_path(self.directory).read_text().splitlines()), before)
+        self.assertEqual(
+            len(journal_path(self.directory).read_text().splitlines()), before
+        )
 
     def test_cumulative_loss_crossing_the_budget_halts_the_session(self) -> None:
         self.book()

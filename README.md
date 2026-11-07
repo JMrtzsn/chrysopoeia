@@ -78,38 +78,31 @@ bounded journal-backed session. `book`, `mark`, and `settle` inspect or update
 the paper journal. No cycle guarantees a trade.
 
 Operating settings are config-only: `[session]` sets capital, loss, cycle/time,
-cost, and cadence limits; `[risk]` sets exposure limits and optional existing
-exposures for standalone `cycle`; `[venue]` must set
-`series = "btc-updown-5m"`. Unknown/missing settings fail validation. Old
+cost, cadence, and scored-only limits; `[risk]` sets exposure limits and
+optional existing exposures for standalone `cycle`; `[venue]` must set
+`markets = "esports-match-winner"`. Unknown/missing settings fail validation. Old
 operating flags such as `--max-cycles`, `--bankroll`, `--interval-seconds`, and
 discovery `--limit` are rejected. Invocation inputs (`--config`, `--journal`,
 targets, input/output files, `--stop-file`, `--json`) remain flags. The default
-profile allows one `run` cycle; `configs/platform.toml` allows two with a $1.50
+profile allows one `run` cycle; `configs/platform.toml` allows two with a $3
 session cost ceiling. `[session].cost_budget` limits the journal-backed `run`
 session; `cycle` uses the configured operating/daily cost limits, not run's
 cycle/deadline controls. Existing journals still enforce persisted
 capital/target/window compatibility on resume. Use a new journal for a new
 session.
 
-BTC 5m Up/Down is the only automated venue market during development. Every
-bundled profile binds `[venue].series`, and the trader's discovery tool uses the
-same series, so `discover` and `run` cannot select other markets. Explicit
-`capture`/`cycle` targets remain available for verification. The benchmark
-`configs/btc5m.toml` sets 20 cycles and a $15 ceiling; see
+Automated runs forecast CS2 and Dota 2 match-winner markets, scored-only: the
+forecast is recorded and published, but deterministic policy blocks every plan,
+so no paper fill or Consumer fill happens. `run` refuses a profile without
+`[session] scored_only = true`. BTC 5m automation is retired. Explicit
+`capture`/`cycle` targets remain available for verification. See the
 [collection instructions](harness/docs/collection.md). Do not start paid
 sessions without approved bounds.
 
 `[research] enabled` (optional, default `true`) controls the pre-trader
-web-research step. `configs/btc5m.toml` and `configs/platform.toml` set it to
-`false`: BTC 5m evidence comes from the snapshot and 1-minute OHLCV analysis,
-and grounded search dominated cost. Disabling it also removes the research
-allowance from the reservation (about $0.70 to $0.28 per failed turn).
-
-`[venue]` also accepts `forecast_offset_seconds` (0–299, default 0) and
-`window_baseline` (default `false`). The BTC profiles forecast 120 seconds into
-the window and attach a deterministic baseline evidence record (window open,
-last price, delta, remaining time, volatility, and a normal-approximation P(Up)).
-The offset is a minimum elapsed time, not an exact schedule.
+web-research step. The bundled profiles enable it; grounded research inflates
+prompts, so they raise `maximum_input_tokens_per_call` to 32768, which reserves
+up to about $1.43 per cycle.
 
 To score forecasts after their markets resolve (any binary Yes/No or Up/Down
 Polymarket market; Up is treated as the YES side):

@@ -28,7 +28,9 @@ class BigQueryHistoryTests(unittest.TestCase):
         job.result.return_value = [row]
         client = Mock()
         client.query.return_value = job
-        identity = ContextIdentity("polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64)
+        identity = ContextIdentity(
+            "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64
+        )
         as_of = datetime(2026, 10, 21, tzinfo=timezone.utc)
 
         result = query_context_history(
@@ -62,7 +64,9 @@ class BigQueryHistoryTests(unittest.TestCase):
 
     def test_invalid_table_identifier_is_rejected_before_query(self) -> None:
         client = Mock()
-        identity = ContextIdentity("polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64)
+        identity = ContextIdentity(
+            "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64
+        )
 
         with self.assertRaises(ValueError):
             query_context_history(
@@ -79,7 +83,9 @@ class BigQueryHistoryTests(unittest.TestCase):
         job.result.return_value = [{"decision_count": "not-a-count"}]
         client = Mock()
         client.query.return_value = job
-        identity = ContextIdentity("polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64)
+        identity = ContextIdentity(
+            "polymarket:series:btc-updown-5m", "crypto.btcusd.5m.updown", 1, "a" * 64
+        )
 
         with self.assertRaises(ValueError):
             query_context_history(

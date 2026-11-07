@@ -79,8 +79,8 @@ Acceptance should prove deterministic routing, isolation of tools and history
 between different market keys, rejection of unregistered tools and invalid
 profiles, safe handling of unknown markets, and unchanged global risk/accounting
 controls. This is bounded profile generation, not agent self-modification or
-tool creation. Expanding the current BTC-only automated market restriction is a
-separate approval.
+tool creation. Expanding automation beyond scored-only CS2/Dota 2 match winners
+is a separate approval.
 
 ## Binary outcome sides
 

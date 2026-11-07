@@ -95,7 +95,9 @@ def openrouter_web_research(
             if not isinstance(annotation, dict):
                 continue
             citation = annotation.get("url_citation")
-            if annotation.get("type") != "url_citation" or not isinstance(citation, dict):
+            if annotation.get("type") != "url_citation" or not isinstance(
+                citation, dict
+            ):
                 continue
             result_count += 1
             excerpt = _clean_text(citation.get("content"), MAX_EXCERPT_LENGTH) or None
@@ -103,7 +105,8 @@ def openrouter_web_research(
                 record = external_evidence(
                     snapshot,
                     citation.get("url"),
-                    _clean_text(citation.get("title"), MAX_TITLE_LENGTH) or "Web source",
+                    _clean_text(citation.get("title"), MAX_TITLE_LENGTH)
+                    or "Web source",
                     current.isoformat(),
                     excerpt=excerpt,
                 )

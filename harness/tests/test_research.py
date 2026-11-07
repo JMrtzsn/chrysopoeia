@@ -26,10 +26,23 @@ def snapshot() -> MarketSnapshot:
     )
 
 
-def response(annotations: list[object], *, prompt_tokens: int = 100, completion_tokens: int = 20) -> dict[str, object]:
+def response(
+    annotations: list[object], *, prompt_tokens: int = 100, completion_tokens: int = 20
+) -> dict[str, object]:
     return {
-        "choices": [{"message": {"role": "assistant", "content": "answer", "annotations": annotations}}],
-        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "answer",
+                    "annotations": annotations,
+                }
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        },
     }
 
 
@@ -48,7 +61,9 @@ class OpenRouterResearchTests(unittest.TestCase):
             post=post,
             now=datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc),
         )
-        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(
+            captured["url"], "https://openrouter.ai/api/v1/chat/completions"
+        )
         body = captured["body"]
         assert isinstance(body, dict)
         self.assertEqual(body["model"], "openai/gpt-4.1-mini")
@@ -81,7 +96,10 @@ class OpenRouterResearchTests(unittest.TestCase):
         payload = response(
             [
                 {"type": "file_citation", "url_citation": {"url": "https://x.test/a"}},
-                {"type": "url_citation", "url_citation": {"url": "http://insecure.test", "title": "bad"}},
+                {
+                    "type": "url_citation",
+                    "url_citation": {"url": "http://insecure.test", "title": "bad"},
+                },
                 {"type": "url_citation", "url_citation": {"url": "https://ok.test/a"}},
                 {"type": "url_citation", "url_citation": {"url": "https://ok.test/a"}},
             ]
@@ -93,7 +111,10 @@ class OpenRouterResearchTests(unittest.TestCase):
     def test_caps_records_and_defaults_missing_title(self) -> None:
         payload = response(
             [
-                {"type": "url_citation", "url_citation": {"url": f"https://example.com/{index}"}}
+                {
+                    "type": "url_citation",
+                    "url_citation": {"url": f"https://example.com/{index}"},
+                }
                 for index in range(MAX_RESEARCH_RECORDS + 4)
             ]
         )
@@ -117,7 +138,10 @@ class OpenRouterResearchTests(unittest.TestCase):
                 )
 
     def test_missing_annotations_yields_no_evidence(self) -> None:
-        for payload in ({"choices": [{"message": {}}]}, {"choices": [{"message": {"annotations": "x"}}]}):
+        for payload in (
+            {"choices": [{"message": {}}]},
+            {"choices": [{"message": {"annotations": "x"}}]},
+        ):
             with self.subTest(payload=payload):
                 records, count, in_tokens, out_tokens = self.run_research(payload)
                 self.assertEqual((records, count, in_tokens, out_tokens), ([], 0, 0, 0))
@@ -128,7 +152,9 @@ class OpenRouterResearchTests(unittest.TestCase):
             raise ValueError("research response is too large")
 
         with self.assertRaises(ValueError):
-            openrouter_web_research(snapshot(), model="openrouter/m", api_key="k", post=post)
+            openrouter_web_research(
+                snapshot(), model="openrouter/m", api_key="k", post=post
+            )
 
 
 if __name__ == "__main__":

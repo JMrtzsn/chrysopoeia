@@ -47,8 +47,11 @@ class OperatingConfig:
     maximum_total_exposure: float = MAXIMUM_TOTAL_EXPOSURE
     maximum_loss: float = 100
     daily_cloud_cost_budget: float = 5
+    scored_only: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.scored_only, bool):
+            raise ValueError("scored_only must be a boolean")
         for value, name in (
             (self.bankroll, "bankroll"),
             (self.maximum_market_exposure, "maximum_market_exposure"),

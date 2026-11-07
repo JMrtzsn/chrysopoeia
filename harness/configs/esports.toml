@@ -1,4 +1,4 @@
-# Esports forecast-benchmark profile: explicit capture/cycle targets only.
+# Esports scored-only benchmark: CS2/Dota 2 match winners, forecasts never trade.
 # Grounded research inflates prompts past the default 8192 input ceiling.
 [runtime]
 adapter = "adk"
@@ -6,7 +6,7 @@ mode = "paper"
 
 [venue]
 adapter = "polymarket"
-series = "btc-updown-5m"
+markets = "esports-match-winner"
 paper_fee_rate = 0.02
 paper_fee_source = "paper-assumption:flat-2pct-v1"
 
@@ -34,6 +34,7 @@ max_cycles = 1
 cost_budget = "5"
 interval_seconds = 300
 daily_cloud_cost_budget = 5
+scored_only = true
 
 [risk]
 maximum_market_exposure = 0.01

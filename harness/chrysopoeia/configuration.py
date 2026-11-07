@@ -93,9 +93,7 @@ class VenueConfig:
     adapter: str
     paper_fee_rate: float
     paper_fee_source: str
-    series: str
-    forecast_offset_seconds: float = 0.0
-    window_baseline: bool = False
+    markets: str
 
 
 @dataclass(frozen=True)
@@ -108,6 +106,7 @@ class SessionConfig:
     cost_budget: Decimal
     interval_seconds: float
     daily_cloud_cost_budget: float
+    scored_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -184,7 +183,9 @@ class HarnessConfig:
         root_keys = {"runtime", "venue", "models", "cost", "session", "risk"}
         if isinstance(value, Mapping):
             root_keys.update(
-                key for key in ("research", "history", "context_learning") if key in value
+                key
+                for key in ("research", "history", "context_learning")
+                if key in value
             )
         root = _table(value, root_keys, "harness")
         research_raw = root.get("research", {"enabled": True})
@@ -204,19 +205,37 @@ class HarnessConfig:
             raise ConfigurationError("context learning enabled must be a boolean")
         context_learning_config = ContextLearningConfig(learning["enabled"])
         runtime = _table(root["runtime"], {"adapter", "mode"}, "runtime")
-        venue_keys = {"adapter", "paper_fee_rate", "paper_fee_source", "series"}
-        for optional in ("forecast_offset_seconds", "window_baseline"):
-            if isinstance(root["venue"], Mapping) and optional in root["venue"]:
-                venue_keys.add(optional)
-        venue = _table(root["venue"], venue_keys, "venue")
-        session = _table(root["session"], {
-            "bankroll", "maximum_loss", "target_win_rate", "window_minutes",
-            "max_cycles", "cost_budget", "interval_seconds", "daily_cloud_cost_budget",
-        }, "session")
-        risk = _table(root["risk"], {
-            "maximum_market_exposure", "maximum_total_exposure",
-            "market_exposure", "total_exposure",
-        }, "risk")
+        venue = _table(
+            root["venue"],
+            {"adapter", "paper_fee_rate", "paper_fee_source", "markets"},
+            "venue",
+        )
+        session_keys = {
+            "bankroll",
+            "maximum_loss",
+            "target_win_rate",
+            "window_minutes",
+            "max_cycles",
+            "cost_budget",
+            "interval_seconds",
+            "daily_cloud_cost_budget",
+        }
+        if isinstance(root["session"], Mapping) and "scored_only" in root["session"]:
+            session_keys.add("scored_only")
+        session = _table(root["session"], session_keys, "session")
+        scored_only = session.get("scored_only", False)
+        if not isinstance(scored_only, bool):
+            raise ConfigurationError("session scored_only must be a boolean")
+        risk = _table(
+            root["risk"],
+            {
+                "maximum_market_exposure",
+                "maximum_total_exposure",
+                "market_exposure",
+                "total_exposure",
+            },
+            "risk",
+        )
         session_config = SessionConfig(
             _number(session["bankroll"], "bankroll"),
             _number(session["maximum_loss"], "maximum loss"),
@@ -226,6 +245,7 @@ class HarnessConfig:
             _price(session["cost_budget"], "cost budget"),
             _number(session["interval_seconds"], "interval seconds"),
             _number(session["daily_cloud_cost_budget"], "daily cloud cost budget"),
+            scored_only,
         )
         if (
             session_config.target_win_rate > 1
@@ -234,13 +254,23 @@ class HarnessConfig:
             or session_config.daily_cloud_cost_budget <= 0
         ):
             raise ConfigurationError("session operating limits are invalid")
-        risk_config = RiskConfig(*(
-            _number(risk[key], key) for key in (
-                "maximum_market_exposure", "maximum_total_exposure",
-                "market_exposure", "total_exposure",
+        risk_config = RiskConfig(
+            *(
+                _number(risk[key], key)
+                for key in (
+                    "maximum_market_exposure",
+                    "maximum_total_exposure",
+                    "market_exposure",
+                    "total_exposure",
+                )
             )
-        ))
-        if not 0 <= risk_config.market_exposure <= risk_config.total_exposure <= session_config.bankroll:
+        )
+        if (
+            not 0
+            <= risk_config.market_exposure
+            <= risk_config.total_exposure
+            <= session_config.bankroll
+        ):
             raise ConfigurationError("existing exposures are inconsistent")
         cost_keys = {
             "model",
@@ -285,27 +315,10 @@ class HarnessConfig:
         fee_source = _text(venue["paper_fee_source"], "paper fee source")
         if fee and fee_source == "paper-assumption:no-fee-v1":
             raise ConfigurationError("positive paper fee requires explicit provenance")
-        series = _text(venue["series"], "venue series")
-        if series != "btc-updown-5m":
-            raise ConfigurationError("venue series is unsupported")
-        if session_config.interval_seconds != 300:
-            raise ConfigurationError("BTC 5m series requires a 300-second interval")
-        offset = venue.get("forecast_offset_seconds", 0)
-        if (
-            isinstance(offset, bool)
-            or not isinstance(offset, (int, float))
-            or not isfinite(offset)
-            or not 0 <= offset < 300
-        ):
-            raise ConfigurationError(
-                "forecast offset must be a finite number of seconds in [0, 300)"
-            )
-        baseline = venue.get("window_baseline", False)
-        if not isinstance(baseline, bool):
-            raise ConfigurationError("window baseline must be a boolean")
-        venue_config = VenueConfig(
-            adapter, float(fee), fee_source, series, float(offset), baseline
-        )
+        markets = _text(venue["markets"], "venue markets")
+        if markets != "esports-match-winner":
+            raise ConfigurationError("venue markets are unsupported")
+        venue_config = VenueConfig(adapter, float(fee), fee_source, markets)
 
         model_adapter = _text(
             models.get("adapter", "adk-gemini")
@@ -321,7 +334,10 @@ class HarnessConfig:
         model_config = ModelConfig(
             model_adapter,
             model_location,
-            *(_text(models[name], f"{name} model") for name in ("root", "context", "trader", "reviewer")),
+            *(
+                _text(models[name], f"{name} model")
+                for name in ("root", "context", "trader", "reviewer")
+            ),
         )
         configured_models = [
             getattr(model_config, role)
@@ -416,9 +432,13 @@ class HarnessConfig:
     @property
     def operating(self) -> OperatingConfig:
         return OperatingConfig(
-            self.session.bankroll, 1,
-            self.risk.maximum_market_exposure, self.risk.maximum_total_exposure,
-            self.session.maximum_loss, self.session.daily_cloud_cost_budget,
+            self.session.bankroll,
+            1,
+            self.risk.maximum_market_exposure,
+            self.risk.maximum_total_exposure,
+            self.session.maximum_loss,
+            self.session.daily_cloud_cost_budget,
+            self.session.scored_only,
         )
 
     @property

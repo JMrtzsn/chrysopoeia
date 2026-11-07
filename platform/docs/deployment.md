@@ -25,16 +25,14 @@ Cloud.
   mounted at `/mnt/journal`; journal semantics belong to the harness.
 - Operating settings come from the bundled Harness-owned
   `configs/platform.toml`, selected by `CHRYSOPOEIA_CONFIG=/etc/chrysopoeia-platform.toml`.
-  The profile covers two BTC 5m windows (required `series = "btc-updown-5m"`,
-  300-second cadence), a 60-minute configured session deadline bounded by the
-  job's 900-second task timeout, and a $1.50 session model-cost ceiling. Two
-  windows plus the boundary wait stay well inside that timeout. Cost is reserved
-  before model work; the profile disables the pre-trader research step
-  (`[research] enabled = false`), so one cycle reserves $0.2838528 and expected
-  actual spend for two completed cycles is about $0.09, not a guaranteed bill.
-  Changing the profile requires an image rebuild and digest update, not extra CLI
-  setting flags. The deployed job still runs the previous image with research
-  enabled until that rebuild and rollout happen.
+  The profile forecasts up to two CS2/Dota 2 match-winner markets per session,
+  scored-only (`[session] scored_only = true`: no plans or fills), with a
+  60-minute configured session deadline bounded by the job's 900-second task
+  timeout and a $3 session model-cost ceiling. Cost is reserved before model
+  work; grounded research is enabled with a 32768-token input ceiling, so one
+  cycle reserves up to $1.43376. Changing the profile requires an image rebuild
+  and digest update, not extra CLI setting flags. The image deployed 2026-11-07
+  still carries the retired BTC profile until the next rebuild and rollout.
 - The harness owns market selection, cadence, recovery, and stopping. The
   platform launches the process but does not drive cycles.
 - Re-running the job starts a fresh bounded session only when given a new

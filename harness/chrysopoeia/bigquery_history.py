@@ -127,7 +127,11 @@ def _count(row: object, key: str) -> int:
 
 def _amount(row: object, key: str) -> float:
     value = _row_value(row, key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
         raise ValueError("BigQuery history result is invalid")
     return float(value)
 
@@ -157,8 +161,12 @@ def query_context_history(
             bigquery.ScalarQueryParameter("lookback_days", "INT64", LOOKBACK_DAYS),
             bigquery.ScalarQueryParameter("scope_key", "STRING", context.scope_key),
             bigquery.ScalarQueryParameter("profile_id", "STRING", context.profile_id),
-            bigquery.ScalarQueryParameter("profile_version", "INT64", context.profile_version),
-            bigquery.ScalarQueryParameter("manifest_hash", "STRING", context.manifest_hash),
+            bigquery.ScalarQueryParameter(
+                "profile_version", "INT64", context.profile_version
+            ),
+            bigquery.ScalarQueryParameter(
+                "manifest_hash", "STRING", context.manifest_hash
+            ),
         ],
     )
     query = _QUERY.format(table=table_ref)

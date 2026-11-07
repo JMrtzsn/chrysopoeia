@@ -68,18 +68,32 @@ def _http_get(url: str, timeout: float, max_bytes: int) -> bytes:
 
 
 def _valid_limit(limit: int) -> int:
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 14 <= limit <= MAX_CANDLES:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 14 <= limit <= MAX_CANDLES
+    ):
         raise ValueError(f"limit must be between 14 and {MAX_CANDLES}")
     return limit
 
 
-def _candle(timestamp: object, open_: object, high: object, low: object, close: object, volume: object) -> Candle:
+def _candle(
+    timestamp: object,
+    open_: object,
+    high: object,
+    low: object,
+    close: object,
+    volume: object,
+) -> Candle:
     if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
         raise ValueError("invalid candle timestamp")
     if not math.isfinite(float(timestamp)) or not 0 < timestamp < 4_102_444_800:
         raise ValueError("invalid candle timestamp")
     values = (open_, high, low, close, volume)
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in values
+    ):
         raise ValueError("invalid candle values")
     converted = tuple(float(value) for value in values)
     if any(not math.isfinite(value) for value in converted):
@@ -92,13 +106,20 @@ def _candle(timestamp: object, open_: object, high: object, low: object, close: 
         or low_value > min(open_value, close_value)
     ):
         raise ValueError("inconsistent candle values")
-    return Candle(int(timestamp), open_value, high_value, low_value, close_value, volume_value)
+    return Candle(
+        int(timestamp), open_value, high_value, low_value, close_value, volume_value
+    )
 
 
-def stock_history(symbol: str, *, limit: int = 100, fetch: Fetch = _http_get) -> dict[str, object]:
+def stock_history(
+    symbol: str, *, limit: int = 100, fetch: Fetch = _http_get
+) -> dict[str, object]:
     """Fetch daily US-equity candles from Yahoo Finance's public chart endpoint."""
     limit = _valid_limit(limit)
-    if not isinstance(symbol, str) or re.fullmatch(r"[A-Za-z0-9^=._-]{1,20}", symbol) is None:
+    if (
+        not isinstance(symbol, str)
+        or re.fullmatch(r"[A-Za-z0-9^=._-]{1,20}", symbol) is None
+    ):
         raise ValueError("invalid stock symbol")
     encoded = urllib.parse.quote(symbol.upper(), safe="")
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?range=1y&interval=1d"
@@ -110,13 +131,26 @@ def stock_history(symbol: str, *, limit: int = 100, fetch: Fetch = _http_get) ->
         result = response["chart"]["result"][0]
         timestamps = result["timestamp"]
         quote = result["indicators"]["quote"][0]
-        opens, highs, lows, closes = (quote[key] for key in ("open", "high", "low", "close"))
+        opens, highs, lows, closes = (
+            quote[key] for key in ("open", "high", "low", "close")
+        )
         volumes = quote.get("volume") or [0] * len(timestamps)
     except (KeyError, IndexError, TypeError):
         raise ValueError("stock history is unavailable") from None
-    if not all(isinstance(values, list) for values in (timestamps, opens, highs, lows, closes, volumes)):
+    if not all(
+        isinstance(values, list)
+        for values in (timestamps, opens, highs, lows, closes, volumes)
+    ):
         raise ValueError("stock history response is invalid")
-    if len({len(values) for values in (timestamps, opens, highs, lows, closes, volumes)}) != 1:
+    if (
+        len(
+            {
+                len(values)
+                for values in (timestamps, opens, highs, lows, closes, volumes)
+            }
+        )
+        != 1
+    ):
         raise ValueError("stock history response is inconsistent")
     candles: list[Candle] = []
     for values in zip(timestamps, opens, highs, lows, closes, volumes, strict=True):
@@ -153,9 +187,16 @@ def crypto_history(
         exchange_id = exchange_id.strip().lower()
     if isinstance(symbol, str):
         symbol = symbol.strip().upper().replace("-", "/")
-    if not isinstance(exchange_id, str) or re.fullmatch(r"[a-z0-9]{2,24}", exchange_id) is None:
+    if (
+        not isinstance(exchange_id, str)
+        or re.fullmatch(r"[a-z0-9]{2,24}", exchange_id) is None
+    ):
         raise ValueError("invalid CCXT exchange id")
-    match = re.fullmatch(r"([A-Z0-9]{2,12})/([A-Z0-9]{2,12})", symbol) if isinstance(symbol, str) else None
+    match = (
+        re.fullmatch(r"([A-Z0-9]{2,12})/([A-Z0-9]{2,12})", symbol)
+        if isinstance(symbol, str)
+        else None
+    )
     if match is None:
         raise ValueError("symbol must look like BTC/USD")
     if not isinstance(interval, str) or interval not in CRYPTO_TIMEFRAMES:
@@ -184,13 +225,17 @@ def crypto_history(
             raise ValueError("now must include a UTC offset")
         since = int(end.timestamp() * 1000) - CRYPTO_TIMEFRAMES[interval] * limit * 1000
         rows = exchange.fetch_ohlcv(symbol, interval, since, limit)
-        if not isinstance(rows, list) or any(not isinstance(row, list) or len(row) != 6 for row in rows):
+        if not isinstance(rows, list) or any(
+            not isinstance(row, list) or len(row) != 6 for row in rows
+        ):
             raise ValueError("crypto history response is invalid")
         candles = [_candle(float(row[0]) / 1000, *row[1:]) for row in rows]
         urls = exchange.urls
         source_root = urls.get("www") if isinstance(urls, Mapping) else None
         if isinstance(source_root, list):
-            source_root = next((value for value in source_root if isinstance(value, str)), None)
+            source_root = next(
+                (value for value in source_root if isinstance(value, str)), None
+            )
         if not isinstance(source_root, str) or not source_root.startswith("https://"):
             raise ValueError("exchange source URL is unavailable")
         source_url = f"{source_root.rstrip('/')}/?{urllib.parse.urlencode({'market': symbol, 'timeframe': interval, 'since': since, 'limit': limit})}"
@@ -214,7 +259,11 @@ def crypto_history(
 
 def analyze_history(history: dict[str, object]) -> dict[str, object]:
     candles = history.get("candles")
-    if not isinstance(candles, list) or len(candles) < 2 or any(not isinstance(c, Candle) for c in candles):
+    if (
+        not isinstance(candles, list)
+        or len(candles) < 2
+        or any(not isinstance(c, Candle) for c in candles)
+    ):
         raise ValueError("invalid candle series")
     closes = [c.close for c in candles]
     returns = [(right / left - 1.0) * 100.0 for left, right in pairwise(closes)]
@@ -246,14 +295,24 @@ def analyze_history(history: dict[str, object]) -> dict[str, object]:
     for index in range(13, len(candles)):
         highest = max(highs[index - 13 : index + 1])
         lowest = min(lows[index - 13 : index + 1])
-        stochastic.append(100.0 * (closes[index] - lowest) / (highest - lowest) if highest > lowest else 50.0)
+        stochastic.append(
+            100.0 * (closes[index] - lowest) / (highest - lowest)
+            if highest > lowest
+            else 50.0
+        )
     stochastic_k = stochastic[-1] if stochastic else None
     stochastic_d = statistics.fmean(stochastic[-3:]) if len(stochastic) >= 3 else None
 
     true_ranges = []
     for index, candle in enumerate(candles):
         previous = closes[index - 1] if index else candle.close
-        true_ranges.append(max(candle.high - candle.low, abs(candle.high - previous), abs(candle.low - previous)))
+        true_ranges.append(
+            max(
+                candle.high - candle.low,
+                abs(candle.high - previous),
+                abs(candle.low - previous),
+            )
+        )
     atr14 = statistics.fmean(true_ranges[-14:]) if len(true_ranges) >= 14 else None
 
     def rounded(value: float | None) -> float | None:
@@ -267,8 +326,12 @@ def analyze_history(history: dict[str, object]) -> dict[str, object]:
         "price_adjustment": history.get("price_adjustment", "unspecified"),
         "interval": history["interval"],
         "bar_count": len(candles),
-        "first_bar": datetime.fromtimestamp(candles[0].timestamp, timezone.utc).isoformat(),
-        "last_bar": datetime.fromtimestamp(candles[-1].timestamp, timezone.utc).isoformat(),
+        "first_bar": datetime.fromtimestamp(
+            candles[0].timestamp, timezone.utc
+        ).isoformat(),
+        "last_bar": datetime.fromtimestamp(
+            candles[-1].timestamp, timezone.utc
+        ).isoformat(),
         "close": rounded(closes[-1]),
         "mean_close": rounded(statistics.fmean(closes)),
         "close_stddev": rounded(statistics.pstdev(closes)),

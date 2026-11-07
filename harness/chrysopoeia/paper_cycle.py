@@ -34,7 +34,13 @@ TURN_OUTCOME_KEY = "turn_outcome"
 PAPER_CYCLE_REPORT_KEY = "paper_cycle_report"
 OUTCOME_STATUS_KEY = "paper_cycle_outcome_status"
 OUTCOME_STATUSES = frozenset(
-    {"abstained", "plan_check_rejected", "reviewer_rejected", "policy_rejected", "plan_ready"}
+    {
+        "abstained",
+        "plan_check_rejected",
+        "reviewer_rejected",
+        "policy_rejected",
+        "plan_ready",
+    }
 )
 LAST_SUCCESSFUL_PLAN_KEY = "last_successful_trade_plan"
 LAST_SUCCESSFUL_SNAPSHOT_KEY = "last_successful_trade_plan_snapshot"
@@ -59,7 +65,9 @@ class EvidenceRecord(StrictOutput):
     retrieved_at: str = Field(min_length=1, max_length=MAX_RETRIEVED_AT_LENGTH)
     source_kind: Literal["market_snapshot", "external"]
     snapshot_id: str = Field(min_length=1, max_length=MAX_SNAPSHOT_ID_LENGTH)
-    excerpt: str | None = Field(default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH)
+    excerpt: str | None = Field(
+        default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH
+    )
 
     @field_validator("url")
     @classmethod
@@ -82,7 +90,9 @@ class EvidenceRecord(StrictOutput):
         if value is None:
             return None
         value = value.strip()
-        if not value or any(ord(character) < 32 or ord(character) == 127 for character in value):
+        if not value or any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ):
             raise ValueError("excerpt must be non-blank and contain no controls")
         return value
 
@@ -100,7 +110,11 @@ class EvidenceRecord(StrictOutput):
         if self.source_kind == "external":
             normalized = _normalize_web_url(self.url)
             expected = _external_evidence_id(
-                self.snapshot_id, normalized, self.title, self.retrieved_at, self.excerpt
+                self.snapshot_id,
+                normalized,
+                self.title,
+                self.retrieved_at,
+                self.excerpt,
             )
             if self.evidence_id != expected:
                 raise ValueError("evidence_id does not match external evidence")
@@ -251,7 +265,9 @@ class ProposalOutput(StrictOutput):
     market_id: str = Field(min_length=1, max_length=200)
     action: Literal["trade", "abstain"]
     probability: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
-    outcome: Literal["YES", "NO"] = Field(default="YES", exclude_if=lambda value: value == "YES")
+    outcome: Literal["YES", "NO"] = Field(
+        default="YES", exclude_if=lambda value: value == "YES"
+    )
     amount: float = Field(strict=True)
     citations: list[CitationId] = Field(max_length=10)
     rationale: str = Field(min_length=1, max_length=500)
@@ -327,7 +343,9 @@ class OutcomeEvidence(StrictOutput):
     url: str = Field(min_length=1, max_length=2048)
     title: str = Field(min_length=1, max_length=500)
     source_kind: Literal["market_snapshot", "external"]
-    excerpt: str | None = Field(default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH)
+    excerpt: str | None = Field(
+        default=None, min_length=1, max_length=MAX_EVIDENCE_EXCERPT_LENGTH
+    )
 
 
 class ContextReference(StrictOutput):
@@ -362,7 +380,9 @@ class ContextProfileGuidance(StrictOutput):
     @field_validator("instructions")
     @classmethod
     def validate_instructions(cls, value: str) -> str:
-        if not value.strip() or any(ord(char) < 32 and char not in "\n\t" for char in value):
+        if not value.strip() or any(
+            ord(char) < 32 and char not in "\n\t" for char in value
+        ):
             raise ValueError("context profile instructions are invalid")
         return value.strip()
 
@@ -407,10 +427,15 @@ def build_turn_outcome(
     if not isinstance(evidence, (list, tuple)) or len(evidence) > 20:
         raise ValueError("outcome evidence is invalid")
     try:
-        checked_evidence = [OutcomeEvidence.model_validate(record) for record in evidence]
-        checked_context = ContextReference.model_validate(context) if context is not None else None
+        checked_evidence = [
+            OutcomeEvidence.model_validate(record) for record in evidence
+        ]
+        checked_context = (
+            ContextReference.model_validate(context) if context is not None else None
+        )
         checked_research = ResearchStatus.model_validate(
-            research or {"status": "unavailable", "reason": "legacy outcome", "query_count": 0}
+            research
+            or {"status": "unavailable", "reason": "legacy outcome", "query_count": 0}
         )
     except (TypeError, ValueError):
         raise ValueError("outcome research is invalid") from None
@@ -434,9 +459,14 @@ def build_turn_outcome(
         raise ValueError("plan-ready outcome requires a trade plan event")
     if status != "plan_ready" and trade_plan_event_id is not None:
         raise ValueError("rejected outcome cannot reference a trade plan event")
-    turn_id = "turn-" + sha256(
-        json.dumps([output.snapshot_id, output.market_id], separators=(",", ":")).encode()
-    ).hexdigest()[:24]
+    turn_id = (
+        "turn-"
+        + sha256(
+            json.dumps(
+                [output.snapshot_id, output.market_id], separators=(",", ":")
+            ).encode()
+        ).hexdigest()[:24]
+    )
     if status in {"abstained", "plan_check_rejected"} and (
         checked_review is not None or checked_policy is not None
     ):
@@ -487,7 +517,10 @@ def build_turn_outcome(
             if checked_context is not None
             else 2
             if output.outcome == "NO"
-            or any(check.plan and check.plan.outcome == "NO" for check in checked_plan_checks)
+            or any(
+                check.plan and check.plan.outcome == "NO"
+                for check in checked_plan_checks
+            )
             else 1
         ),
         "record_type": "turn_outcome",
@@ -530,9 +563,23 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         {"status": "unavailable", "reason": "legacy outcome", "query_count": 0},
     )
     legacy_keys = {
-        "schema_version", "record_type", "event_id", "turn_id", "snapshot_id",
-        "market_id", "created_at", "status", "reason", "proposal", "review",
-        "policy", "trade_plan_event_id", "model_cost_usd", "plan_checks", "evidence", "research",
+        "schema_version",
+        "record_type",
+        "event_id",
+        "turn_id",
+        "snapshot_id",
+        "market_id",
+        "created_at",
+        "status",
+        "reason",
+        "proposal",
+        "review",
+        "policy",
+        "trade_plan_event_id",
+        "model_cost_usd",
+        "plan_checks",
+        "evidence",
+        "research",
     }
     if frozenset(normalized) not in {
         frozenset(legacy_keys),
@@ -542,11 +589,15 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         raise ValueError("invalid turn outcome")
     try:
         proposal = dict(normalized["proposal"])
-        proposal.update(snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"])
+        proposal.update(
+            snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"]
+        )
         review = normalized["review"]
         if review is not None:
             review = dict(review)
-            review.update(snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"])
+            review.update(
+                snapshot_id=normalized["snapshot_id"], market_id=normalized["market_id"]
+            )
         expected = build_turn_outcome(
             proposal=proposal,
             review=review,
@@ -568,7 +619,11 @@ def validate_turn_outcome(value: object) -> dict[str, object]:
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid turn outcome") from None
-    if normalized.get("schema_version") not in {1, 2, 3, 4} or normalized.get("record_type") != "turn_outcome" or normalized != expected:
+    if (
+        normalized.get("schema_version") not in {1, 2, 3, 4}
+        or normalized.get("record_type") != "turn_outcome"
+        or normalized != expected
+    ):
         raise ValueError("invalid turn outcome")
     return expected
 
@@ -600,8 +655,12 @@ class ProposalDraft(StrictOutput):
     snapshot_id: str | None = Field(default=None, min_length=1, max_length=200)
     market_id: str | None = Field(default=None, min_length=1, max_length=200)
     action: Literal["trade", "abstain"] | None = None
-    probability: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False, strict=True)
-    outcome: Literal["YES", "NO"] = Field(default="YES", exclude_if=lambda value: value == "YES")
+    probability: float | None = Field(
+        default=None, ge=0, le=1, allow_inf_nan=False, strict=True
+    )
+    outcome: Literal["YES", "NO"] = Field(
+        default="YES", exclude_if=lambda value: value == "YES"
+    )
     amount: float | None = Field(default=None, allow_inf_nan=False, strict=True)
     citations: list[CitationId] | None = Field(default=None, max_length=10)
     max_entry_price: float | None = Field(default=None, ge=0, le=1, strict=True)
@@ -649,8 +708,7 @@ def plan_check_rejection_reason(state: StateMap) -> str:
     if not isinstance(checks, list) or not checks:
         return "no plan check was run"
     if not any(
-        isinstance(check, Mapping) and check.get("passed") is True
-        for check in checks
+        isinstance(check, Mapping) and check.get("passed") is True for check in checks
     ):
         return "no plan check passed"
     return "proposal differs from the last passed plan"
@@ -801,10 +859,11 @@ def finalize_paper_cycle(
 
     decision = asdict(cycle.decision)
     fill = asdict(cycle.fill) if cycle.fill else None
-    checked = (
-        state.get(LAST_SUCCESSFUL_PLAN_KEY) == proposal_output.model_dump()
-        and state.get(LAST_SUCCESSFUL_SNAPSHOT_KEY) == asdict(snapshot)
-    )
+    checked = state.get(
+        LAST_SUCCESSFUL_PLAN_KEY
+    ) == proposal_output.model_dump() and state.get(
+        LAST_SUCCESSFUL_SNAPSHOT_KEY
+    ) == asdict(snapshot)
     event = (
         json.loads(json.dumps(asdict(cycle.event), sort_keys=True))
         if cycle.event and checked
@@ -815,11 +874,21 @@ def finalize_paper_cycle(
     if cycle.event and checked:
         status, reason, outcome = "approved", cycle.decision.reason, "plan_ready"
     elif cycle.event:
-        status, reason, outcome = "rejected", plan_check_rejection_reason(state), "plan_check_rejected"
+        status, reason, outcome = (
+            "rejected",
+            plan_check_rejection_reason(state),
+            "plan_check_rejected",
+        )
     elif not review.approved:
         status, reason, outcome = "rejected", "review_rejected", "reviewer_rejected"
     else:
         status, reason, outcome = "rejected", cycle.decision.reason, "policy_rejected"
+    # Scored-only sessions record the forecast but never emit a plan or fill.
+    if operating.scored_only:
+        fill, event = None, None
+        if outcome == "plan_ready":
+            decision = {**decision, "allowed": False, "reason": "scored_only"}
+            status, reason, outcome = "rejected", "scored_only", "policy_rejected"
     report = PaperCycleReportOutput(
         status=status, reason=reason, summary=cycle.summary
     ).model_dump()

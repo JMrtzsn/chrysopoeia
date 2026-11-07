@@ -56,9 +56,7 @@ EXPECTED = {
         "market_data": "public-read-only",
         "paper_fee_rate": 0.02,
         "paper_fee_source": "paper-assumption:flat-2pct-v1",
-        "series": "btc-updown-5m",
-        "forecast_offset_seconds": 0.0,
-        "window_baseline": False,
+        "markets": "esports-match-winner",
     },
 }
 
@@ -76,16 +74,27 @@ class OperatorCliTests(unittest.TestCase):
 
     def test_cycle_accepts_market_context_draft_or_no_target(self) -> None:
         result = {
-            "schema_version": 1, "record_type": "paper_cycle_result",
-            "snapshot_id": "", "market_id": "", "status": "abstained",
-            "reason": "no_target", "trader_called": True, "reviewer_called": False,
-            "fill": None, "event": None, "ledger_statuses": ["completed"],
-            "actual_estimated_cost_usd": "0", "maximum_reserved_cost_usd": "0.2838528",
+            "schema_version": 1,
+            "record_type": "paper_cycle_result",
+            "snapshot_id": "",
+            "market_id": "",
+            "status": "abstained",
+            "reason": "no_target",
+            "trader_called": True,
+            "reviewer_called": False,
+            "fill": None,
+            "event": None,
+            "ledger_statuses": ["completed"],
+            "actual_estimated_cost_usd": "0",
+            "maximum_reserved_cost_usd": "0.2838528",
         }
         snapshot = MarketSnapshot("snapshot", "12345", 0.4, 1_000, 0, 0)
         with (
             patch("chrysopoeia.cli.load_market_snapshot", return_value=snapshot),
-            patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=result)) as run,
+            patch(
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value=result),
+            ) as run,
         ):
             for arguments in (
                 ("--market", "12345"),
@@ -112,13 +121,16 @@ class OperatorCliTests(unittest.TestCase):
                     self.assertEqual(code, 2)
 
     def test_cycle_with_journal_requires_a_target_before_admission(self) -> None:
-        with tempfile.TemporaryDirectory() as directory, patch(
-            "chrysopoeia.operations.run_journal_turn", AsyncMock()
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("chrysopoeia.operations.run_journal_turn", AsyncMock()) as run,
+        ):
             code, stdout, stderr = self.invoke("cycle", "--journal", directory)
 
         self.assertEqual((code, stdout), (2, ""))
-        self.assertEqual(stderr, "cycle failed: --journal requires --snapshot or --market\n")
+        self.assertEqual(
+            stderr, "cycle failed: --journal requires --snapshot or --market\n"
+        )
         run.assert_not_called()
 
     def test_cycle_rejects_unknown_nested_draft_fields(self) -> None:
@@ -203,9 +215,7 @@ class OperatorCliTests(unittest.TestCase):
                 AsyncMock(return_value=(report, iterations)),
             ) as run,
         ):
-            code, output, error = self.invoke(
-                "run", "--journal", directory
-            )
+            code, output, error = self.invoke("run", "--journal", directory)
 
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output), report)
@@ -220,54 +230,64 @@ class OperatorCliTests(unittest.TestCase):
             patch("chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock()) as model,
         ):
             config = Path(directory) / "no-spend.toml"
-            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
-                'cost_budget = "5"', 'cost_budget = "0"'
-            ))
+            config.write_text(
+                (ROOT / "chrysopoeia.toml")
+                .read_text()
+                .replace('cost_budget = "5"', 'cost_budget = "0"')
+            )
             code, output, error = self.invoke(
-                "run", "--config", str(config), "--journal", str(Path(directory) / "journal")
+                "run",
+                "--config",
+                str(config),
+                "--journal",
+                str(Path(directory) / "journal"),
             )
             self.assertEqual((code, error), (0, ""))
             self.assertEqual(json.loads(output)["stop_reason"], "cost_budget")
             discover.assert_not_called()
             model.assert_not_awaited()
 
-    def test_run_rejects_configured_external_exposure_before_opening_a_journal(self) -> None:
+    def test_run_rejects_configured_external_exposure_before_opening_a_journal(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "exposed.toml"
             journal = Path(directory) / "journal"
-            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
-                "\ntotal_exposure = 0", "\ntotal_exposure = 1"
-            ))
-            code, output, error = self.invoke("run", "--config", str(config), "--journal", str(journal))
+            config.write_text(
+                (ROOT / "chrysopoeia.toml")
+                .read_text()
+                .replace("\ntotal_exposure = 0", "\ntotal_exposure = 1")
+            )
+            code, output, error = self.invoke(
+                "run", "--config", str(config), "--journal", str(journal)
+            )
             self.assertEqual((code, output), (2, ""))
             self.assertIn("run uses its journal", error)
             self.assertFalse(journal.exists())
 
-    def test_run_uses_benchmark_config_and_rejects_invalid_cadence(
+    def test_run_uses_esports_config_and_refuses_sessions_that_could_trade(
         self,
     ) -> None:
         with (
             tempfile.TemporaryDirectory() as directory,
             patch("chrysopoeia.loop.run_loop", AsyncMock(return_value=({}, []))) as run,
         ):
-            args = (
-                "run",
-                "--journal",
-                directory,
-                "--config",
-                str(ROOT / "configs" / "btc5m.toml"),
+            esports = ROOT / "configs" / "esports.toml"
+            code, _, _ = self.invoke(
+                "run", "--journal", directory, "--config", str(esports)
             )
-            code, _, _ = self.invoke(*args)
             self.assertEqual(code, 0)
-            self.assertEqual(run.call_args.args[0].series, "btc-updown-5m")
-            self.assertEqual(run.call_args.args[0].interval_seconds, 300)
-            self.assertEqual(run.call_args.args[0].max_cycles, 20)
-            invalid = Path(directory) / "bad.toml"
-            invalid.write_text((ROOT / "configs" / "btc5m.toml").read_text().replace(
-                "interval_seconds = 300", "interval_seconds = 30"
-            ))
-            code, _, _ = self.invoke("run", "--journal", directory, "--config", str(invalid))
-            self.assertEqual(code, 2)
+            self.assertEqual(run.call_args.args[0].markets, "esports-match-winner")
+            self.assertTrue(run.call_args.args[0].scored_only)
+            trading = Path(directory) / "trading.toml"
+            trading.write_text(
+                esports.read_text().replace("scored_only = true", "scored_only = false")
+            )
+            code, output, error = self.invoke(
+                "run", "--journal", directory, "--config", str(trading)
+            )
+            self.assertEqual((code, output), (2, ""))
+            self.assertIn("scored-only", error)
             self.assertEqual(run.await_count, 1)
 
     def run_cli(
@@ -296,7 +316,9 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(json.loads(first.stdout), EXPECTED)
         self.assertEqual(first.stdout, second.stdout)
-        self.assertEqual(json.loads(first.stdout)["session"]["daily_cloud_cost_budget"], 5)
+        self.assertEqual(
+            json.loads(first.stdout)["session"]["daily_cloud_cost_budget"], 5
+        )
 
     def test_default_is_cwd_independent_and_entry_points_are_equivalent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -374,14 +396,16 @@ class OperatorCliTests(unittest.TestCase):
         self.assertEqual(console_misuse.returncode, 2)
         self.assertNotIn("Traceback", misuse.stderr)
 
-    def test_discover_is_bound_to_configured_series_and_rejects_the_old_limit_flag(self) -> None:
+    def test_discover_is_bound_to_esports_markets_and_rejects_the_old_limit_flag(
+        self,
+    ) -> None:
         with patch("chrysopoeia.cli.discover_markets", return_value=()) as discover:
             code, stdout, stderr = self.invoke("discover")
 
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(json.loads(stdout)["candidates"], [])
         discover.assert_called_once_with(
-            series="btc-updown-5m", fetch=cli.polymarket_fetch
+            markets="esports-match-winner", fetch=cli.polymarket_fetch
         )
 
         for limit in ("1", "20", "0", "21", "1.0", "true"):
@@ -489,7 +513,10 @@ class OperatorCliTests(unittest.TestCase):
                     "asks",
                     "fee_rate",
                     "fee_source",
-                    "no_token_id", "no_asks", "no_bids", "no_book_captured_at",
+                    "no_token_id",
+                    "no_asks",
+                    "no_bids",
+                    "no_book_captured_at",
                 },
             )
             self.assertEqual(record["schema_version"], 1)
@@ -766,9 +793,12 @@ class OperatorCliTests(unittest.TestCase):
             source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
             output = Path(directory) / "result.json"
             config = Path(directory) / "exposure.toml"
-            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace(
-                "\nmarket_exposure = 0", "\nmarket_exposure = 2"
-            ).replace("\ntotal_exposure = 0", "\ntotal_exposure = 3"))
+            config.write_text(
+                (ROOT / "chrysopoeia.toml")
+                .read_text()
+                .replace("\nmarket_exposure = 0", "\nmarket_exposure = 2")
+                .replace("\ntotal_exposure = 0", "\ntotal_exposure = 3")
+            )
             with (
                 patch(
                     "chrysopoeia.cycle_runner.run_paper_cycle",
@@ -802,6 +832,7 @@ class OperatorCliTests(unittest.TestCase):
 
     def cycle_fill_result(self) -> dict[str, object]:
         from chrysopoeia.paper_cycle import build_turn_outcome
+
         snapshot = MarketSnapshot(
             "placeholder",
             "12345",
@@ -871,17 +902,26 @@ class OperatorCliTests(unittest.TestCase):
         }
         result["outcome_event"] = build_turn_outcome(
             proposal={
-                "snapshot_id": snapshot.snapshot_id, "market_id": snapshot.market_id,
-                "action": "trade", "probability": 0.46, "amount": 4.0,
-                "max_entry_price": 0.41, "exit_plan": fill["exit_plan"],
-                "citations": ["market_snapshot"], "rationale": "Evidence supports a trade.",
+                "snapshot_id": snapshot.snapshot_id,
+                "market_id": snapshot.market_id,
+                "action": "trade",
+                "probability": 0.46,
+                "amount": 4.0,
+                "max_entry_price": 0.41,
+                "exit_plan": fill["exit_plan"],
+                "citations": ["market_snapshot"],
+                "rationale": "Evidence supports a trade.",
             },
             review={
-                "snapshot_id": snapshot.snapshot_id, "market_id": snapshot.market_id,
-                "approved": True, "reason": "supported", "citations": ["market_snapshot"],
+                "snapshot_id": snapshot.snapshot_id,
+                "market_id": snapshot.market_id,
+                "approved": True,
+                "reason": "supported",
+                "citations": ["market_snapshot"],
             },
             policy={"allowed": True, "reason": result["reason"]},
-            status="plan_ready", reason=str(result["reason"]),
+            status="plan_ready",
+            reason=str(result["reason"]),
             created_at=snapshot.captured_at,
             trade_plan_event_id=result["event"]["event_id"],
             model_cost_usd=str(result["actual_estimated_cost_usd"]),
@@ -923,7 +963,9 @@ class OperatorCliTests(unittest.TestCase):
                 ),
                 patch(
                     "chrysopoeia.operations.consume_trade_plan",
-                    wraps=__import__("chrysopoeia.trading", fromlist=["consume_trade_plan"]).consume_trade_plan,
+                    wraps=__import__(
+                        "chrysopoeia.trading", fromlist=["consume_trade_plan"]
+                    ).consume_trade_plan,
                 ) as consume,
                 patch("chrysopoeia.cli.polymarket_fetch"),
             ):
@@ -978,11 +1020,19 @@ class OperatorCliTests(unittest.TestCase):
             source = journal / "snapshot.json"
             source.write_text(json.dumps(cli.serialize_market_snapshot(snapshot)))
             with patch(
-                "chrysopoeia.cycle_runner.run_paper_cycle", AsyncMock(return_value=result)
+                "chrysopoeia.cycle_runner.run_paper_cycle",
+                AsyncMock(return_value=result),
             ) as run:
                 code, _stdout, stderr = self.invoke(
-                    "cycle", "--snapshot", str(source), "--journal", str(journal),
-                    "--context", "focus on liquidity", "--draft", '{"action":"abstain"}',
+                    "cycle",
+                    "--snapshot",
+                    str(source),
+                    "--journal",
+                    str(journal),
+                    "--context",
+                    "focus on liquidity",
+                    "--draft",
+                    '{"action":"abstain"}',
                 )
 
         self.assertEqual((code, stderr), (0, ""))
@@ -1058,16 +1108,32 @@ class OperatorCliTests(unittest.TestCase):
                 self.assertIsInstance(result["outcome_event"], dict)
                 outcome = {**result["outcome_event"]}
                 outcome.update(
-                    status=("abstained" if status == "abstained" else "reviewer_rejected" if reason == "review_rejected" else "policy_rejected"),
+                    status=(
+                        "abstained"
+                        if status == "abstained"
+                        else "reviewer_rejected"
+                        if reason == "review_rejected"
+                        else "policy_rejected"
+                    ),
                     reason=reason,
                     trade_plan_event_id=None,
                     review=None if status == "abstained" else outcome["review"],
-                    policy=None if status == "abstained" else {"allowed": False, "reason": reason},
+                    policy=None
+                    if status == "abstained"
+                    else {"allowed": False, "reason": reason},
                 )
                 if reason == "review_rejected":
-                    outcome["review"] = {"approved": False, "reason": "rejected", "citations": []}
+                    outcome["review"] = {
+                        "approved": False,
+                        "reason": "rejected",
+                        "citations": [],
+                    }
                 elif status != "abstained":
-                    outcome["review"] = {"approved": True, "reason": "supported", "citations": ["market_snapshot"]}
+                    outcome["review"] = {
+                        "approved": True,
+                        "reason": "supported",
+                        "citations": ["market_snapshot"],
+                    }
                 result["outcome_event"] = outcome
                 with patch(
                     "chrysopoeia.cycle_runner.run_paper_cycle",
@@ -1302,8 +1368,14 @@ class OperatorCliTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
             config = root / "invalid.toml"
-            config.write_text((ROOT / "chrysopoeia.toml").read_text().replace("bankroll = 1000", "bankroll = 0"))
-            code, stdout, stderr = self.invoke("cycle", "--snapshot", str(bad), "--config", str(config))
+            config.write_text(
+                (ROOT / "chrysopoeia.toml")
+                .read_text()
+                .replace("bankroll = 1000", "bankroll = 0")
+            )
+            code, stdout, stderr = self.invoke(
+                "cycle", "--snapshot", str(bad), "--config", str(config)
+            )
             self.assertEqual(
                 (code, stdout, stderr),
                 (2, "", "cycle failed: model/workflow unavailable\n"),
