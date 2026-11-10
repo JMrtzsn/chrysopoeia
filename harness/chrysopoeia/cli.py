@@ -407,6 +407,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--stop-file", type=Path)
     book = commands.add_parser("book")
     book.add_argument("--journal", type=Path, required=True)
+    status = commands.add_parser(
+        "status",
+        help="offline overview of one or more journal directories",
+    )
+    status.add_argument("--journal", type=Path, nargs="+", required=True)
+    status.add_argument("--json", action="store_true")
     settle_command = commands.add_parser("settle")
     settle_command.add_argument("--journal", type=Path, required=True)
     settle_command.add_argument("--market", required=True)
@@ -593,6 +599,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             "open_positions": len(settled_state.positions),
         }
         print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.command == "status":
+        from chrysopoeia.accounting import JournalError
+        from chrysopoeia.overview import render_human, summarize_journals
+
+        try:
+            report = summarize_journals(args.journal)
+        except ValueError as exc:
+            parser.exit(2, f"status failed: {exc}\n")
+        except JournalError as exc:
+            parser.exit(2, f"status failed: {exc}\n")
+        if args.json:
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        else:
+            print(render_human(report))
         return 0
     if args.command == "book":
         from chrysopoeia.accounting import JournalError, replay
