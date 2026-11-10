@@ -163,11 +163,41 @@ runtime resources were replaced or deleted. Recovery steps are in
    (see `docs/deployment.md`); the trigger queue is left paused. Cloud Run
    reserves `/healthz`, so the Observer health route moved to `/health` and was
    redeployed alone.
-7. **Esports scored-only platform profile** (coordinated operator approval,
-   2026-11-07): the bundled Harness `platform.toml` now forecasts CS2/Dota 2
-   match winners scored-only (no plans, so the Consumer stays idle) with
-   research on and a $3 two-cycle ceiling. Requires a separately approved
-   Harness image rebuild, pin, and no-model `validate`; no Platform code change.
+7. ~~**Esports scored-only platform profile**~~ (done 2026-11-09): rebuilt,
+   pinned as
+   `sha256:a21949cfc40a6f3ecae9af56c67ab1cfe9f7638b4b6e6d8ff6da463837d33224`,
+   deployed, and verified no-model: executions `chrysopoeia-cycle-local-7rdf8`
+   (1m7s, exit 0) plus duplicate validation `-25r7q`; the local gate prints the
+   deployed profile as esports scored-only, `cost_budget=3`, `max_cycles=2`,
+   gemini-3.5-flash at `us`. See `docs/deployment.md`.
+8. ~~**Scheduled esports scanning with a native billing-budget alert**~~
+   (done 2026-11-10, budget parked):
+   (a) Deploys the scheduling chain behind config (`scan_schedule`,
+       `scan_paused`): Cloud Scheduler → `chrysopoeia-scan-local` workflow →
+       existing job with per-tick journal override
+       `/mnt/journal/esports-<ISO stamp>`; runtime identity is the existing
+       least-privilege trigger service account. Settle decisions recorded in
+       `docs/deployment.md`: the executions-create API needs OAuth (not OIDC)
+       and has no `:execute` method; the journal keys on the tick timestamp
+       because a closed session journal rejects re-open, so date-keying alone
+       would deadlock the schedule after the first session. Verification
+       passed: two scheduler-triggered executions (workflow `493c9ea0` → job
+       `chrysopoeia-cycle-local-b627z` → journal
+       `esports-2026-11-10T06:13:16.871485Z`; workflow `f7524ed2` → job
+       `-xqhqn` → journal `esports-2026-11-10T06:16:09.815551Z`), then
+       `scan_paused=true` left the cron `40 13-22 * * *` PAUSED (still ~$0
+       while paused; scheduled spend is bounded per tick to the $3 session
+       ceiling and $0 on idle discovery days).
+   (b) Budget alert parked pending operator IAM: `gcloud billing budgets
+       create` on `BILLING_ACCOUNT_ID` returns permission denied, and only a
+       billing admin can grant it. The Pulumi `gcp.billing.Budget` resource
+       (USD amount via `budget_amount_usd`, project filter, 50/90/100%
+       thresholds) is ready behind config; enabling the API was completed.
+       3-day check precondition note: Harness journals accumulated idle
+       sessions (day 1: $1.43376 booked turn then 403-billing-error; days
+       2–3 zero eligible markets so $0 spend).
+   Exclusions unchanged: no harness/consumer/observer change; no
+   `scored_only=false`; no real-money execution.
 
 ## Deferred
 

@@ -15,6 +15,7 @@ database. Multi-tenant or public deployment remains out of scope pending an
 explicit Level 3 design.
 """
 
+import base64
 import json
 import os
 
@@ -43,12 +44,20 @@ consumer_sweep_schedule = config.get("consumer_sweep_schedule") or "* * * * *"
 context_history_enabled = config.get_bool("context_history_enabled") or False
 observer_image_digest = config.get("observer_image_digest")
 observer_invoker_member = config.get("observer_invoker_member")
+billing_account_id = config.get("billing_account_id")
+budget_amount_usd = config.get("budget_amount_usd")
+scan_schedule = config.get("scan_schedule")
+scan_paused = config.get_bool("scan_paused") or False
 if consumer_image_digest and not pubsub_topic:
     pubsub_topic = config.require("pubsub_topic")
 if context_history_enabled and not pubsub_topic:
     raise pulumi.RunError("context history requires the configured event archive topic")
 if observer_image_digest and not pubsub_topic:
     raise pulumi.RunError("observer requires the configured event archive topic")
+if budget_amount_usd and not billing_account_id:
+    raise pulumi.RunError("budget_amount_usd requires billing_account_id")
+if scan_schedule and not job_args:
+    raise pulumi.RunError("scheduled scanning requires job_args")
 if observer_image_digest and not observer_invoker_member:
     raise pulumi.RunError("observer requires observer_invoker_member")
 if observer_invoker_member in {"allUsers", "allAuthenticatedUsers"}:
@@ -752,6 +761,161 @@ if consumer_image_digest and pubsub_topic:
         "consumer_dead_letter_subscription_name", dead_letter_subscription.name
     )
     pulumi.export("consumer_sweep_job_name", consumer_sweep_job.name)
+
+# Item 8(a): native billing budget on the project (billing-domain alert only).
+if budget_amount_usd:
+    budgets_service = gcp.projects.Service(
+        "billing-budgets-service",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="billingbudgets.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=False,
+        ),
+    )
+    project_number = gcp.organizations.get_project(project_id=project_id).number
+    gcp.billing.Budget(
+        "spend-budget",
+        gcp.billing.BudgetArgs(
+            billing_account=billing_account_id,
+            display_name=f"Chrysopoeia spend budget ({operator})",
+            budget_filter=gcp.billing.BudgetBudgetFilterArgs(
+                projects=[f"projects/{project_number}"],
+            ),
+            amount=gcp.billing.BudgetAmountArgs(
+                specified_amount=gcp.billing.BudgetAmountSpecifiedAmountArgs(
+                    currency_code="USD",
+                    units=budget_amount_usd,
+                ),
+            ),
+            threshold_rules=[
+                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=0.5),
+                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=0.9),
+                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=1.0),
+            ],
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[budgets_service]),
+    )
+
+# Item 8(b): scheduled opportunity scanning. Cloud Scheduler invokes the
+# workflow, which computes a fresh minute-keyed journal name per tick and
+# requests one paper-cycle job execution with args overridden per execution.
+# The workflow runtime identity is the existing least-privilege trigger
+# identity (run.jobs.run and runWithOverrides only). The schedule is created
+# paused unless scan_paused is set; enabling it is an explicit config change.
+if scan_schedule:
+    workflows_service = gcp.projects.Service(
+        "workflows-service",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="workflows.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=False,
+        ),
+    )
+    scan_workflow_name = f"chrysopoeia-scan-{operator}"
+    scheduler_agent_member = pulumi.Output.concat(
+        "serviceAccount:service-",
+        str(gcp.organizations.get_project(project_id=project_id).number),
+        "@gcp-sa-cloudscheduler.iam.gserviceaccount.com",
+    )
+    gcp.serviceaccount.IAMMember(
+        "scan-scheduler-token-creator",
+        gcp.serviceaccount.IAMMemberArgs(
+            service_account_id=trigger.name,
+            role="roles/iam.serviceAccountTokenCreator",
+            member=scheduler_agent_member,
+        ),
+    )
+    scan_source = pulumi.Output.concat(
+        "main:\n"
+        "  steps:\n"
+        "    - init:\n"
+        "        assign:\n"
+        "          - stamp: ${time.format(sys.now())}\n"
+        "    - run:\n"
+        "        call: googleapis.run.v2.projects.locations.jobs.run\n"
+        "        args:\n"
+        "          name: \"projects/",
+        project_id,
+        "/locations/",
+        region,
+        "/jobs/chrysopoeia-cycle-",
+        operator,
+        """"\n
+          body:
+            overrides:
+              containerOverrides:
+                - args:
+                    - run
+                    - --journal
+                    - ${"/mnt/journal/esports-" + stamp}
+          connector_params:
+            skip_polling: True
+        result: accepted
+    - done:
+        return: ${accepted.name}
+""",
+    )
+    scan_workflow = gcp.workflows.Workflow(
+        "scan-workflow",
+        gcp.workflows.WorkflowArgs(
+            project=project_id,
+            region=region,
+            name=scan_workflow_name,
+            service_account=trigger.email,
+            source_contents=scan_source,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[workflows_service]),
+    )
+    gcp.projects.IAMMember(
+        "scan-workflow-invoker",
+        gcp.projects.IAMMemberArgs(
+            project=project_id,
+            role="roles/workflows.invoker",
+            member=trigger_member,
+        ),
+    )
+    scan_schedule_job = gcp.cloudscheduler.Job(
+        "cycle-scan",
+        gcp.cloudscheduler.JobArgs(
+            project=project_id,
+            region=region,
+            name=f"chrysopoeia-scan-{operator}",
+            schedule=scan_schedule,
+            time_zone="Etc/UTC",
+            paused=scan_paused,
+            attempt_deadline="120s",
+            http_target=gcp.cloudscheduler.JobHttpTargetArgs(
+                # Workflows executes.create accepts OAuth2 access tokens only;
+                # the documented scheduler integration uses one (not OIDC).
+                uri=pulumi.Output.concat(
+                    "https://workflowexecutions.googleapis.com/v1/projects/",
+                    project_id,
+                    "/locations/",
+                    region,
+                    "/workflows/",
+                    scan_workflow_name,
+                    "/executions",
+                ),
+                http_method="POST",
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "User-Agent": "Google-Cloud-Scheduler",
+                },
+                body=base64.b64encode(b'{"argument": "{}"}').decode(),
+                oauth_token=gcp.cloudscheduler.JobHttpTargetOauthTokenArgs(
+                    service_account_email=trigger.email,
+                    scope="https://www.googleapis.com/auth/cloud-platform",
+                ),
+            ),
+        ),
+        opts=pulumi.ResourceOptions(
+            depends_on=[workflows_service, scan_workflow]
+        ),
+    )
+    pulumi.export("scan_schedule_name", scan_schedule_job.name)
+    pulumi.export("scan_workflow_name", scan_workflow.name)
 
 pulumi.export("runner_email", runner.email)
 pulumi.export("journal_bucket", bucket.url)

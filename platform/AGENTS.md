@@ -44,6 +44,21 @@ Ordered platform work lives in `ROADMAP.md`.
   `allUsers`/`allAuthenticatedUsers`). Its dedicated identity has only
   `roles/bigquery.jobUser` and archive-dataset `roles/bigquery.dataViewer`; it
   has no storage, publishing, or Vertex access.
+- Scheduled esports scanning exists only when `scan_schedule` is set (cron in
+  UTC): a Cloud Scheduler job POSTs one executions-create call for the
+  `chrysopoeia-scan-<operator>` workflow, which runs one paper-cycle execution
+  with a per-tick journal override. The workflow's runtime identity is the
+  existing least-privilege trigger identity (`run.jobs.run` +
+  `runWithOverrides` only); the scheduler needs that identity to satisfy
+  `workflows.invoker` plus a scheduler-agent token-creator grant on it.
+  `scan_paused` (default true) pauses the schedule. Workflows executes-create
+  accepts OAuth2 access tokens only, and its `time.format(sys.now())` returns
+  the per-tick journal key.
+- Optional `billing_account_id` prepares the native billing budget domain; the
+  budget itself (`budget_amount_usd`) stays undeployed until the operator holds
+  billing-budget permissions on the billing account. `__main__.py` may only
+  create the budget for the configured project, never set org policy or
+  recipients.
 
 ## Verification gates
 
