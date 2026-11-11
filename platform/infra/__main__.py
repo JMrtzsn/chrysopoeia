@@ -46,6 +46,7 @@ observer_image_digest = config.get("observer_image_digest")
 observer_invoker_member = config.get("observer_invoker_member")
 billing_account_id = config.get("billing_account_id")
 budget_amount_usd = config.get("budget_amount_usd")
+budget_currency = config.get("budget_currency") or "SEK"
 scan_schedule = config.get("scan_schedule")
 scan_paused = config.get_bool("scan_paused") or False
 if consumer_image_digest and not pubsub_topic:
@@ -784,14 +785,20 @@ if budget_amount_usd:
             ),
             amount=gcp.billing.BudgetAmountArgs(
                 specified_amount=gcp.billing.BudgetAmountSpecifiedAmountArgs(
-                    currency_code="USD",
+                    currency_code=budget_currency,
                     units=budget_amount_usd,
                 ),
             ),
             threshold_rules=[
-                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=0.5),
-                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=0.9),
-                gcp.billing.BudgetThresholdRuleArgs(threshold_percent=1.0),
+                gcp.billing.BudgetThresholdRuleArgs(
+                    threshold_percent=0.5, spend_basis="CURRENT_SPEND"
+                ),
+                gcp.billing.BudgetThresholdRuleArgs(
+                    threshold_percent=0.9, spend_basis="CURRENT_SPEND"
+                ),
+                gcp.billing.BudgetThresholdRuleArgs(
+                    threshold_percent=1.0, spend_basis="CURRENT_SPEND"
+                ),
             ],
         ),
         opts=pulumi.ResourceOptions(depends_on=[budgets_service]),

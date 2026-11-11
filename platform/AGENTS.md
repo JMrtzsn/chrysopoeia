@@ -54,11 +54,10 @@ Ordered platform work lives in `ROADMAP.md`.
   `scan_paused` (default true) pauses the schedule. Workflows executes-create
   accepts OAuth2 access tokens only, and its `time.format(sys.now())` returns
   the per-tick journal key.
-- Optional `billing_account_id` prepares the native billing budget domain; the
-  budget itself (`budget_amount_usd`) stays undeployed until the operator holds
-  billing-budget permissions on the billing account. `__main__.py` may only
-  create the budget for the configured project, never set org policy or
-  recipients.
+- Optional `billing_account_id` with `budget_amount_usd` (+ `budget_currency`,
+  default SEK) deploys the native monthly billing budget for the configured
+  project: whole-amount thresholds at 50/90/100%, default billing-account
+  recipients. The billing account currency must match the amount's currency.
 
 ## Verification gates
 

@@ -188,14 +188,16 @@ runtime resources were replaced or deleted. Recovery steps are in
        `scan_paused=true` left the cron `40 13-22 * * *` PAUSED (still ~$0
        while paused; scheduled spend is bounded per tick to the $3 session
        ceiling and $0 on idle discovery days).
-   (b) Budget alert parked pending operator IAM: `gcloud billing budgets
-       create` on `BILLING_ACCOUNT_ID` returns permission denied, and only a
-       billing admin can grant it. The Pulumi `gcp.billing.Budget` resource
-       (USD amount via `budget_amount_usd`, project filter, 50/90/100%
-       thresholds) is ready behind config; enabling the API was completed.
-       3-day check precondition note: Harness journals accumulated idle
-       sessions (day 1: $1.43376 booked turn then 403-billing-error; days
-       2–3 zero eligible markets so $0 spend).
+   (b) Budget alert deployed 2026-11-11: `Chrysopoeia spend budget (local)`,
+       1000 SEK/month (the billing account currency is SEK — a USD amount was
+       rejected with an opaque `INVALID_ARGUMENT`), project-filtered, 50/90/100%
+       monthly thresholds with default billing-account email recipients. Adopted
+       into Pulumi state by import; the resource sits behind `budget_amount_usd`
+       and `budget_currency`. Root causes of the earlier parking: the billing
+       APIs require a quota project the caller may use (fixed via `gcloud
+       config set billing/quota_project PROJECT_ID` and the
+       `GOOGLE_CLOUD_QUOTA_PROJECT` env), and the currency mismatch above — no
+       IAM grant was ever missing.
    Exclusions unchanged: no harness/consumer/observer change; no
    `scored_only=false`; no real-money execution.
 

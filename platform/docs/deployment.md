@@ -60,13 +60,19 @@ Cloud.
   markets shows per-tick executions that reach the job's 900-second task timeout
   and are marked FAILED with zero model spend (known cosmetic limitation).
   Markets though, worst case (all ticks admit markets but every turn fails):
-  ten $3 sessions/day. The native billing budget (item 8a) is NOT deployed:
-  `billing_budgets.googleapis.com` is enabled and the Pulumi `gcp.billing.Budget`
-  resource exists behind the `budget_amount_usd` config, but budget creation is
-  parked until the operator grants this account billing-budget permissions on
-  billing account `BILLING_ACCOUNT_ID` (`gcloud billing budgets create`
-  fails with permission denied; budget APIs also require
-  `GOOGLE_CLOUD_QUOTA_PROJECT=PROJECT_ID` locally).
+  ten $3 sessions/day. The native billing budget (item 8a) IS deployed:
+  `Chrysopoeia spend budget (local)` — 1000 SEK/month (≈$100; the billing
+  account `BILLING_ACCOUNT_ID` currency is SEK and a USD amount is rejected
+  with an opaque `INVALID_ARGUMENT`), filtered to this project, alerting at
+  50/90/100% of monthly spend to the default billing-account recipients
+  (`notificationsRule` empty; the operator gmail account holds
+  `roles/billing.admin` and receives the emails). Local plumbing notes: the
+  gcloud CLI needs `gcloud config set billing/quota_project
+  PROJECT_ID`, and any local call through the billing-budgets API
+  (Pulumi included) needs `GOOGLE_CLOUD_QUOTA_PROJECT=PROJECT_ID`.
+  The Pulumi `gcp.billing.Budget` resource sits behind `budget_amount_usd`
+  (whole units) and `budget_currency` (default SEK) and owns the deployed
+  budget by import.
 - Re-running the job starts a fresh bounded session only when given a new
   journal. The stored args reuse `/mnt/journal/run`, so a second execution
   resumes the finished session and stops at once at its cycle cap. Override per
