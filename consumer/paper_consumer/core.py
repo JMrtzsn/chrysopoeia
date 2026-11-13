@@ -683,8 +683,6 @@ class Consumer:
                         position["token_id"],
                     ):
                         raise InvalidEvent("exit quote identity does not match")
-                    if _timestamp(quote.market_end) != _timestamp(position["market_end"]):
-                        raise InvalidEvent("exit quote market end does not match")
                     if (
                         now - _timestamp(quote.captured_at) > timedelta(minutes=5)
                         or _timestamp(quote.captured_at) > now
@@ -699,6 +697,11 @@ class Consumer:
                         self.journal.append(
                             self._outcome(event_id, position, quote, now, "settled", proceeds)
                         )
+                        continue
+                    if _timestamp(quote.market_end) != _timestamp(position["market_end"]):
+                        # Polymarket can reschedule a match; the announced end
+                        # date is event metadata, not the instrument identity.
+                        # Hold for resolution instead of failing the sweep.
                         continue
                     bids = self._book(quote.bids, required=False, reverse=True)
                     asks = self._book(quote.asks, required=True)

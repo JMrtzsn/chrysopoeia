@@ -238,6 +238,35 @@ class ConsumerTests(unittest.TestCase):
         self.assertEqual([item["status"] for item in publisher.events], ["filled", "settled"])
         self.assertNotEqual(publisher.events[0]["event_id"], publisher.events[1]["event_id"])
 
+    def test_sweep_holds_on_reschedule_and_settles_at_resolution(self) -> None:
+        publisher = FakePublisher()
+        market = FakeMarket([
+            quote(),
+            quote(
+                market_end=(NOW + timedelta(days=2)).isoformat(),
+                asks=((0.9, 100.0),),
+                bids=((0.89, 100.0),),
+            ),
+            quote(
+                market_end=(NOW + timedelta(days=2)).isoformat(),
+                resolution="YES",
+                asks=(),
+                bids=(),
+            ),
+        ])
+        client = TestClient(
+            create_app(self.config, market, lambda: NOW, publisher=publisher)
+        )
+        plan = event()
+
+        self.assertEqual(client.post("/push", json=envelope(plan)).status_code, 204)
+        # Polymarket rescheduled the match: hold without failing the sweep.
+        self.assertEqual(client.post("/sweep").status_code, 204)
+        self.assertEqual([item["status"] for item in publisher.events], ["filled"])
+        # The match then resolves on the new date; settlement still proceeds.
+        self.assertEqual(client.post("/sweep").status_code, 204)
+        self.assertEqual([item["status"] for item in publisher.events], ["filled", "settled"])
+
     def test_sweep_publishes_a_closed_outcome_with_realized_pnl(self) -> None:
         publisher = FakePublisher()
         market = FakeMarket([

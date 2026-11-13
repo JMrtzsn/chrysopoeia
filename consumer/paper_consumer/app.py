@@ -97,7 +97,9 @@ def create_app(
     def sweep() -> Response:
         try:
             consumer.sweep(clock())
-        except TransientFailure:
+        except TransientFailure as exc:
+            # Operational detail, not a secret: the scheduler only sees the status.
+            print(f"sweep failed: {exc}: {exc.__cause__}", flush=True)
             return Response(status_code=503)
         return Response(status_code=204)
 
