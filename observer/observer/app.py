@@ -6,6 +6,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 from google.api_core.exceptions import GoogleAPIError
 
+from observer.health import query_health
 from observer.insights import BigQueryClient, query_insights
 
 
@@ -26,6 +27,14 @@ def create_app(
     def insights() -> Response:
         try:
             result = query_insights(clock(), table=table, client=client)
+        except (GoogleAPIError, OSError, TimeoutError, ValueError):
+            return Response(status_code=503)
+        return JSONResponse(result)
+
+    @app.get("/v1/health")
+    def journey_health() -> Response:
+        try:
+            result = query_health(clock(), table=table, client=client)
         except (GoogleAPIError, OSError, TimeoutError, ValueError):
             return Response(status_code=503)
         return JSONResponse(result)

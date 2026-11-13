@@ -30,6 +30,26 @@ turns without a `turn_outcome` are absent. V3-only and mixed v3/v4 groups return
 reservation sum beside actual costs from all versions. Actual cost keeps its
 existing meaning and is an estimate, not a provider bill.
 
+## Journey health
+
+`GET /v1/health` answers "is the trading loop producing outcomes?" with one
+bounded read over the same archive. It returns `healthy`/`degraded` plus
+`reasons`, and degrades when:
+
+- inside the scheduled window (13:40–23:00 UTC; executions run hourly at :40 of
+  hours 13–22, so overnight silence is by design) no `turn_outcome` exists within
+  the last four hours;
+- a filled position has no terminal (`closed`/`settled`) Consumer outcome more
+  than 24 hours after its plan's `market_end` (stuck settlement);
+- `OBSERVER_DAILY_COST_BUDGET_USD` is set and the 24-hour actual model cost
+  exceeds it (unset means the budget check is skipped).
+
+Metrics — last decision/completion timestamps, 24-hour decisions, abstention
+rate, fills, wins, realized P&L, model cost, maximum settlement lag in hours, and
+context revisions since the last completed trade — are informational; they do
+not change the status. Like `/v1/insights`, this route is read-only, byte-capped,
+partition-bounded, and never writes or subscribes.
+
 ## Run locally
 
 Requires Python 3.10+, `uv`, ambient Google credentials with BigQuery query and
