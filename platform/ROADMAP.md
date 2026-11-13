@@ -223,6 +223,30 @@ runtime resources were replaced or deleted. Recovery steps are in
     dashboard. Gated on `health_alert_email`; no absence alerting because
     overnight silence is by design.
 
+11. **Journey-health event alerting** (operator-approved 2026-11-13,
+    event-based direction; implementation separately approved): item 10 pages
+    on process-failure logs only; outcome-level degradation must react to the
+    event stream, not poll `/v1/health`. Design:
+    - a platform-owned filtered push subscription on `chrysopoeia-events`
+      triggers a small platform-owned Cloud Run evaluator that invokes the
+      private Observer `/v1/health` once per event with its dedicated OIDC
+      invoker identity and logs one structured `observer_health` record
+      (severity `ERROR` when the status is `degraded`, else `INFO`). The
+      Observer stays pull-based and read-only; the evaluator owns no ledger
+      and only logs.
+    - Alerting keys on those records: one threshold alert on the `degraded`
+      record rate >0 sustained ~10 minutes (covers stuck settlements and any
+      event-time stale-outcome or cost-budget reason), and one absence
+      condition on the health-record rate in-window only — each event logs a
+      record, so a stopped loop starves the stream and page instead of the
+      overnight silence staying by design.
+    - The `Chrysopoeia health (local)` dashboard gains a journey-health panel.
+    - Acceptance: offline evaluator tests; image build, pin, and deploy;
+      one bounded live check (labeled event → exactly one structured record →
+      alert metric visible); no model or campaign spend. Each step separately
+      approved. Cost bound: ~10 events/day, scale-to-zero evaluator, and one
+      ≤100 MiB Observer query per event.
+
 ## Deferred
 
 - Cloud SQL, RAG Engine, Memory Bank, and managed runtime services, gated on
