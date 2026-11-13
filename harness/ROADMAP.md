@@ -78,6 +78,13 @@ endpoint configured separately from the platform compute region.
   series). Up/Down markets are now capturable, with Up as the YES side. The initial five-window CLOB
   baseline scored 0.247; there are not yet agent forecasts in the local journal.
   Evidence is in `docs/verification.md`.
+- Venue-coupling audit (2026-11-13, read-only): report in
+  `docs/venue-coupling-audit.md`. Four cross-unit couplings (core
+  Polymarket-URL validation inside `MarketSnapshot`, YES-first outcome
+  semantics, `polymarket:*` context namespaces persisted in archived events,
+  and the numeric `market_id` pattern), adapter-only wiring at six direct
+  call-site modules, and config-only closed gates. No code changes; no
+  abstraction added ahead of a second venue.
 - Reserved-cost `turn_outcome` v4 and Observer actual/reserved reporting: decided,
   context-attributed cycles carry the existing reservation ceiling including
   research; v1/v2/v3 remain compatible, and mixed-version Observer groups keep
@@ -89,32 +96,13 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Venue-coupling audit** (operator-approved 2026-11-13, read-only): the
-   system is venue-neutral at the core (adapter pattern, generic
-   `trade_plan_ready`/`consumer_outcome` contracts, consumer `Market`
-   interface) but Polymarket-shaped at every edge, and each adapter has only
-   one implementation. Audit every place the venue leaks past an adapter and
-   rate each by change cost:
-   - `harness/chrysopoeia/polymarket.py` (Gamma API assumptions, the
-     `cs2-<team>-<team>-YYYY-MM-DD` slug grammar, YES-first outcome mapping,
-     discovery limits) and every importer of it outside the adapter layer;
-   - `consumer/paper_consumer/market.py` (Gamma `closed`/`outcomePrices`
-     resolution semantics, CLOB token ids) and its wiring in `app.py`;
-   - `contracts/*.schema.json` for hidden venue fields (instrument/token id
-     naming, outcome side assumptions);
-   - context scopes and profile ids (`polymarket.event`,
-     `polymarket:event:cs2-…`): whether learned contexts can ever transfer
-     across venues or would need per-venue namespaces;
-   - configuration `[venue] adapter = "polymarket"` and `markets =
-     "esports-match-winner"` enforcement points.
-   Deliverable: a ranked report with file:line evidence per coupling, an
-   estimated change-cost tier (config-only / adapter-only / cross-unit), and
-   which couplings are acceptable to keep. No code changes. Consumer and
-   observer findings need those work units' operator approvals before any fix.
+Harness Next is empty; the current approved cross-unit item is the Observer
+journey health endpoint (operator-approved 2026-11-13), owned and tracked in
+`../observer/ROADMAP.md`.
 
 ## Older
 
-2. **Automated paper trading for esports match winners** (operator-approved
+1. **Automated paper trading for esports match winners** (operator-approved
    2026-11-12; implemented same day): the Platform profile sets
    `[session] scored_only = false`; `run` accepts both scored-only and
    paper-trading profiles, and approved plans that pass deterministic risk
