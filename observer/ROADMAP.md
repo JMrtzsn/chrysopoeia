@@ -56,6 +56,23 @@ future deployment. The BigQuery archive is an analytics copy, never a ledger.
    authenticated deployed query returned 200 and unauthenticated access 403.
    Cloud Run reserves `/healthz`, so the health route moved to `/health`
    (redeployed `sha256:ac0de602…`; 200 authenticated, 403 unauthenticated).
+2. **Journey health endpoint** (operator-approved 2026-11-13): add a read-only
+   `GET /v1/health` that answers "is the trading loop producing outcomes?"
+   from the event archive, where the platform's log-based alerts only answer
+   "did a process log an error?". Bounded BigQuery reads checking:
+   - last `turn_outcome` age, evaluated only during the scheduled window
+     (cron `40 13-22 * * *` UTC; overnight silence is by design);
+   - fills with no terminal `consumer_outcome` after market end plus a grace
+     period (the 2026-11-12 stuck-settlement case);
+   - settlement lag, 24 h model cost versus budget, fill/win/realized-PnL
+     counts, abstention rate, and context revisions since the last outcome.
+   Response: `healthy`/`degraded` plus reasons. Alerting (separate, platform
+   work unit): hourly Cloud Scheduler probe inside the window logs one
+   structured health record; one log-based alert pages on `degraded` and on
+   absence of a record in-window (the email channel
+   `chrysopoeia health (local)` already exists). Dashboard gains a health
+   panel. Observer stays read-only; no schema change; no harness or consumer
+   import.
 
 ## Deferred
 

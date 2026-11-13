@@ -89,13 +89,38 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-Operator approval (2026-11-12): automated paper trading for the esports
-match-winner venue is enabled. The Platform profile sets
-`[session] scored_only = false`; `run` accepts both scored-only and
-paper-trading profiles, and approved plans that pass deterministic risk policy
-produce journal fills and `trade_plan_ready` events under the existing risk,
-fee, and cost caps. Real-money execution remains prohibited. Live evidence:
-Platform ROADMAP item 9.
+1. **Venue-coupling audit** (operator-approved 2026-11-13, read-only): the
+   system is venue-neutral at the core (adapter pattern, generic
+   `trade_plan_ready`/`consumer_outcome` contracts, consumer `Market`
+   interface) but Polymarket-shaped at every edge, and each adapter has only
+   one implementation. Audit every place the venue leaks past an adapter and
+   rate each by change cost:
+   - `harness/chrysopoeia/polymarket.py` (Gamma API assumptions, the
+     `cs2-<team>-<team>-YYYY-MM-DD` slug grammar, YES-first outcome mapping,
+     discovery limits) and every importer of it outside the adapter layer;
+   - `consumer/paper_consumer/market.py` (Gamma `closed`/`outcomePrices`
+     resolution semantics, CLOB token ids) and its wiring in `app.py`;
+   - `contracts/*.schema.json` for hidden venue fields (instrument/token id
+     naming, outcome side assumptions);
+   - context scopes and profile ids (`polymarket.event`,
+     `polymarket:event:cs2-…`): whether learned contexts can ever transfer
+     across venues or would need per-venue namespaces;
+   - configuration `[venue] adapter = "polymarket"` and `markets =
+     "esports-match-winner"` enforcement points.
+   Deliverable: a ranked report with file:line evidence per coupling, an
+   estimated change-cost tier (config-only / adapter-only / cross-unit), and
+   which couplings are acceptable to keep. No code changes. Consumer and
+   observer findings need those work units' operator approvals before any fix.
+
+## Older
+
+2. **Automated paper trading for esports match winners** (operator-approved
+   2026-11-12; implemented same day): the Platform profile sets
+   `[session] scored_only = false`; `run` accepts both scored-only and
+   paper-trading profiles, and approved plans that pass deterministic risk
+   policy produce journal fills and `trade_plan_ready` events under the
+   existing risk, fee, and cost caps. Real-money execution remains
+   prohibited. Live evidence: Platform ROADMAP item 9.
 
 Coordinated operator approval (2026-11-07): retire BTC 5m automation and make
 CS2/Dota 2 match winners the automated venue, scored-only. `[venue].markets =
