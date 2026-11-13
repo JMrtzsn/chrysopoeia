@@ -47,6 +47,7 @@ observer_invoker_member = config.get("observer_invoker_member")
 billing_account_id = config.get("billing_account_id")
 budget_amount_usd = config.get("budget_amount_usd")
 budget_currency = config.get("budget_currency") or "SEK"
+health_alert_email = config.get("health_alert_email")
 scan_schedule = config.get("scan_schedule")
 scan_paused = config.get_bool("scan_paused") or False
 if consumer_image_digest and not pubsub_topic:
@@ -923,6 +924,188 @@ if scan_schedule:
     )
     pulumi.export("scan_schedule_name", scan_schedule_job.name)
     pulumi.export("scan_workflow_name", scan_workflow.name)
+
+# Item 10: health monitoring. Log-based metrics over failure signatures we have
+# already hit (consumer sweep errors, cycle task timeouts, scheduler attempt
+# failures), email alerts for each, and a Cloud Monitoring dashboard. Gated on
+# health_alert_email; overnight silence is by design (no ticks are scheduled
+# then), so alerts key on error events, not on absent ticks.
+if health_alert_email:
+    monitoring_service = gcp.projects.Service(
+        "monitoring-service",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="monitoring.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=False,
+        ),
+    )
+
+    def _log_metric(metric_id: str, log_filter: str) -> tuple[str, gcp.logging.Metric]:
+        name = f"chrysopoeia_{metric_id}_{operator}".replace("-", "_")
+        metric = gcp.logging.Metric(
+            f"health-metric-{metric_id}",
+            gcp.logging.MetricArgs(
+                project=project_id,
+                name=name,
+                description=log_filter,
+                filter=log_filter,
+            ),
+            opts=pulumi.ResourceOptions(depends_on=[monitoring_service]),
+        )
+        return name, metric
+
+    sweep_errors_id, sweep_errors = _log_metric(
+        "sweep_errors",
+        'resource.type="cloud_run_revision" '
+        f'resource.labels.service_name="chrysopoeia-consumer-{operator}" '
+        'severity>=ERROR',
+    )
+    task_timeouts_id, task_timeouts = _log_metric(
+        "task_timeouts",
+        'resource.type="cloud_run_job" '
+        f'resource.labels.job_name="chrysopoeia-cycle-{operator}" '
+        'severity>=ERROR "maximum timeout"',
+    )
+    scheduler_failures_id, scheduler_failures = _log_metric(
+        "scheduler_failures",
+        'resource.type="cloud_scheduler_job" httpRequest.status>=500',
+    )
+
+    alert_channel = gcp.monitoring.NotificationChannel(
+        "health-email",
+        gcp.monitoring.NotificationChannelArgs(
+            project=project_id,
+            display_name=f"Chrysopoeia health ({operator})",
+            type="email",
+            labels={"email_address": health_alert_email},
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[monitoring_service]),
+    )
+
+    def _alert(metric_id: str, resource_type: str, title: str, period: str) -> None:
+        gcp.monitoring.AlertPolicy(
+            f"health-alert-{metric_id}",
+            gcp.monitoring.AlertPolicyArgs(
+                project=project_id,
+                display_name=f"Chrysopoeia {title} ({operator})",
+                combiner="OR",
+                notification_channels=[alert_channel.id],
+                conditions=[
+                    gcp.monitoring.AlertPolicyConditionArgs(
+                        display_name=title,
+                        condition_threshold=gcp.monitoring.AlertPolicyConditionConditionThresholdArgs(
+                            filter=f'resource.type="{resource_type}" AND metric.type="logging.googleapis.com/user/{metric_id}"',
+                            comparison="COMPARISON_GT",
+                            threshold_value=0,
+                            duration=period,
+                            aggregations=[
+                                gcp.monitoring.AlertPolicyConditionConditionThresholdAggregationArgs(
+                                    alignment_period="60s",
+                                    per_series_aligner="ALIGN_RATE",
+                                )
+                            ],
+                            trigger=gcp.monitoring.AlertPolicyConditionConditionThresholdTriggerArgs(
+                                count=1
+                            ),
+                        ),
+                    )
+                ],
+            ),
+            opts=pulumi.ResourceOptions(depends_on=[monitoring_service]),
+        )
+
+    # Sweep errors page on any sustained failure (the 2026-11-12 outage ran
+    # silently for 8 hours); a single transient 503 retries on its own.
+    _alert(sweep_errors_id, "cloud_run_revision", "consumer sweep errors", "600s")
+    # Tick timeouts: one long research run can hit the 900 s ceiling; two
+    # consecutive hours of timeouts means the profile needs attention.
+    _alert(task_timeouts_id, "cloud_run_job", "cycle task timeouts", "3600s")
+    _alert(scheduler_failures_id, "cloud_scheduler_job", "scheduler attempt failures", "1800s")
+
+    dashboard = pulumi.Output.json_dumps(
+        {
+            "displayName": f"Chrysopoeia health ({operator})",
+            "gridLayout": {
+                "widgets": [
+                    {
+                        "xyChart": {
+                            "dataSets": [
+                                {
+                                    "timeSeriesQuery": {
+                                        "timeSeriesFilter": {
+                                            "filter": (
+                                                'resource.type="cloud_run_revision" AND metric.type="logging.googleapis.com/user/'
+                                                f"{sweep_errors_id}\""
+                                            ),
+                                            "aggregation": {
+                                                "alignmentPeriod": "300s",
+                                                "perSeriesAligner": "ALIGN_RATE",
+                                            },
+                                        }
+                                    }
+                                }
+                            ],
+                            "timeshiftDuration": "86400s",
+                        },
+                        "title": "Consumer sweep errors (rate)",
+                    },
+                    {
+                        "xyChart": {
+                            "dataSets": [
+                                {
+                                    "timeSeriesQuery": {
+                                        "timeSeriesFilter": {
+                                            "filter": (
+                                                'resource.type="cloud_run_job" AND metric.type="logging.googleapis.com/user/'
+                                                f"{task_timeouts_id}\""
+                                            ),
+                                            "aggregation": {
+                                                "alignmentPeriod": "300s",
+                                                "perSeriesAligner": "ALIGN_RATE",
+                                            },
+                                        }
+                                    }
+                                }
+                            ],
+                            "timeshiftDuration": "86400s",
+                        },
+                        "title": "Cycle task timeouts (rate)",
+                    },
+                    {
+                        "xyChart": {
+                            "dataSets": [
+                                {
+                                    "timeSeriesQuery": {
+                                        "timeSeriesFilter": {
+                                            "filter": (
+                                                'resource.type="cloud_scheduler_job" AND metric.type="logging.googleapis.com/user/'
+                                                f"{scheduler_failures_id}\""
+                                            ),
+                                            "aggregation": {
+                                                "alignmentPeriod": "300s",
+                                                "perSeriesAligner": "ALIGN_RATE",
+                                            },
+                                        }
+                                    }
+                                }
+                            ],
+                            "timeshiftDuration": "86400s",
+                        },
+                        "title": "Scheduler attempt failures (rate)",
+                    },
+                ]
+            },
+        }
+    )
+    gcp.monitoring.Dashboard(
+        "health-dashboard",
+        gcp.monitoring.DashboardArgs(
+            project=project_id, dashboard_json=dashboard
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[monitoring_service]),
+    )
+    pulumi.export("health_alert_email", health_alert_email)
 
 pulumi.export("runner_email", runner.email)
 pulumi.export("journal_bucket", bucket.url)

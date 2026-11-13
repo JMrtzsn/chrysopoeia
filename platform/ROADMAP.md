@@ -211,6 +211,18 @@ runtime resources were replaced or deleted. Recovery steps are in
    @ 0.86, $0.10 fee), and a `trade_plan_ready` outbox event. Real-money
    execution remains prohibited.
 
+10. **Health monitoring** (deployed 2026-11-13): three log-based metrics over
+    failure signatures observed this week — consumer service ERROR logs
+    (`chrysopoeia_sweep_errors_local`, caught the 8-hour silent sweep outage of
+    2026-11-12), cycle task 900-second timeouts (`chrysopoeia_task_timeouts_local`,
+    seen 18:56/19:56 on 2026-11-12), scheduler 5xx attempts
+    (`chrysopoeia_scheduler_failures_local`) — plus an email notification
+    channel, one threshold alert per metric (any rate >0 sustained 10 min for
+    sweep errors; >0 sustained 1 h for timeouts; >0 sustained 30 min for
+    scheduler failures), and the `Chrysopoeia health (local)` Cloud Monitoring
+    dashboard. Gated on `health_alert_email`; no absence alerting because
+    overnight silence is by design.
+
 ## Deferred
 
 - Cloud SQL, RAG Engine, Memory Bank, and managed runtime services, gated on

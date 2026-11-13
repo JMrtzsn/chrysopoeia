@@ -58,6 +58,12 @@ Ordered platform work lives in `ROADMAP.md`.
   default SEK) deploys the native monthly billing budget for the configured
   project: whole-amount thresholds at 50/90/100%, default billing-account
   recipients. The billing account currency must match the amount's currency.
+- Optional `health_alert_email` deploys log-based metrics over known failure
+  signatures (consumer service ERROR logs, cycle task 900-second timeouts,
+  scheduler 5xx attempts), an email notification channel, one threshold alert
+  per metric, and a Cloud Monitoring health dashboard. Alerts key on error
+  events, not absent ticks: overnight silence is by design because no ticks
+  are scheduled then.
 
 ## Verification gates
 
