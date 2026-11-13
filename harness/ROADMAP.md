@@ -89,6 +89,14 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
+Operator approval (2026-11-12): automated paper trading for the esports
+match-winner venue is enabled. The Platform profile sets
+`[session] scored_only = false`; `run` accepts both scored-only and
+paper-trading profiles, and approved plans that pass deterministic risk policy
+produce journal fills and `trade_plan_ready` events under the existing risk,
+fee, and cost caps. Real-money execution remains prohibited. Live evidence:
+Platform ROADMAP item 9.
+
 Coordinated operator approval (2026-11-07): retire BTC 5m automation and make
 CS2/Dota 2 match winners the automated venue, scored-only. `[venue].markets =
 "esports-match-winner"` replaces `[venue].series`; discovery keeps only

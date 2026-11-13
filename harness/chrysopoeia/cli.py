@@ -687,11 +687,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 2,
                 "run failed: existing exposures are cycle-only; run uses its journal\n",
             )
-        if not config.session.scored_only:
-            parser.exit(
-                2,
-                "run failed: automated runs are scored-only; set [session] scored_only = true\n",
-            )
         flag = StopFlag()
         previous = {}
         try:

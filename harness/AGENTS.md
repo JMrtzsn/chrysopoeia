@@ -33,12 +33,12 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
   change; the platform consumes the resulting image digest pin via Pulumi.
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
-- Session capital/limits/cadence and risk limits come only from required
-  `[session]`/`[risk]` config sections. `[venue].markets` is required and must
-  be `esports-match-winner`; automated `run` forecasts CS2/Dota 2 match winners
-  only and refuses profiles without `[session] scored_only = true`, so it never
-  emits plans or fills. Explicit
-  `capture`/`cycle` targets remain verification inputs. CLI setting overrides are
+  `capture`/`cycle` targets remain verification inputs. Automated `run`
+  forecasts CS2/Dota 2 match winners only; `[venue].markets` is required and must
+  be `esports-match-winner`. Operator-approved 2026-11-12: automated runs may
+  take paper positions (`[session] scored_only = false` in the Platform
+  profile); scored-only profiles remain supported and never emit plans or
+  fills. Real-money execution remains prohibited. CLI setting overrides are
   not supported. Keep `--config`, `--journal`, target/input/output flags, JSON
   formatting, and `--stop-file` as invocation controls. The Platform profile is
   bundled beside the wheel and selected as `/etc/chrysopoeia-platform.toml`.

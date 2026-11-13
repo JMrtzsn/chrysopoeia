@@ -25,8 +25,10 @@ Cloud.
   mounted at `/mnt/journal`; journal semantics belong to the harness.
 - Operating settings come from the bundled Harness-owned
   `configs/platform.toml`, selected by `CHRYSOPOEIA_CONFIG=/etc/chrysopoeia-platform.toml`.
-  The profile forecasts up to two CS2/Dota 2 match-winner markets per session,
-  scored-only (`[session] scored_only = true`: no plans or fills), with a
+  The profile forecasts up to two CS2/Dota 2 match-winner markets per session
+  and takes paper positions (`[session] scored_only = false`, operator-approved
+  2026-11-12: reviewer-approved plans that pass risk policy produce journal
+  fills and `trade_plan_ready` events), with a
   60-minute configured session deadline bounded by the job's 900-second task
   timeout and a $3 session model-cost ceiling. Cost is reserved before model
   work; grounded research is enabled with a 32768-token input ceiling, so one

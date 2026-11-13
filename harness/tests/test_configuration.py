@@ -116,10 +116,12 @@ class HarnessConfigurationTests(unittest.TestCase):
         for name in ("esports.toml", "platform.toml"):
             profile = load_harness_config(base / name)
             self.assertEqual(profile.venue.markets, "esports-match-winner")
-            self.assertTrue(profile.operating.scored_only)
             self.assertTrue(profile.research.enabled)
             self.assertEqual(profile.cost.maximum_input_tokens_per_call, 32768)
         platform = load_harness_config(base / "platform.toml")
+        # Operator-approved 2026-11-12: automated paper trading.
+        self.assertFalse(platform.operating.scored_only)
+        self.assertTrue(load_harness_config(base / "esports.toml").operating.scored_only)
         self.assertEqual(platform.session.max_cycles, 2)
         self.assertTrue(platform.history.enabled)
         self.assertTrue(platform.context_learning.enabled)

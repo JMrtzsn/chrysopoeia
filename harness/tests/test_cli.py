@@ -265,7 +265,7 @@ class OperatorCliTests(unittest.TestCase):
             self.assertIn("run uses its journal", error)
             self.assertFalse(journal.exists())
 
-    def test_run_uses_esports_config_and_refuses_sessions_that_could_trade(
+    def test_run_uses_esports_config_and_runs_paper_sessions(
         self,
     ) -> None:
         with (
@@ -283,12 +283,12 @@ class OperatorCliTests(unittest.TestCase):
             trading.write_text(
                 esports.read_text().replace("scored_only = true", "scored_only = false")
             )
-            code, output, error = self.invoke(
+            code, output, _ = self.invoke(
                 "run", "--journal", directory, "--config", str(trading)
             )
-            self.assertEqual((code, output), (2, ""))
-            self.assertIn("scored-only", error)
-            self.assertEqual(run.await_count, 1)
+            self.assertEqual((code, output), (0, "{}\n"))
+            self.assertFalse(run.call_args.args[0].scored_only)
+            self.assertEqual(run.await_count, 2)
 
     def run_cli(
         self, *arguments: str, cwd: str | Path | None = None, console: bool = False

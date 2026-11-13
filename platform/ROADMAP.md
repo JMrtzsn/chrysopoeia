@@ -201,6 +201,16 @@ runtime resources were replaced or deleted. Recovery steps are in
    Exclusions unchanged: no harness/consumer/observer change; no
    `scored_only=false`; no real-money execution.
 
+9. **Automated paper trading for esports match winners** (operator-approved
+   2026-11-12): harness gate flipped (`run` no longer refuses non-scored-only
+   profiles; `configs/platform.toml` sets `scored_only = false`; 377 offline
+   tests green), image rebuilt/pinned (`sha256:bdf53208…`), deployed, and
+   verified live: forced tick `e62c5a8d` → job `-wmgmb` → journal
+   `esports-2026-11-12T13:41:42.030466Z` produced `plan_ready` (p=0.93 vs price
+   0.86), a deterministic-policy-approved paper fill ($5.00 stake, 5.81 shares
+   @ 0.86, $0.10 fee), and a `trade_plan_ready` outbox event. Real-money
+   execution remains prohibited.
+
 ## Deferred
 
 - Cloud SQL, RAG Engine, Memory Bank, and managed runtime services, gated on

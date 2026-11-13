@@ -1,10 +1,13 @@
-# Esports scored-only collection
+# Esports automated collection
 
-Automated sessions forecast CS2 and Dota 2 match-winner markets only, and they
-never trade. Every bundled profile sets `[venue] markets = "esports-match-winner"`
-and `[session] scored_only = true`; `run` refuses any profile that is not
-scored-only. BTC 5m automation is retired; older BTC journals and archived
-events remain scoreable.
+Automated sessions forecast CS2 and Dota 2 match-winner markets only. Every
+bundled profile sets `[venue] markets = "esports-match-winner"`. The Platform
+profile runs automated paper trading (`[session] scored_only = false`,
+operator-approved 2026-11-12): reviewer-approved plans that pass risk policy
+produce paper fills, positions, and settled PnL in the journal. Other profiles
+may stay scored-only (`run` accepts both); scored-only sessions never emit
+plans or fills. BTC 5m automation is retired; older BTC journals and archived
+events remain scoreable. Real-money execution remains prohibited.
 
 Discovery reuses the bounded volume-ranked Gamma read (at most three 25-record
 pages, 5 s and 256 KiB each) and keeps a market only when its event slug is a
@@ -15,12 +18,13 @@ eligible market not yet admitted in the journal; with none, the cycle idles unti
 the next interval. Coverage depends on esports appearing in the top 75 markets by
 24-hour volume.
 
-Scored-only is enforced by deterministic policy, not the prompt: a plan the
-reviewer approves and the risk policy would allow is recorded as
-`policy_rejected` with reason `scored_only`. The `turn_outcome` (with its
+Scored-only, where configured, is enforced by deterministic policy, not the
+prompt: a plan the reviewer approves and the risk policy would allow is recorded
+as `policy_rejected` with reason `scored_only`. The `turn_outcome` (with its
 probability) is journaled and published; no `trade_plan_ready` event, Harness
-paper fill, or Consumer fill is produced. `polymarket-eval` scores every decided
-turn regardless of status.
+paper fill, or Consumer fill is produced. Paper-trading sessions emit
+`trade_plan_ready` and journal fills under the same risk, fee, and cost caps.
+`polymarket-eval` scores every decided turn regardless of status.
 
 The Platform-owned raw archive stores published outcome events, not every
 journal record or model failure. Keep the local journal for scoring, failure
