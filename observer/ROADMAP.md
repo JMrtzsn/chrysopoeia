@@ -76,20 +76,31 @@ future deployment. The BigQuery archive is an analytics copy, never a ledger.
   settlements, 7.785 h max settlement lag, 0 revisions) and unauthenticated
   access returned 403. Remaining alerting steps are platform work (see Next).
 
+- **Open-positions projection consumption** (operator-approved 2026-11-13,
+  completed 2026-11-14): `query_health` reads the platform-maintained
+  `open_positions` projection — a derived, rebuildable read model over the
+  archive, refreshed every 15 minutes by a platform scheduled query — for
+  lifecycle state (stuck settlements, settlement lag, last completed trade),
+  plus one dynamically bounded scan (starting no earlier than the last
+  completed trade) for 24-hour decision/fill/cost metrics and context
+  revisions. No new environment variable: the positions table is derived from
+  `OBSERVER_ARCHIVE_TABLE`'s dataset. 27 tests, Ruff, and ty pass; image
+  `sha256:d2790838…` built, pushed, and deployed; live `/v1/health` returned
+  200 authenticated with projection-sourced metrics (last completed
+  2026-11-14T13:42Z, 10 decisions/24 h, 2 fills, 1 win, +1.88 realized,
+  $3.8426 model cost, 0 stuck settlements, 7.785 h max settlement lag) and
+  403 unauthenticated; BigQuery job history shows the observer identity
+  querying `open_positions` at exactly the response's `as_of`. An initial
+  200 check and a config-set mishap (observer digest briefly under the
+  Harness `image_digest` key, corrected) are recorded in
+  `../platform/docs/deployment.md`. Writer infrastructure and evidence:
+  `../platform/docs/deployment.md`.
+
 ## Next
 
-1. **Open-positions projection** (operator-approved 2026-11-13): a derived read
-   model over the archive — one `open_positions` table keyed by
-   `trade_plan_event_id` with fill → terminal transitions, maintained as events
-   arrive so health checks read a lookup instead of rescanning 90 days per
-   event. Read-only and rebuildable from `raw_events` (deleting it loses
-   nothing); never authoritative — any disagreement resolves in the owning
-   ledger's favor. One unit owns it (never cross-unit writable); approved here
-   because it adds a projection store, which the v1 boundary explicitly
-   excluded. Platform ROADMAP item 11's evaluator reads it once it exists.
-2. **Platform item 11 — journey-health event alerting**: platform-owned
-   evaluator, `degraded`/absence alerting, and a dashboard health panel
-   (details and acceptance in `../platform/ROADMAP.md`).
+1. **Platform item 11 — journey-health event alerting**: platform-owned
+   evaluator that reads the projection, `degraded`/absence alerting, and a
+   dashboard health panel (details and acceptance in `../platform/ROADMAP.md`).
 
 ## Deferred
 

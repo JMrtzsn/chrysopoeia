@@ -2,8 +2,8 @@
 
 Independent FastAPI service for read-only insight over the raw BigQuery event
 archive. `GET /v1/insights` runs a bounded query at read time; it does not keep a
-projection database, subscribe to events, or write anywhere. `GET /health` does
-not query the archive.
+projection database of its own, subscribe to events, or write anywhere. `GET
+/health` does not query the archive.
 
 Each result groups `turn_outcome` v3/v4 decisions by full context identity
 (`scope_key`, profile ID/version/manifest hash), joins archived Consumer outcomes
@@ -32,9 +32,13 @@ existing meaning and is an estimate, not a provider bill.
 
 ## Journey health
 
-`GET /v1/health` answers "is the trading loop producing outcomes?" with one
-bounded read over the same archive. It returns `healthy`/`degraded` plus
-`reasons`, and degrades when:
+`GET /v1/health` answers "is the trading loop producing outcomes?" with two
+bounded reads: a lookup of lifecycle state in the platform-maintained
+`open_positions` projection (same dataset as the archive; the projection is a
+scheduled-query rebuild of `raw_events` every 15 minutes, never authoritative),
+and a 24-hour archive scan that extends back to the last completed trade for
+context revisions. It returns `healthy`/`degraded` plus `reasons`, and degrades
+when:
 
 - inside the scheduled window (13:40–23:00 UTC; executions run hourly at :40 of
   hours 13–22, so overnight silence is by design) no `turn_outcome` exists within
