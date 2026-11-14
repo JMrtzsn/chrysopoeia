@@ -17,6 +17,22 @@ coordination decision, not a new platform work item.
 
 ## Complete
 
+- [x] Open-positions projection writer (2026-11-14, operator-approved via the
+  Observer ROADMAP Next item 1): the `open_positions` derived table in the
+  archive dataset (explicitly unprotected and retained on delete — a rebuildable
+  read model, never authoritative), a customer-managed transfer runner service
+  account with project `roles/bigquery.jobUser`, archive-dataset
+  `roles/bigquery.dataViewer`, table-level `roles/bigquery.dataEditor`, operator
+  `roles/iam.serviceAccountUser` for config creation, `roles/iam.serviceAccountTokenCreator`
+  for the Google-managed transfer agent on the runner, and the
+  `open-positions-refresh` scheduled query (every 15 minutes, atomic
+  TRUNCATE+INSERT full rebuild from the 90-day archive window). API-created
+  scheduled queries require an explicit service-account credential and
+  Google-managed service agents reject impersonation, so the runner is a normal
+  service account. First rebuild ran as the operator: 20 rows (9 rejected,
+  7 settled, 4 pending). See `docs/deployment.md`; the Observer reads the table
+  for journey-health lifecycle state.
+
 - [x] Managed deployment, Level 2 (single operator): container-first Pulumi base
   with a versioned journal bucket, least-privileged runner service account,
   Artifact Registry repository, and one Cloud Run job (`infra/`, `Dockerfile`).

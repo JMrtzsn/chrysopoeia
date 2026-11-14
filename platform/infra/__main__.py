@@ -208,6 +208,228 @@ if pubsub_topic:
     pulumi.export("event_archive_table", archive_subscription.bigquery_config.table)
     pulumi.export("event_archive_subscription", archive_subscription.name)
 
+    # Open-positions projection: a derived, rebuildable read model over the
+    # archive (one row per trade plan with its lifecycle state), refreshed by a
+    # scheduled query. It is never authoritative and deletion loses nothing;
+    # operator-approved 2026-11-13 (observer ROADMAP Next item 1).
+    transfer_api = gcp.projects.Service(
+        "transfer-api",
+        gcp.projects.ServiceArgs(
+            project=project_id,
+            service="bigquerydatatransfer.googleapis.com",
+            disable_dependent_services=False,
+            disable_on_destroy=False,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_api]),
+    )
+    # Scheduled-query configs created through the API must name an explicit
+    # credential, and Google-managed service agents reject impersonation, so
+    # the projection runner is a normal project service account.
+    transfer_runner = gcp.serviceaccount.Account(
+        "transfer-runner",
+        gcp.serviceaccount.AccountArgs(
+            project=project_id,
+            account_id=f"chrysopoeia-transfer-{operator}"[:30],
+            display_name=f"Chrysopoeia open-positions projection ({operator})",
+            description="Runs the scheduled query that rebuilds the open-positions projection.",
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[transfer_api]),
+    )
+    transfer_agent_member = pulumi.Output.concat("serviceAccount:", transfer_runner.email)
+    open_positions_table = gcp.bigquery.Table(
+        "open-positions",
+        gcp.bigquery.TableArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            table_id="open_positions",
+            deletion_protection=False,
+            schema=json.dumps(
+                [
+                    {"name": "trade_plan_event_id", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "profile_id", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "profile_version", "type": "INT64", "mode": "NULLABLE"},
+                    {"name": "market_end", "type": "TIMESTAMP", "mode": "NULLABLE"},
+                    {"name": "plan_created_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+                    {"name": "status", "type": "STRING", "mode": "NULLABLE"},
+                    {"name": "settled_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+                    {"name": "pnl", "type": "FLOAT64", "mode": "NULLABLE"},
+                ]
+            ),
+        ),
+        opts=pulumi.ResourceOptions(
+            depends_on=[archive_dataset], protect=False, retain_on_delete=True
+        ),
+    )
+    gcp.projects.IAMMember(
+        "transfer-bigquery-job-user",
+        gcp.projects.IAMMemberArgs(
+            project=project_id,
+            role="roles/bigquery.jobUser",
+            member=transfer_agent_member,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_api]),
+    )
+    gcp.bigquery.DatasetIamMember(
+        "transfer-archive-reader",
+        gcp.bigquery.DatasetIamMemberArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            role="roles/bigquery.dataViewer",
+            member=transfer_agent_member,
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[archive_dataset]),
+    )
+    gcp.bigquery.IamMember(
+        "transfer-projection-writer",
+        gcp.bigquery.IamMemberArgs(
+            project=project_id,
+            dataset_id=archive_dataset.dataset_id,
+            table_id=open_positions_table.table_id,
+            role="roles/bigquery.dataEditor",
+            member=transfer_agent_member,
+        ),
+    )
+    # Creating a transfer config pinned to the runner's credential requires
+    # the operator to actAs it during the create itself.
+    if observer_invoker_member:
+        transfer_actas = gcp.projects.IAMMember(
+            "transfer-config-creator",
+            gcp.projects.IAMMemberArgs(
+                project=project_id,
+                role="roles/iam.serviceAccountUser",
+                member=observer_invoker_member,
+            ),
+            opts=pulumi.ResourceOptions(depends_on=[transfer_runner]),
+        )
+    else:
+        transfer_actas = transfer_runner
+    # Atomic full rebuild: replaying the archive re-derives every row, so the
+    # projection stays a pure read model rather than incrementally accreted state.
+    project_number = gcp.organizations.get_project_output(
+        project_id=project_id
+    ).number
+    # The transfer service's Google-managed agent mints access tokens for the
+    # runner on every scheduled execution; without this the run fails with
+    # "DTS service agent needs iam.serviceAccounts.getAccessToken permission".
+    gcp.serviceaccount.IAMMember(
+        "transfer-token-creator",
+        gcp.serviceaccount.IAMMemberArgs(
+            service_account_id=pulumi.Output.concat(
+                "projects/", project_id, "/serviceAccounts/", transfer_runner.email
+            ),
+            role="roles/iam.serviceAccountTokenCreator",
+            member=pulumi.Output.concat(
+                "serviceAccount:service-",
+                project_number,
+                "@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com",
+            ),
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[transfer_runner]),
+    )
+    projection_query = pulumi.Output.all(
+        project_id, archive_dataset.dataset_id
+    ).apply(
+        lambda args: (
+            f"TRUNCATE TABLE `{args[0]}.{args[1]}.open_positions`;\n"
+            "INSERT INTO `"
+            + f"{args[0]}.{args[1]}.open_positions`"
+            + " (trade_plan_event_id, profile_id, profile_version, market_end, plan_created_at, status, settled_at, pnl)\n"
+            "WITH parsed AS (\n"
+            "  SELECT SAFE.PARSE_JSON(data) AS payload, publish_time\n"
+            f"  FROM `{args[0]}.{args[1]}.raw_events`\n"
+            "  WHERE publish_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)\n"
+            "    AND publish_time < CURRENT_TIMESTAMP()\n"
+            "    AND data IS NOT NULL\n"
+            "), events AS (\n"
+            "  SELECT payload\n"
+            "  FROM parsed\n"
+            "  WHERE payload IS NOT NULL\n"
+            "    AND JSON_VALUE(payload, '$.event_id') IS NOT NULL\n"
+            "  QUALIFY ROW_NUMBER() OVER (\n"
+            "    PARTITION BY JSON_VALUE(payload, '$.record_type'), JSON_VALUE(payload, '$.event_id')\n"
+            "    ORDER BY publish_time DESC\n"
+            "  ) = 1\n"
+            "), plans AS (\n"
+            "  SELECT\n"
+            "    JSON_VALUE(payload, '$.event_id') AS trade_plan_event_id,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.created_at') AS TIMESTAMP) AS plan_created_at,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.market_end') AS TIMESTAMP) AS market_end\n"
+            "  FROM events\n"
+            "  WHERE JSON_VALUE(payload, '$.record_type') = 'trade_plan_ready'\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.schema_version') AS INT64) IN (1, 2)\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.created_at') AS TIMESTAMP) < CURRENT_TIMESTAMP()\n"
+            "), turns AS (\n"
+            "  SELECT\n"
+            "    JSON_VALUE(payload, '$.trade_plan_event_id') AS trade_plan_event_id,\n"
+            "    JSON_VALUE(payload, '$.context.profile_id') AS profile_id,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.context.profile_version') AS INT64) AS profile_version,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.created_at') AS TIMESTAMP) AS created_at\n"
+            "  FROM events\n"
+            "  WHERE JSON_VALUE(payload, '$.record_type') = 'turn_outcome'\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.schema_version') AS INT64) IN (3, 4)\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.created_at') AS TIMESTAMP) < CURRENT_TIMESTAMP()\n"
+            "), turn_context AS (\n"
+            "  SELECT trade_plan_event_id, profile_id, profile_version\n"
+            "  FROM turns\n"
+            "  WHERE trade_plan_event_id IS NOT NULL\n"
+            "  QUALIFY ROW_NUMBER() OVER (PARTITION BY trade_plan_event_id ORDER BY created_at DESC) = 1\n"
+            "), consumer_events AS (\n"
+            "  SELECT\n"
+            "    JSON_VALUE(payload, '$.trade_plan_event_id') AS trade_plan_event_id,\n"
+            "    JSON_VALUE(payload, '$.status') AS status,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.pnl') AS FLOAT64) AS pnl,\n"
+            "    SAFE_CAST(JSON_VALUE(payload, '$.recorded_at') AS TIMESTAMP) AS recorded_at\n"
+            "  FROM events\n"
+            "  WHERE JSON_VALUE(payload, '$.record_type') = 'consumer_outcome'\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.schema_version') AS INT64) = 1\n"
+            "    AND SAFE_CAST(JSON_VALUE(payload, '$.recorded_at') AS TIMESTAMP) < CURRENT_TIMESTAMP()\n"
+            "), lifecycle AS (\n"
+            "  SELECT\n"
+            "    trade_plan_event_id,\n"
+            "    LOGICAL_OR(status = 'filled') AS was_filled,\n"
+            "    LOGICAL_OR(status = 'rejected') AS was_rejected,\n"
+            "    ARRAY_AGG(\n"
+            "      IF(status IN ('closed', 'settled'), STRUCT(recorded_at, pnl), NULL)\n"
+            "      IGNORE NULLS ORDER BY recorded_at DESC LIMIT 1\n"
+            "    )[SAFE_OFFSET(0)] AS final_outcome\n"
+            "  FROM consumer_events\n"
+            "  WHERE trade_plan_event_id IS NOT NULL\n"
+            "  GROUP BY trade_plan_event_id\n"
+            ")\n"
+            "SELECT\n"
+            "  p.trade_plan_event_id,\n"
+            "  tc.profile_id,\n"
+            "  tc.profile_version,\n"
+            "  p.market_end,\n"
+            "  p.plan_created_at,\n"
+            "  CASE\n"
+            "    WHEN l.was_filled THEN IF(l.final_outcome IS NULL, 'open', 'settled')\n"
+            "    WHEN l.was_rejected THEN 'rejected'\n"
+            "    ELSE 'pending'\n"
+            "  END AS status,\n"
+            "  l.final_outcome.recorded_at AS settled_at,\n"
+            "  l.final_outcome.pnl AS pnl\n"
+            "FROM plans p\n"
+            "LEFT JOIN turn_context tc USING (trade_plan_event_id)\n"
+            "LEFT JOIN lifecycle l USING (trade_plan_event_id)"
+        )
+    )
+    gcp.bigquery.DataTransferConfig(
+        "open-positions-refresh",
+        gcp.bigquery.DataTransferConfigArgs(
+            project=project_id,
+            location=region,
+            data_source_id="scheduled_query",
+            display_name="open-positions-refresh",
+            schedule="every 15 minutes",
+            service_account_name=transfer_runner.email,
+            params={"query": projection_query},
+        ),
+        opts=pulumi.ResourceOptions(
+            depends_on=[open_positions_table, transfer_actas]
+        ),
+    )
+
     if context_history_enabled:
         gcp.projects.IAMMember(
             "runner-bigquery-job-user",
