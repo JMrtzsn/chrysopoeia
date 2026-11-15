@@ -37,6 +37,12 @@ resource "google_bigquery_table" "raw_events" {
   }
 
   require_partition_filter = true
+
+  # The raw archive is protected twice: the API-level flag and the local
+  # destroy guard, matching the Pulumi program's protect + deletion_protection.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_bigquery_table_iam_member" "archive_writer" {

@@ -317,6 +317,16 @@ runtime resources were replaced or deleted. Recovery steps are in
       on the journal bucket, consumer ledger bucket, and archive dataset/table,
       matching today's Pulumi `protect`/`deletion_protection`. Add an offline
       test that fails if any protection is removed.
+
+      **Complete (2026-11-15).** `prevent_destroy` pinned on the journals
+      bucket, consumer ledger bucket, archive dataset, and `raw_events`
+      (table also keeps `deletion_protection = true`); the `open_positions`
+      projection table stays deliberately unprotected — it is a rebuildable
+      read model and deletion loses nothing. New
+      `tests/test_protections.py` (stdlib only, brace-parsed resource blocks)
+      asserts every pinned protection; verified to fail when one is removed
+      and pass when restored. Wired into `gates.sh` as the fourth gate. All
+      gates green offline, no cloud access.
     - **12c. Plan policy.** Gate with `plan -out=tfplan`, then
       `terraform show -json`, then `conftest` (Rego). Deny delete/replace of
       protected resources, `allUsers`/`allAuthenticatedUsers` members,

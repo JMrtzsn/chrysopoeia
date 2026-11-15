@@ -12,6 +12,11 @@ resource "google_storage_bucket" "journals" {
   versioning {
     enabled = true
   }
+
+  # Journals are durable records; destruction is never part of any flow.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_storage_bucket_iam_member" "runner_object_admin" {
@@ -36,6 +41,12 @@ resource "google_storage_bucket" "consumer_ledger" {
 
   versioning {
     enabled = true
+  }
+
+  # The consumer ledger is its owners' durable record; same protection as the
+  # journals bucket.
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
