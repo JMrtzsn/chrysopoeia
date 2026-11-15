@@ -263,6 +263,86 @@ runtime resources were replaced or deleted. Recovery steps are in
       approved. Cost bound: ~10 events/day, scale-to-zero evaluator, and one
       ≤100 MiB Observer query per event.
 
+12. **Terraform migration with plan gates** (proposed 2026-11-15; approved
+    2026-11-15 with amendments): replace the single-file Pulumi program with a
+    structured Terraform root so LLM-authored infrastructure changes pass
+    deterministic gates before any apply. Pulumi problems recorded in
+    `docs/deployment.md` include ghost diffs, `--target` not creating new
+    resources, and file-backed state. Most other live defects were GCP API
+    behavior and will carry over, and two carry over structurally: Terraform's
+    `-target` has the same state-only limitation, and the `google` provider has
+    its own perpetual-diff family (scheduler `http_target.headers`,
+    transfer-config `params` formatting, IAM binding ordering). Land this
+    before item 11 adds more resources. Each step needs separate operator
+    approval; no resource may be recreated.
+    - **Single-writer rule.** From the start of 12d (import) until 12e
+      (cutover) completes, Pulumi applies are forbidden: `platform/run.sh
+      deploy` must refuse once import begins, so two tools never apply to the
+      same cloud. Pulumi previews stay allowed for comparison.
+    - **Ghost-diff allowance list (12d/12f).** `terraform plan` after import is
+      accepted only with an explicit, committed list of known provider-quirk
+      diffs (initial suspects: transfer-config `params.query` string
+      formatting, scheduler `http_target.headers`, IAM binding ordering). At
+      12f, drift detection ignores only that list; anything else is drift.
+    - **12a. Structure and offline gates.** Add `infra-tf/` with per-concern
+      files (`apis`, `iam`, `storage`, `events`, `bigquery`, `run`,
+      `scheduling`, `monitoring`, `budget`), keeping the same optional-feature
+      conditions as today's config keys. Add pinned `google` provider and
+      Terraform versions plus a GCS state backend with locking. The state
+      bucket is created once by the operator, versioned, and its access is
+      pinned from day one (who can write state can rewrite the cloud); the
+      empty-passphrase file-backed local-dev habit does not carry over.
+      Gate roles do not overlap: tflint = correctness, trivy config =
+      security, conftest (12c) = operator policy. Offline gates:
+      `terraform fmt -check`, `validate`, `tflint` (Google ruleset), and
+      `trivy config`. Acceptance: all gates pass with no cloud access.
+
+      **Complete (2026-11-15).** `platform/infra-tf/` mirrors the ~70-resource
+      Pulumi program per concern, with the same optional-feature conditions
+      (`count`-gated on `pubsub_topic`, image digests, `scan_schedule`,
+      `budget_amount_usd`, `health_alert_email`) and the program's
+      cross-config guards as variable validations. Pinned: Terraform
+      `~> 1.15.0`, google/google-beta provider `8.11.0`; GCS backend declared
+      (`PROJECT_ID-chrs-tfstate-local`, created by the operator in 12d,
+      not yet provisioned). Pulumi auto-named live resources are reflected
+      exactly (`paper-consumer-a8db57a`, `consumer-dead-letter-retention-7304458`,
+      `consumer-sweep-916f9e1`) so 12d imports by ID without recreation.
+      Archive dataset carries `prevent_destroy`, tables their
+      `deletion_protection` as today. Evidence: `./gates.sh` all green with no
+      cloud access (`terraform init -backend=false`): `fmt -check`, `validate`,
+      tflint 0.66.0 + Google ruleset 0.41.0 (0 issues), trivy 0.76.2 config
+      HIGH/CRITICAL (0 findings). Offline only — no resource created, no
+      state written.
+    - **12b. Protections first.** Add `lifecycle { prevent_destroy = true }`
+      on the journal bucket, consumer ledger bucket, and archive dataset/table,
+      matching today's Pulumi `protect`/`deletion_protection`. Add an offline
+      test that fails if any protection is removed.
+    - **12c. Plan policy.** Gate with `plan -out=tfplan`, then
+      `terraform show -json`, then `conftest` (Rego). Deny delete/replace of
+      protected resources, `allUsers`/`allAuthenticatedUsers` members,
+      project-level owner/editor grants, and non-digest image references.
+      Add fixture-plan tests for each rule. Apply only a saved, gated
+      `tfplan`, never a fresh plan.
+    - **12d. Import.** Use `import` blocks for every live resource in the
+      `local-dev` stack, keeping existing IDs. Acceptance: `terraform plan`
+      against live state shows **no changes** (read-only; needs operator
+      approval for authenticated reads). Any diff on a protected resource
+      blocks the step.
+    - **12e. Cutover.** Point `run.sh deploy` at the gated
+      plan→policy→apply flow and keep the `CHRYSOPOEIA_RUN_PLATFORM=1`
+      refusal. Make image pins Terraform variables, and update `AGENTS.md`
+      and `docs/deployment.md`. Acceptance: one bounded image repin applied
+      through the gated flow, plus one job execution or `validate --json`.
+      Then remove the Pulumi state with `pulumi state delete`/`stack rm`
+      (resources stay in place; never `destroy`), delete `infra/`, and
+      archive the old state file.
+    - **12f. Drift check.** Run a scheduled or manual
+      `plan -detailed-exitcode`; any non-zero exit is reported as drift.
+      CI required checks and apply approval follow once a remote repository
+      policy exists.
+    - Cost: ~$0 beyond one GCS state bucket. No model spend. Rollback until
+      12e: Pulumi state is untouched and stays authoritative.
+
 ## Deferred
 
 - Cloud SQL, RAG Engine, Memory Bank, and managed runtime services, gated on
