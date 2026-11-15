@@ -67,7 +67,9 @@ real Pub/Sub push envelope.
 - Local runs have no authentication; bind to `127.0.0.1` only.
 - The service makes real public Polymarket Gamma/CLOB reads. Fills are paper only.
 - `204` means a durable fill, terminal rejection, or intentionally ignored
-  non-`trade_plan_ready` event; `503` means retryable failure.
+  non-`trade_plan_ready` event; `503` means retryable failure of the ledger or
+  outbox — a position whose public quote is unreadable is deferred (logged at
+  ERROR severity) and retried on the next sweep without failing the sweep.
 
 ## Adding a market provider
 

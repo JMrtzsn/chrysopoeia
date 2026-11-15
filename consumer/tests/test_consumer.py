@@ -1,8 +1,10 @@
 import base64
+import io
 import json
 import re
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -573,13 +575,50 @@ class ConsumerTests(unittest.TestCase):
         self.assertEqual(client.post("/sweep").status_code, 204)
         self.assertEqual(len(self.path.read_text().splitlines()), 1)
 
-    def test_transient_exit_quote_failure_retries(self) -> None:
-        market = FakeMarket([quote(), RuntimeError("temporary")])
+    def test_transient_quote_load_failure_defers_and_later_settles(self) -> None:
+        market = FakeMarket([
+            quote(),
+            RuntimeError("temporary"),
+            quote(resolution="YES", asks=(), bids=()),
+        ])
         client = self.client(market)
         client.post("/push", json=envelope(event()))
 
-        self.assertEqual(client.post("/sweep").status_code, 503)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            self.assertEqual(client.post("/sweep").status_code, 204)
         self.assertEqual(len(self.path.read_text().splitlines()), 1)
+        self.assertIn('"severity": "ERROR"', buffer.getvalue())
+        self.assertIn("sweep deferred", buffer.getvalue())
+
+        # A later sweep with a readable quote still settles the position.
+        self.assertEqual(client.post("/sweep").status_code, 204)
+        self.assertEqual(len(self.path.read_text().splitlines()), 2)
+        self.assertEqual(
+            json.loads(self.path.read_text().splitlines()[-1])["status"], "settled"
+        )
+
+    def test_one_unreadable_quote_does_not_block_other_positions(self) -> None:
+        market = FakeMarket([
+            quote(),
+            quote(market_id="67890"),
+            quote(captured_at=(NOW - timedelta(minutes=10)).isoformat()),
+            quote(market_id="67890"),
+        ])
+        client = self.client(market)
+        client.post("/push", json=envelope(event()))
+        client.post("/push", json=envelope(event(market_id="67890")))
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            self.assertEqual(client.post("/sweep").status_code, 204)
+
+        statuses = [
+            json.loads(line)["status"] for line in self.path.read_text().splitlines()
+        ]
+        self.assertEqual(statuses.count("filled"), 2)
+        self.assertIn("sweep deferred", buffer.getvalue())
+        self.assertIn('"severity": "ERROR"', buffer.getvalue())
 
     def test_yes_and_no_resolution_settle_idempotently(self) -> None:
         for resolution in ("YES", "NO"):

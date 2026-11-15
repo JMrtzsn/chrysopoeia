@@ -27,6 +27,10 @@ class TransientFailure(RuntimeError):
     pass
 
 
+class QuoteFailure(TransientFailure):
+    """One position's venue quote is unreadable; retry that position later."""
+
+
 @dataclass(frozen=True)
 class Config:
     journal: Path
@@ -672,63 +676,81 @@ class Consumer:
             _terminal, positions = self.journal.replay()
             for event_id, position in tuple(positions.items()):
                 try:
-                    quote = self.market.load(
-                        str(position["market_id"]), str(position["token_id"]), now
+                    self._sweep_position(event_id, position, now)
+                except QuoteFailure as exc:
+                    # One position's unreadable venue data must not fail the
+                    # whole sweep or block the positions behind it.
+                    print(
+                        json.dumps(
+                            {
+                                "severity": "ERROR",
+                                "message": f"sweep deferred {event_id}: {exc}: {exc.__cause__}",
+                            }
+                        ),
+                        flush=True,
                     )
-                except Exception as exc:
-                    raise TransientFailure("public quote unavailable") from exc
-                try:
-                    if (quote.market_id, quote.token_id) != (
-                        position["market_id"],
-                        position["token_id"],
-                    ):
-                        raise InvalidEvent("exit quote identity does not match")
-                    if (
-                        now - _timestamp(quote.captured_at) > timedelta(minutes=5)
-                        or _timestamp(quote.captured_at) > now
-                    ):
-                        raise InvalidEvent("exit quote is stale or future-dated")
-                    if quote.resolution in {"YES", "NO"}:
-                        proceeds = (
-                            Decimal(str(position["shares"]))
-                            if quote.resolution == "YES"
-                            else Decimal(0)
-                        )
-                        self.journal.append(
-                            self._outcome(event_id, position, quote, now, "settled", proceeds)
-                        )
-                        continue
-                    if _timestamp(quote.market_end) != _timestamp(position["market_end"]):
-                        # Polymarket can reschedule a match; the announced end
-                        # date is event metadata, not the instrument identity.
-                        # Hold for resolution instead of failing the sweep.
-                        continue
-                    bids = self._book(quote.bids, required=False, reverse=True)
-                    asks = self._book(quote.asks, required=True)
-                    if bids and bids[0][0] >= asks[0][0]:
-                        raise InvalidEvent("exit quote book is crossed")
-                except InvalidEvent as exc:
-                    raise TransientFailure("public exit quote is invalid") from exc
-                result = self._sell(Decimal(str(position["shares"])), bids)
-                if result is None:
-                    continue
-                gross, price = result
-                net = gross * (Decimal(1) - Decimal(str(self.config.fee_rate)))
-                roi = net / Decimal(str(position["total_cost"])) - Decimal(1)
-                plan = position["exit_plan"]
-                assert isinstance(plan, dict)
-                stop = plan["stop_loss_roi"]
-                due = plan["exit_by"] is not None and now >= _timestamp(plan["exit_by"])
-                if (
-                    roi >= Decimal(str(plan["take_profit_roi"]))
-                    or (stop is not None and roi <= Decimal(str(stop)))
-                    or due
-                ):
-                    record = self._outcome(event_id, position, quote, now, "closed", net)
-                    record["price"] = float(price)
-                    record["fee"] = float(gross - net)
-                    self.journal.append(record)
             self.flush_outbox(now)
+
+    def _sweep_position(
+        self, event_id: str, position: dict[str, object], now: datetime
+    ) -> None:
+        try:
+            quote = self.market.load(
+                str(position["market_id"]), str(position["token_id"]), now
+            )
+        except Exception as exc:
+            raise QuoteFailure("public quote unavailable") from exc
+        try:
+            if (quote.market_id, quote.token_id) != (
+                position["market_id"],
+                position["token_id"],
+            ):
+                raise InvalidEvent("exit quote identity does not match")
+            if (
+                now - _timestamp(quote.captured_at) > timedelta(minutes=5)
+                or _timestamp(quote.captured_at) > now
+            ):
+                raise InvalidEvent("exit quote is stale or future-dated")
+            if quote.resolution in {"YES", "NO"}:
+                proceeds = (
+                    Decimal(str(position["shares"]))
+                    if quote.resolution == "YES"
+                    else Decimal(0)
+                )
+                self.journal.append(
+                    self._outcome(event_id, position, quote, now, "settled", proceeds)
+                )
+                return
+            if _timestamp(quote.market_end) != _timestamp(position["market_end"]):
+                # Polymarket can reschedule a match; the announced end
+                # date is event metadata, not the instrument identity.
+                # Hold for resolution instead of failing the sweep.
+                return
+            bids = self._book(quote.bids, required=False, reverse=True)
+            asks = self._book(quote.asks, required=True)
+            if bids and bids[0][0] >= asks[0][0]:
+                raise InvalidEvent("exit quote book is crossed")
+        except InvalidEvent as exc:
+            raise QuoteFailure("public exit quote is invalid") from exc
+        result = self._sell(Decimal(str(position["shares"])), bids)
+        if result is None:
+            return
+        gross, price = result
+        net = gross * (Decimal(1) - Decimal(str(self.config.fee_rate)))
+        roi = net / Decimal(str(position["total_cost"])) - Decimal(1)
+        plan = position["exit_plan"]
+        assert isinstance(plan, dict)
+        stop = plan["stop_loss_roi"]
+        due = plan["exit_by"] is not None and now >= _timestamp(plan["exit_by"])
+        if (
+            roi >= Decimal(str(plan["take_profit_roi"]))
+            or (stop is not None and roi <= Decimal(str(stop)))
+            or due
+        ):
+            record = self._outcome(event_id, position, quote, now, "closed", net)
+            record["price"] = float(price)
+            record["fee"] = float(gross - net)
+            self.journal.append(record)
 
     @staticmethod
     def _sell(

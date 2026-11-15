@@ -12,6 +12,17 @@
   Evidence: `../platform/docs/deployment.md`.
 - [x] Ignore routing: offline checks and a live `turn_outcome` delivery returned
   HTTP 204 without a ledger write on 2026-10-12.
+- [x] Per-position sweep isolation (operator-approved 2026-11-15): a position
+  whose public exit quote is unreadable (stale/future-dated) is deferred with a
+  structured ERROR log and retried on the next sweep, instead of failing the
+  whole sweep with HTTP 503 — one flaky venue quote no longer blocks settlement
+  of other open positions or spams the sweep scheduler with UNAVAILABLE.
+  Fail-safe semantics are unchanged: nothing settles on bad data, and ledger or
+  outbox failures still fail the sweep. 42 tests, Ruff, and ty pass; image
+  `sha256:6f53a5e6…` deployed with the documented quiescing (trigger queue
+  already paused, no active Harness execution, sweep Scheduler paused, resumed
+  after revision `00005-w4m` served 204 sweeps); evidence:
+  `../platform/docs/deployment.md`.
 
 ## Next
 
