@@ -19,7 +19,7 @@ resource "google_workflows_workflow" "scan" {
   region              = var.region
   name                = local.scan_workflow_name
   service_account     = local.trigger_email
-  deletion_protection = false
+  deletion_protection = true
 
   source_contents = <<-WF
 main:
@@ -31,6 +31,7 @@ main:
         call: googleapis.run.v2.projects.locations.jobs.run
         args:
           name: "projects/${var.project_id}/locations/${var.region}/jobs/chrysopoeia-cycle-${var.operator}"
+
           body:
             overrides:
               containerOverrides:
@@ -64,12 +65,7 @@ resource "google_cloud_scheduler_job" "cycle_scan" {
     uri         = local.scan_workflow_uri
     http_method = "POST"
 
-    headers = {
-      "Content-Type" = "application/octet-stream"
-      "User-Agent"   = "Google-Cloud-Scheduler"
-    }
-
-    body = base64encode(jsonencode({ argument = "{}" }))
+    body = base64encode("{\"argument\": \"{}\"}")
 
     oauth_token {
       service_account_email = local.trigger_email

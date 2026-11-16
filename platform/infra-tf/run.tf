@@ -25,7 +25,7 @@ resource "google_cloud_run_v2_job" "paper_cycle" {
   location            = var.region
   name                = "chrysopoeia-cycle-${var.operator}"
   launch_stage        = "GA"
-  deletion_protection = false
+  deletion_protection = true
 
   template {
     task_count = 1
@@ -85,7 +85,7 @@ locals {
       { name = "CHRYSOPOEIA_CONTEXT_CATALOG", value = "/mnt/journal/context_profiles.jsonl" },
     ],
     local.feature_topic ? [
-      { name = "CHRYSOPOEIA_EVENT_SINK", value = "pubsub:${var.pubsub_topic}" },
+      { name = "CHRYSOPOEIA_EVENT_SINK", value = "pubsub:${local.topic_path}" },
     ] : [],
     var.context_history_enabled && local.feature_topic ? [
       {
@@ -104,7 +104,7 @@ resource "google_cloud_run_v2_service" "observer" {
   location            = var.region
   name                = "chrysopoeia-observer-${var.operator}"
   ingress             = "INGRESS_TRAFFIC_ALL"
-  deletion_protection = false
+  deletion_protection = true
 
   template {
     service_account = local.observer_email
@@ -157,7 +157,7 @@ resource "google_cloud_run_v2_service" "consumer" {
   location            = var.region
   name                = "chrysopoeia-consumer-${var.operator}"
   ingress             = "INGRESS_TRAFFIC_ALL"
-  deletion_protection = false
+  deletion_protection = true
 
   template {
     service_account = local.consumer_email
@@ -177,7 +177,7 @@ resource "google_cloud_run_v2_service" "consumer" {
 
       env {
         name  = "CHRYSOPOEIA_EVENT_TOPIC"
-        value = var.pubsub_topic
+        value = local.topic_path
       }
 
       volume_mounts {

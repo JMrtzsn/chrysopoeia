@@ -62,7 +62,7 @@ resource "google_bigquery_table" "open_positions" {
   project             = var.project_id
   dataset_id          = local.archive_dataset_id
   table_id            = "open_positions"
-  deletion_protection = false
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "trade_plan_event_id", type = "STRING", mode = "NULLABLE" },
@@ -114,16 +114,20 @@ resource "google_bigquery_dataset_iam_member" "runner_data_viewer" {
 # The `params.query` string formatting is a known provider-quirk diff
 # (roadmap 12d ghost-diff allowance list).
 resource "google_bigquery_data_transfer_config" "open_positions_refresh" {
-  count                = local.feature_topic ? 1 : 0
-  project              = var.project_id
-  location             = var.region
-  data_source_id       = "scheduled_query"
-  display_name         = "open-positions-refresh"
-  schedule             = "every 15 minutes"
-  service_account_name = local.transfer_email
+  count          = local.feature_topic ? 1 : 0
+  project        = var.project_id
+  location       = var.region
+  data_source_id = "scheduled_query"
+  display_name   = "open-positions-refresh"
+  schedule       = "every 15 minutes"
+
+  # The live config runs as its owner (the transfer identity, via the
+  # operator's serviceAccountUser grant at creation). serviceAccount is unset
+  # on purpose; recreating this config would re-own it to the operator, which
+  # is why the archive resources carry destroy protections instead.
 
   params = {
-    query = <<-SQL
+    query = chomp(<<-SQL
 TRUNCATE TABLE `${var.project_id}.${local.archive_dataset_id}.open_positions`;
 INSERT INTO `${var.project_id}.${local.archive_dataset_id}.open_positions` (trade_plan_event_id, profile_id, profile_version, market_end, plan_created_at, status, settled_at, pnl)
 WITH parsed AS (
@@ -205,6 +209,7 @@ FROM plans p
 LEFT JOIN turn_context tc USING (trade_plan_event_id)
 LEFT JOIN lifecycle l USING (trade_plan_event_id)
 SQL
+    )
   }
 
   depends_on = [

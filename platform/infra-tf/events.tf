@@ -98,8 +98,7 @@ resource "google_pubsub_subscription" "paper_consumer" {
 
 resource "google_pubsub_subscription_iam_member" "dead_letter_subscriber" {
   count        = var.consumer_image_digest != "" ? 1 : 0
-  project      = var.project_id
-  subscription = local.consumer_subscription_name
+  subscription = "projects/${var.project_id}/subscriptions/${local.consumer_subscription_name}"
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_agent_member
 }

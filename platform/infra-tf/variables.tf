@@ -35,7 +35,7 @@ variable "image_digest" {
 variable "pubsub_topic" {
   type        = string
   default     = ""
-  description = "Full topic path (projects/<project>/topics/<topic>) for the event sink; empty disables all event/archive resources."
+  description = "Short topic name for the event sink; empty disables all event/archive resources. Full paths derive from project_id and this name."
 }
 
 variable "consumer_image_digest" {

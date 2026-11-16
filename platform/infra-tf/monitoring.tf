@@ -172,75 +172,86 @@ resource "google_monitoring_alert_policy" "scheduler_failures" {
 }
 
 resource "google_monitoring_dashboard" "health" {
-  count   = var.health_alert_email != "" ? 1 : 0
-  project = var.project_id
-  dashboard_json = jsonencode({
-    displayName = "Chrysopoeia health (${var.operator})"
-    gridLayout = {
-      widgets = [
-        {
-          title = "Consumer sweep errors (rate)"
-          xyChart = {
-            dataSets = [{
-              timeSeriesQuery = {
-                timeSeriesFilter = {
-                  filter = format(
-                    "resource.type=\"cloud_run_revision\" AND metric.type=\"logging.googleapis.com/user/%s\"",
-                    local.sweep_errors_metric,
-                  )
-                  aggregation = {
-                    alignmentPeriod  = "300s"
-                    perSeriesAligner = "ALIGN_RATE"
-                  }
+  count = var.health_alert_email != "" ? 1 : 0
+  # Live dashboards key their identity on the project NUMBER.
+  project = local.project_number
+
+  # Mirrors the live dashboard verbatim (including etag and system-set
+  # plotType/targetAxis) so the import produces no drift.
+  dashboard_json = <<-DASH
+{
+  "displayName": "Chrysopoeia health (local)",
+  "etag": "eda4221bda1f0aa2a48f82900c2db6bd",
+  "gridLayout": {
+    "widgets": [
+      {
+        "title": "Consumer sweep errors (rate)",
+        "xyChart": {
+          "dataSets": [
+            {
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_RATE"
+                  },
+                  "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"logging.googleapis.com/user/chrysopoeia_sweep_errors_local\""
                 }
               }
-            }]
-            timeshiftDuration = "86400s"
-          }
-        },
-        {
-          title = "Cycle task timeouts (rate)"
-          xyChart = {
-            dataSets = [{
-              timeSeriesQuery = {
-                timeSeriesFilter = {
-                  filter = format(
-                    "resource.type=\"cloud_run_job\" AND metric.type=\"logging.googleapis.com/user/%s\"",
-                    local.task_timeouts_metric,
-                  )
-                  aggregation = {
-                    alignmentPeriod  = "300s"
-                    perSeriesAligner = "ALIGN_RATE"
-                  }
+            }
+          ],
+          "timeshiftDuration": "86400s"
+        }
+      },
+      {
+        "title": "Cycle task timeouts (rate)",
+        "xyChart": {
+          "dataSets": [
+            {
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_RATE"
+                  },
+                  "filter": "resource.type=\"cloud_run_job\" AND metric.type=\"logging.googleapis.com/user/chrysopoeia_task_timeouts_local\""
                 }
               }
-            }]
-            timeshiftDuration = "86400s"
-          }
-        },
-        {
-          title = "Scheduler attempt failures (rate)"
-          xyChart = {
-            dataSets = [{
-              timeSeriesQuery = {
-                timeSeriesFilter = {
-                  filter = format(
-                    "resource.type=\"cloud_scheduler_job\" AND metric.type=\"logging.googleapis.com/user/%s\"",
-                    local.scheduler_failures_metric,
-                  )
-                  aggregation = {
-                    alignmentPeriod  = "300s"
-                    perSeriesAligner = "ALIGN_RATE"
-                  }
+            }
+          ],
+          "timeshiftDuration": "86400s"
+        }
+      },
+      {
+        "title": "Scheduler attempt failures (rate)",
+        "xyChart": {
+          "dataSets": [
+            {
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_RATE"
+                  },
+                  "filter": "resource.type=\"cloud_scheduler_job\" AND metric.type=\"logging.googleapis.com/user/chrysopoeia_scheduler_failures_local\""
                 }
               }
-            }]
-            timeshiftDuration = "86400s"
-          }
-        },
-      ]
-    }
-  })
+            }
+          ],
+          "timeshiftDuration": "86400s"
+        }
+      }
+    ]
+  },
+  "name": "projects/${local.project_number}/dashboards/841758d8-acb6-48f2-8291-1d1817fe7682"
+}
+DASH
 
   depends_on = [google_project_service.monitoring]
 }

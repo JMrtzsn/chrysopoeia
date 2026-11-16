@@ -13,19 +13,10 @@ resource "google_service_account" "trigger" {
   description  = "Executes the paper-cycle job with arg overrides from queued campaign tasks only."
 }
 
-# Google-managed service agents for Pub/Sub push and Cloud Tasks OIDC.
-resource "google_project_service_identity" "tasks_agent" {
-  provider = google-beta
-  project  = var.project_id
-  service  = "cloudtasks.googleapis.com"
-}
-
-resource "google_project_service_identity" "pubsub_agent" {
-  count    = local.feature_topic ? 1 : 0
-  provider = google-beta
-  project  = var.project_id
-  service  = "pubsub.googleapis.com"
-}
+# Google-managed service agents (Pub/Sub push, Cloud Tasks OIDC) exist as a
+# side effect of enabling the APIs; their emails follow the deterministic
+# service-{project_number}@gcp-sa-{service} pattern, so Terraform only needs
+# to reference them, not manage them.
 
 # Custom role: run.jobs.run + runWithOverrides only.
 resource "google_project_iam_custom_role" "job_trigger" {
@@ -55,7 +46,7 @@ resource "google_service_account_iam_member" "tasks_agent_token_creator" {
 }
 
 locals {
-  tasks_agent_member = "serviceAccount:${google_project_service_identity.tasks_agent.email}"
+  tasks_agent_member = "serviceAccount:service-${local.project_number}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 }
 
 # Scheduled scanning: the workflow runs as the trigger identity; the scheduler
@@ -81,6 +72,15 @@ resource "google_project_iam_member" "transfer_job_user" {
   role       = "roles/bigquery.jobUser"
   member     = local.transfer_member
   depends_on = [google_project_service.bigquerydatatransfer]
+}
+
+# Creating a transfer config pinned to the runner's credential requires the
+# operator to actAs it during the create itself.
+resource "google_project_iam_member" "transfer_config_creator" {
+  count   = var.observer_invoker_member != "" && local.feature_topic ? 1 : 0
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = var.observer_invoker_member
 }
 
 # The transfer service agent mints runner tokens on every scheduled run.

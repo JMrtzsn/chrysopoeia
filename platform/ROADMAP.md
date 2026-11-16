@@ -284,6 +284,8 @@ runtime resources were replaced or deleted. Recovery steps are in
       diffs (initial suspects: transfer-config `params.query` string
       formatting, scheduler `http_target.headers`, IAM binding ordering). At
       12f, drift detection ignores only that list; anything else is drift.
+      12d outcome: all three suspects proved to be exact-mirror fixes, so the
+      committed list is empty — 12f drift detection ignores nothing.
     - **12a. Structure and offline gates.** Add `infra-tf/` with per-concern
       files (`apis`, `iam`, `storage`, `events`, `bigquery`, `run`,
       `scheduling`, `monitoring`, `budget`), keeping the same optional-feature
@@ -351,6 +353,44 @@ runtime resources were replaced or deleted. Recovery steps are in
       against live state shows **no changes** (read-only; needs operator
       approval for authenticated reads). Any diff on a protected resource
       blocks the step.
+
+      **Complete (2026-11-16).** State bucket
+      `PROJECT_ID-chrs-tfstate-local` created first (versioning,
+      UBLA, public access prevention enforced, only the project owner/editor
+      legacy bindings). The single-writer guard
+      (`IMPORT_BEGAN` + `run.sh deploy` refusal) was committed before the
+      first import. All 69 importable live resources imported by ID; the
+      scan workflow has no importer in the provider (8.11.0 and main), so its
+      state entry was pushed by hand with identity attributes only and the
+      provider refreshed it from the API on the first plan — 71 objects in
+      state. `terraform plan` against live state now reports **no changes**;
+      the import apply wrote state only (69 imports + two config-only
+      `disable_on_destroy`/`disable_dependent_services` materializations on
+      project services, no API calls). Ghost-diff burn-down notes: the
+      suspected ghosts were eliminated by exact mirroring rather than
+      allowed — transfer-config `params.query` via `chomp()` (the API strips
+      the trailing newline; the workflow source keeps its newline, so the
+      workflow uses the plain heredoc), scheduler `http_target` via the
+      literal live body `{"argument": "{}"}` (jsonencode produced compact
+      JSON) and no `headers` block (the API returns none), and the dashboard
+      via the verbatim live JSON (including system-set `plotType`/`targetAxis`
+      and `etag`) keyed on the project NUMBER. The live
+      `deletion_protection` on the run job/services, workflow, and
+      `open_positions` is `true` (provider defaults since creation), so the
+      config mirrors it; `open_positions` still has no `prevent_destroy`
+      lifecycle and stays rebuildable-by-policy. Real corrections found by
+      the import: the transfer config's live `serviceAccount` is unset (it
+      runs as its owner, the transfer identity, via the actAs creation grant),
+      `pubsub_topic` config values are short topic names with full paths
+      derived locally, and the dead-letter subscriber IAM needs the full
+      subscription path with no explicit project. Provider-level:
+      `google-beta` dropped (`google_project_service_identity` has no
+      importer; agents resolve via the deterministic
+      `service-{number}@gcp-sa-{service}` emails), and the provider needs
+      `user_project_override` + `billing_project` because it does not read
+      the ADC quota project (b/360405077). Evidence: `gates.sh` exit 0;
+      import apply output retained; post-apply `terraform plan` = "no
+      changes". Operator-local `terraform.tfvars` is gitignored.
     - **12e. Cutover.** Point `run.sh deploy` at the gated
       plan→policy→apply flow and keep the `CHRYSOPOEIA_RUN_PLATFORM=1`
       refusal. Make image pins Terraform variables, and update `AGENTS.md`
