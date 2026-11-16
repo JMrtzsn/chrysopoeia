@@ -28,6 +28,12 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 case "$ACTION" in
   deploy)
+    if [ -f "$REPO_ROOT/platform/infra-tf/IMPORT_BEGAN" ]; then
+      echo "platform/run.sh: refusing; Terraform import has begun (12d) and the" >&2
+      echo "single-writer rule forbids Pulumi applies until cutover (12e). Use" >&2
+      echo "platform/infra-tf/gates.sh + the gated Terraform flow instead." >&2
+      exit 2
+    fi
     if [ -z "${PULUMI_CONFIG_PASSPHRASE+x}" ]; then
       echo "platform/run.sh: set PULUMI_CONFIG_PASSPHRASE (empty string for local-dev)" >&2
       exit 2
