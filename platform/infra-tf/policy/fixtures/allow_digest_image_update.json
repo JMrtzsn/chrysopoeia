@@ -1,0 +1,26 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_cloud_run_v2_service.consumer",
+      "type": "google_cloud_run_v2_service",
+      "name": "consumer",
+      "change": {
+        "actions": ["update"],
+        "before": {"template": {"template": {"containers": [{"image": "us-central1-docker.pkg.dev/p/chrysopoeia/consumer@sha256:6f53a5e6"}]}}},
+        "after": {
+          "template": {
+            "template": {
+              "containers": [
+                {
+                  "image": "us-central1-docker.pkg.dev/p/chrysopoeia/consumer@sha256:6f53a5e6",
+                  "env": [{"name": "CONSUMER_JOURNAL", "value": "/mnt/consumer/ledger.jsonl"}]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

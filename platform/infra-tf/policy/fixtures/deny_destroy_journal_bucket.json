@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_storage_bucket.journals",
+      "type": "google_storage_bucket",
+      "name": "journals",
+      "change": {
+        "actions": ["delete"],
+        "before": {"name": "PROJECT_ID-chrs-journals-local"},
+        "after": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_project_iam_member.owner_grant",
+      "type": "google_project_iam_member",
+      "name": "owner_grant",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {"member": "user:operator@example.com", "role": "roles/owner"}
+      }
+    }
+  ]
+}

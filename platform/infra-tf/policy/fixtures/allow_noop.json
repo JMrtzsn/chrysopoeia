@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_cloud_scheduler_job.consumer_sweep",
+      "type": "google_cloud_scheduler_job",
+      "name": "consumer_sweep",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"paused": false},
+        "after": {"paused": false}
+      }
+    }
+  ]
+}

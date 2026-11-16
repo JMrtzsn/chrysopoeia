@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_cloud_run_v2_job.paper_cycle",
+      "type": "google_cloud_run_v2_job",
+      "name": "paper_cycle",
+      "change": {
+        "actions": ["update"],
+        "before": {"template": {"template": {"containers": [{"image": "us-central1-docker.pkg.dev/p/chrysopoeia/harness@sha256:bdf53208"}]}}},
+        "after": {"template": {"template": {"containers": [{"image": "us-central1-docker.pkg.dev/p/chrysopoeia/harness:latest"}]}}}
+      }
+    }
+  ]
+}

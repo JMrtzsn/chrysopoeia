@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_bigquery_table.raw_events",
+      "type": "google_bigquery_table",
+      "name": "raw_events",
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {"table_id": "raw_events", "deletion_protection": true},
+        "after": {"table_id": "raw_events", "deletion_protection": false}
+      }
+    }
+  ]
+}

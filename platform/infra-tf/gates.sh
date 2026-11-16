@@ -10,6 +10,7 @@ terraform fmt -check -diff
 terraform init -backend=false >/dev/null
 terraform validate
 python3 tests/test_protections.py
+policy/test.sh
 "$TFLINT" --init >/dev/null
 "$TFLINT" --format compact
 trivy config --exit-code 1 --severity HIGH,CRITICAL .

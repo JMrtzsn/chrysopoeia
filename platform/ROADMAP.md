@@ -333,6 +333,19 @@ runtime resources were replaced or deleted. Recovery steps are in
       project-level owner/editor grants, and non-digest image references.
       Add fixture-plan tests for each rule. Apply only a saved, gated
       `tfplan`, never a fresh plan.
+
+      **Complete (2026-11-15).** `policy/plan_policy.rego` (conftest 0.71.1,
+      OPA rego v1) denies: destruction of any 12b-protected resource, replace
+      via destroy+create of one, any `allUsers`/`allAuthenticatedUsers` leaf
+      anywhere in the plan, any `roles/owner`/`roles/editor` grant, and any
+      non-digest container image. `policy/test.sh` runs one fixture per rule
+      (`deny_*` must produce a denial, `allow_*` must pass clean) and is wired
+      into `gates.sh` as the fifth gate — all green offline. Notes: the walk
+      rules intentionally scan whole-plan leaves, which is stricter than
+      "project-level" grants and catches every IAM resource shape; conftest's
+      default namespace is `main`, so the runner passes
+      `--namespace terraform.plan`. The saved-plan→policy→apply flow in
+      `run.sh` lands at 12e per the item.
     - **12d. Import.** Use `import` blocks for every live resource in the
       `local-dev` stack, keeping existing IDs. Acceptance: `terraform plan`
       against live state shows **no changes** (read-only; needs operator
