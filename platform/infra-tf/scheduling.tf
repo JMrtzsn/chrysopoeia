@@ -87,6 +87,7 @@ resource "google_cloud_scheduler_job" "consumer_sweep" {
   name      = local.consumer_sweep_job_name
   schedule  = var.consumer_sweep_schedule
   time_zone = "Etc/UTC"
+  paused    = var.consumer_sweep_paused
 
   http_target {
     uri         = "${local.consumer_uri}/sweep"

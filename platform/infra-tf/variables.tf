@@ -56,6 +56,12 @@ variable "consumer_sweep_schedule" {
   description = "Cron (UTC) for the consumer settlement sweep."
 }
 
+variable "consumer_sweep_paused" {
+  type        = bool
+  default     = false
+  description = "Pause the consumer settlement sweep; open paper positions stop settling while paused."
+}
+
 variable "context_history_enabled" {
   type    = bool
   default = false
