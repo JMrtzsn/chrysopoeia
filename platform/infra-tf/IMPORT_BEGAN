@@ -1,4 +1,0 @@
-Terraform import began 2026-11-16 (roadmap item 12d). Until cutover (12e)
-completes, the single-writer rule forbids Pulumi applies: two tools must
-never apply to the same cloud. Pulumi previews remain allowed for
-comparison. platform/run.sh deploy refuses while this file exists.

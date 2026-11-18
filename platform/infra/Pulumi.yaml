@@ -1,5 +1,0 @@
-name: chrysopoeia-infra
-runtime: python
-description: Persistent cloud base for the Chrysopoeia harness (bucket + runner identity only).
-backend:
-  url: file://./state

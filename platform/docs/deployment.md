@@ -6,7 +6,8 @@ Cloud.
 ## Deployed shape
 
 - `harness/` builds a wheel and container image. `platform/` builds/publishes the
-  image and deploys the Pulumi program in `infra/`. `Dockerfile` installs the
+  image and deploys the Terraform root in `infra-tf/` (state in the
+  versioned GCS bucket `PROJECT_ID-chrs-tfstate-local`). `Dockerfile` installs the
   locked dependencies in their own layer before copying the wheel and configs, so
   a code or config change reuses the cached dependency layer and pushes only
   small layers; changing `uv.lock` is still a full re-push.
@@ -18,7 +19,7 @@ Cloud.
   2.8.0/pydantic 2.13.4, and both deployed BTC turns failed to produce a
   structured proposal. Keep the image dependency set identical to the lock that
   passed offline and live checks.
-- Pulumi owns a versioned journal bucket, runner service account, Artifact
+- Terraform owns a versioned journal bucket, runner service account, Artifact
   Registry repository, and one Cloud Run job. Live images are pinned by digest,
   never a floating tag.
 - The job runs the selected `chrysopoeia` CLI entrypoint on demand. The bucket is
@@ -71,8 +72,9 @@ Cloud.
   `roles/billing.admin` and receives the emails). Local plumbing notes: the
   gcloud CLI needs `gcloud config set billing/quota_project
   PROJECT_ID`, and any local call through the billing-budgets API
-  (Pulumi included) needs `GOOGLE_CLOUD_QUOTA_PROJECT=PROJECT_ID`.
-  The Pulumi `gcp.billing.Budget` resource sits behind `budget_amount_usd`
+  needs a quota project; the Terraform provider sets `user_project_override`
+  and `billing_project` because it ignores the ADC quota project.
+  The Terraform `google_billing_budget` resource sits behind `budget_amount_usd`
   (whole units) and `budget_currency` (default SEK) and owns the deployed
   budget by import.
 - Re-running the job starts a fresh bounded session only when given a new
@@ -81,11 +83,11 @@ Cloud.
   execution, for example
   `gcloud beta run jobs execute chrysopoeia-cycle-local --region us-central1 --args=run,--journal=/mnt/journal/run-$(date +%s)`.
 - This job is not an HTTP server. Paper fills and exits are simulated in-process
-  only while the paper loop runs. Optional `pubsub_topic` Pulumi configuration
+  only while the paper loop runs. Optional `pubsub_topic` Terraform variable
   creates a topic and only a topic-scoped `roles/pubsub.publisher` grant for the
   runner. It sets `CHRYSOPOEIA_EVENT_SINK=pubsub:projects/<project>/topics/<topic>`
   on the plain Harness CLI image. Absent configuration leaves execution unchanged.
-- When both `consumer_image_digest` and `pubsub_topic` are set, Pulumi adds the
+- When both `consumer_image_digest` and `pubsub_topic` are set, Terraform adds the
   independent paper consumer: separate versioned ledger bucket and bucket-only
   runtime identity, private service pinned by digest with revision minimum zero,
   revision maximum one, and request concurrency one, plus OIDC push and minute
@@ -135,7 +137,7 @@ separate design and approval.
 
 ## Event archive
 
-When `pubsub_topic` is configured, Pulumi also creates a protected BigQuery
+When `pubsub_topic` is configured, Terraform also creates a protected BigQuery
 dataset `chrysopoeia_events_<operator>` in the compute region, table `raw_events`,
 and an unfiltered subscription `<topic>-bigquery`. The current destination is
 `PROJECT_ID.chrysopoeia_events_local.raw_events` in `us-central1`.
@@ -151,8 +153,8 @@ settlements. Delivery is at least once; stable outcome event IDs and journaled
 acknowledgements make retries safe.
 
 Harness BigQuery reads are separately disabled by default. Enabling them requires
-both `[history].enabled = true` in the bundled Harness profile and Pulumi
-`context_history_enabled = true`. Pulumi then grants the runner project-level
+both `[history].enabled = true` in the bundled Harness profile and the Terraform
+`context_history_enabled = true` variable. Terraform then grants the runner project-level
 `roles/bigquery.jobUser` and dataset-scoped `roles/bigquery.dataViewer`, and sets
 the archive table/location environment. The query reads only the configured
 archive, filters its required `publish_time` partition, looks back 90 days, and
@@ -167,9 +169,8 @@ so event-version changes do not drop fields or require table migrations. All
 event types are archived, including abstentions and Consumer lifecycle outcomes;
 no worker or Dataflow job runs.
 
-Rows have no configured expiration. Both dataset and table have Pulumi
-`protect=True` and `retain_on_delete=True`; the table also has provider deletion
-protection, and dataset destruction cannot delete its contents.
+Rows have no configured expiration. Both dataset and table have Terraform
+`prevent_destroy`; the table also has provider deletion protection, and dataset destruction cannot delete its contents.
 The table is partitioned daily by `publish_time`, with a required partition
 filter to bound scans. For example:
 
@@ -206,7 +207,7 @@ forecasting process or schedule starts when the archive is deployed.
 ## Observer service
 
 When `observer_image_digest` is configured (with `pubsub_topic` and
-`observer_invoker_member`), Pulumi creates five resources: service account
+`observer_invoker_member`), Terraform creates five resources: service account
 `chrysopoeia-observer-<operator>`, its project `roles/bigquery.jobUser`, its
 archive-dataset `roles/bigquery.dataViewer`, Cloud Run service
 `chrysopoeia-observer-<operator>` (scale zero to one, concurrency one, no
@@ -233,57 +234,61 @@ Consumer control-plane readiness, Observer `/health`, and exactly one deployed
 ### Permanent storage and infrastructure recreation
 
 The dataset and table are permanent fixtures, not disposable runtime resources.
-Keep their existing project, dataset ID, table ID, location, and Pulumi logical
-names. Normal runtime updates reuse them. Protection blocks accidental deletion
-or replacement, including removal of `pubsub_topic`; retention additionally
-instructs Pulumi to leave the cloud resources intact if they are deliberately
-unprotected and removed from management later. Do not disable these safeguards
+Keep their existing project, dataset ID, table ID, location, and Terraform
+addresses. Normal runtime updates reuse them. Protection blocks accidental deletion
+or replacement, including removal of `pubsub_topic`: `prevent_destroy`,
+`deletion_protection`, the protections test in `gates.sh`, and the conftest
+plan policy all block it. Do not disable these safeguards
 to get past a deployment error.
 
 Recreate only the intended runtime resources, not storage. Keep the current
-Pulumi state and back it up securely before infrastructure maintenance; the
-current backend is local under `platform/infra/state/`. Do not erase that state
+Terraform state; the backend is the versioned, owner-only GCS bucket
+`PROJECT_ID-chrs-tfstate-local` (object versions are the backup). The
+retired Pulumi state is archived under `archive/pulumi-2026-11-18/` there. Do not erase that state
 as a way of resetting infrastructure. A normal full-stack destroy is blocked
 by protected resources, rather than silently deleting history. Other storage,
 including the paper journals bucket, still needs its own preservation review.
 
-If stack/state must be recreated, restore its backup first. If that is not
-possible, import the existing storage before `pulumi up`; never create an empty
-replacement archive. With the original project/configuration restored and the
-Platform Python environment active, run from the repository root:
+If state must be recreated, restore a prior object version first. If that is
+not possible, add `import` blocks for the existing storage before any apply;
+never create an empty replacement archive. Example:
 
-```sh
-PULUMI_CONFIG_PASSPHRASE='' pulumi -C platform/infra import --stack local-dev \
-  --generate-code=false 'gcp:bigquery/dataset:Dataset' event-archive \
-  projects/PROJECT_ID/datasets/chrysopoeia_events_local
-PULUMI_CONFIG_PASSPHRASE='' pulumi -C platform/infra import --stack local-dev \
-  --generate-code=false 'gcp:bigquery/table:Table' raw-events \
-  projects/PROJECT_ID/datasets/chrysopoeia_events_local/tables/raw_events
+```hcl
+import {
+  to = google_bigquery_dataset.event_archive[0]
+  id = "projects/PROJECT_ID/datasets/chrysopoeia_events_local"
+}
+import {
+  to = google_bigquery_table.raw_events[0]
+  id = "projects/PROJECT_ID/datasets/chrysopoeia_events_local/tables/raw_events"
+}
 ```
 
 Import only into state that is missing these resources. Recover/import other
-still-existing infrastructure too, then preview and require no storage
+still-existing infrastructure too, then plan and require no storage
 replacement or deletion before the separately approved apply. Use the existing
-source, not generated replacement code. The next apply persists both protection
-and retention settings. Recreating a subscription does not delete archived
+source, not generated replacement code. Recreating a subscription does not delete archived
 rows, but its backlog and events published during a subscription gap are not
 preserved automatically.
 
-These controls prevent Pulumi lifecycle deletion; they are not immutable/WORM
+These controls prevent Terraform lifecycle deletion; they are not immutable/WORM
 storage or a backup. Privileged SQL deletion, external table/project deletion,
 and destructive in-place schema changes require separate access/backup controls.
 No storage teardown is part of verification.
 
 ## Change and verification boundary
 
-Run Pulumi preview and applies from `platform/`; see
+Plan and apply only through `platform/run.sh`; see
 [`../AGENTS.md`](../AGENTS.md) and [`../ROADMAP.md`](../ROADMAP.md). Live applies,
 image publication, and job executions require approval and bounded verification
 per [`../../harness/docs/verification.md`](../../harness/docs/verification.md).
-Running the platform is explicit and off by default: use `platform/run.sh
-{deploy|job}`, which refuses unless `CHRYSOPOEIA_RUN_PLATFORM=1` is set, and the
-Pulumi program itself refuses any real apply (or destroy) without it. `pulumi
-preview` is always allowed and needs neither the script nor the variable.
+Running the platform is explicit and off by default:
+`CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy` runs `infra-tf/gates.sh`,
+saves a plan, checks it with conftest (`infra-tf/policy/`), and applies only
+that saved plan. `platform/run.sh drift` is a read-only
+`plan -detailed-exitcode` (0 = no drift, 2 = drift) and needs no variable.
+Image pins and other values live in the operator-local
+`infra-tf/terraform.tfvars`.
 The 2026-10-10 bounded live check below covered authenticated push, the mounted
 ledger across revision restarts, bucket and invoker IAM, and live Gamma/CLOB
 timestamp freshness. Dead-letter delivery, YES/NO settlement, and concurrent
@@ -295,19 +300,15 @@ For the approved temporary live test, choose a future cron in
 `consumer_sweep_schedule` before applying, then manually trigger exactly one sweep. Restore the
 operator-selected schedule afterward; shorter intervals reduce exit-monitoring
 latency but increase invocation cost.
-The file-backed `local-dev` stack has no secure configuration values and uses an
-explicitly empty `PULUMI_CONFIG_PASSPHRASE` for preview. Operators must not put
-credentials or other secrets in this stack. This local-only setup does not apply
-to production stacks, which must not use an empty passphrase.
-Do not change Cloud Run environment variables outside Pulumi:
+Do not change cloud resources outside Terraform:
 `gcloud beta run jobs update --set-env-vars` replaces the full environment and
-can desynchronize state.
+creates drift.
 
 ## Recorded platform checks
 
 | Date | Command / boundary | Result |
 | --- | --- | --- |
-| 2026-11-18 | Shutdown for re-evaluation (operator-approved), first live Terraform apply: new `consumer_sweep_paused` variable; operator tfvars set `scan_paused = true` and `consumer_sweep_paused = true`; saved plan (2 in-place `paused false -> true`, 0 add/destroy) passed conftest, then that plan was applied. | Both Scheduler jobs `PAUSED`; follow-up `plan -detailed-exitcode` = 0 (no drift); `gates.sh` exit 0. Reason: since Nov 17 most scan cycles hang after a model call until the 900 s timeout (all 6 on Nov 17, plus 18:42Z on Nov 18). The sweep logged ~290 deferred-position errors, caused by stale public exit quotes on 3 open positions. Those paper positions stay unsettled while the sweep is paused. Resume: set both to `false`, then run the same plan→policy→apply sequence. |
+| 2026-11-18 | Terraform cutover (12e) and drift check (12f): gated `CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy`; `platform/run.sh job --args=validate,--json --wait`; `pulumi stack export`, then `pulumi stack rm local-dev --force` (state only); `platform/run.sh drift` | The deploy passed gates, saved the plan, passed conftest (5/5), and applied 0 added/0 changed/0 destroyed. Execution `qt8rg` exited 0 (21:23–21:24Z). The Pulumi archive (74 resources) is in `gs://PROJECT_ID-chrs-tfstate-local/archive/pulumi-2026-11-18/`; the stack was removed with no cloud resource touched. Drift exit 0 after deleting `infra/`. | for re-evaluation (operator-approved), first live Terraform apply: new `consumer_sweep_paused` variable; operator tfvars set `scan_paused = true` and `consumer_sweep_paused = true`; saved plan (2 in-place `paused false -> true`, 0 add/destroy) passed conftest, then that plan was applied. | Both Scheduler jobs `PAUSED`; follow-up `plan -detailed-exitcode` = 0 (no drift); `gates.sh` exit 0. Reason: since Nov 17 most scan cycles hang after a model call until the 900 s timeout (all 6 on Nov 17, plus 18:42Z on Nov 18). The sweep logged ~290 deferred-position errors, caused by stale public exit quotes on 3 open positions. Those paper positions stay unsettled while the sweep is paused. Resume: set both to `false`, then run the same plan→policy→apply sequence. |
 | 2026-11-16 | Terraform import (12d, operator-approved): state bucket `PROJECT_ID-chrs-tfstate-local` created (versioning, UBLA, PAP enforced, owner-only bindings); `IMPORT_BEGAN` single-writer guard committed before the first import; 69 import blocks resolved by ID, scan workflow state pushed by hand (no provider importer); one import apply (state-only, no API changes), then `terraform plan` = no changes, 71 objects in state; `gates.sh` exit 0. From now until cutover (12e), Pulumi applies are forbidden (`run.sh deploy` refuses). | Imports resolved after fixing ID formats (full REST paths for Cloud Run/monitoring/bigquery, space-delimited IAM member IDs), dropping `google-beta` (service identities resolve via deterministic agent emails), and mirroring live values exactly (transfer-config `serviceAccount` unset/owner-run-as, `chomp()`ed query, scheduler body literal, dashboard verbatim JSON on project number, `deletion_protection=true` as live). `user_project_override` + `billing_project` required because the provider ignores the ADC quota project (b/360405077). |
 | 2026-11-15 | Consumer per-position sweep isolation (operator-approved in the Consumer unit): `sh consumer/build.sh` (build-only), push `sha256:6f53a5e6…`, `pulumi config set consumer_image_digest`, documented quiescing (trigger queue already PAUSED, no active Harness execution — last completed 2026-11-14T22:52Z, next scheduled tick 13:40Z), sweep Scheduler paused, targeted consumer-service deploy, revision `00005-w4m` ready, Scheduler resumed; one sweep 204 on the new revision | Diagnosis of the overnight alert errors first: since 2026-11-13 ~12:00 UTC the consumer sweep intermittently returned 503 (`sweep failed: public exit quote is invalid: exit quote is stale or future-dated`) whenever an open position's Polymarket quote was older than 5 minutes or future-dated — bursts spanned each open position's holding period (settlements 18:16 Nov 13, 13:42 Nov 14, 23:06 Nov 14; last burst 03:13–04:47 Nov 15). One bad quote aborted the whole sweep, so every minute the scheduler logged UNAVAILABLE. Consumer fix deployed: the sweep now defers the unreadable position with a structured `severity=ERROR` log (the sweep-errors log-based metric still fires) and settles the rest; ledger/outbox failures still return 503. Apply: 1 updated, 72 unchanged. Verified: revision `00005-w4m` ready with 100% traffic, startup probe + gcsfuse mount succeeded 05:07:54Z, sweeps 204 at 05:09/05:10Z, no 5xx on the new revision. Quiescing window was safe: no open position was due (two open, market ends 14:00/15:00 UTC). |
 | 2026-11-14 | Open-positions projection (operator-approved via the Observer ROADMAP): `open_positions` derived table (explicitly unprotected, retained on delete — rebuildable), transfer runner service account, project `roles/bigquery.jobUser` + archive-dataset `roles/bigquery.dataViewer` + table-level `roles/bigquery.dataEditor` on it, operator `roles/iam.serviceAccountUser` for config creation, `roles/iam.serviceAccountTokenCreator` for the Google-managed transfer agent on the runner, and the `open-positions-refresh` scheduled query (every 15 minutes, atomic TRUNCATE+INSERT full rebuild from the 90-day archive window); one manual rebuild via `bq query`; observer rebuild + push `sha256:d2790838…`, `pulumi config set observer_image_digest`, targeted observer-service deploy; one authenticated `/v1/health` | Debugging evidence, all live-discovered: (1) `--target` can only name resources already in the stack — new resources need a full deploy; (2) API-created scheduled-query configs reject the default-agent credential with `Error 400: Failed to find a valid credential. The field 'version_info' or 'service_account_name' must be specified` even after the Google-managed agent holds `roles/bigquerydatatransfer.serviceAgent`, and `iam.serviceAccounts.actAs` on a Google-managed agent is denied to user principals even at project level — resolved with a customer-managed runner SA pinned via `service_account_name`; (3) runs as a customer SA additionally need `roles/iam.serviceAccountTokenCreator` for the transfer service's agent on the runner (`DTS service agent needs iam.serviceAccounts.getAccessToken permission`); (4) `observer/build.sh` is build-only — the first image publish was skipped and the service update failed `Image not found`; the pushed manifest digest differs from the local image ID, so the pushed `d2790838…` is what gets pinned. Operator config-set defect caught and corrected: the observer digest was mistakenly set under `image_digest` (the Harness job's key), making the paper-cycle job try to pull the observer image — `image_digest` was restored to the Harness digest `bdf53208…` and the job verified on it; nothing else consumed the wrong value. First live `/v1/health` 200 (17:15) was served by the previous observer digest `9aef0265…` (identical response shape, so not evidence of the refactor); after the corrected pin and redeploy, 200 re-verified at 18:33 with proof the new code runs: BigQuery job history shows the observer identity querying `open_positions` at exactly the response's `as_of` (last decision 17:41Z, last completed 13:42Z from the projection, 10 decisions/24 h, 2 fills, 1 win, +1.88 realized, $3.8426 model cost, 0 stuck settlements, 7.785 h max settlement lag), unauthenticated 403. Manual rebuild: 20 rows (9 rejected, 7 settled, 4 pending, 0 open). Transfer runs: 17:12–17:57 FAILED (each grant racing the next create; token-creator grant missing), 18:12 and 18:27 SUCCEEDED. |

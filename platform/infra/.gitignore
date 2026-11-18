@@ -1,4 +1,0 @@
-state/
-.venv/
-Pulumi.*.yaml
-__pycache__/

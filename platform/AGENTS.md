@@ -1,6 +1,6 @@
 # Platform Work Unit
 
-GCP deployment: container image build/publish, Pulumi base (bucket, runner
+GCP deployment: container image build/publish, Terraform base (bucket, runner
 identity, Artifact Registry, on-demand Cloud Run job), digest pinning, and the
 optional independent consumer service/subscription/scheduler. Sibling work units
 own application behavior; Harness owns event contracts.
@@ -8,11 +8,11 @@ Ordered platform work lives in `ROADMAP.md`.
 
 ## Owned
 
-- `infra/` (Pulumi program + local state dir)
+- `infra-tf/` (Terraform root, offline gates, plan policy; state in the
+  versioned GCS bucket `PROJECT_ID-chrs-tfstate-local`)
 - `Dockerfile` (wheel-install build; no harness source ever copied)
 - `build.sh`, `.dockerignore`
 - `run.sh` (the explicit, operator-gated way to apply the stack or execute the job)
-- `pyproject.toml` for the Pulumi dev dependency (or `requirements.txt` + venv)
 
 ## Off-limits
 
@@ -22,10 +22,11 @@ Ordered platform work lives in `ROADMAP.md`.
 
 ## Contract consumed from the harness
 
-- Pinned image digest: `pulumi config set image_digest <name@sha256:...>`
+- Pinned image digest: `image_digest = "<name@sha256:...>"` in the
+  operator-local `infra-tf/terraform.tfvars`
   (never `:latest` on a live stack; `:latest` is only a build-tag alias).
 - Invocation form: image `ENTRYPOINT ["chrysopoeia", ...]` + args from
-  `job_args` Pulumi config for the current on-demand job. The harness owns
+  the `job_args` Terraform variable for the current on-demand job. The harness owns
   bounded proposal cycles; platform does not drive them.
 - Operating settings are Harness-owned TOML, not CLI flags. Bundle
   `harness/configs/platform.toml` with the wheel, set `CHRYSOPOEIA_CONFIG` to
@@ -51,7 +52,8 @@ Ordered platform work lives in `ROADMAP.md`.
   existing least-privilege trigger identity (`run.jobs.run` +
   `runWithOverrides` only); the scheduler needs that identity to satisfy
   `workflows.invoker` plus a scheduler-agent token-creator grant on it.
-  `scan_paused` (default true) pauses the schedule. Workflows executes-create
+  `scan_paused` pauses the schedule; `consumer_sweep_paused` pauses the
+  consumer sweep. Workflows executes-create
   accepts OAuth2 access tokens only, and its `time.format(sys.now())` returns
   the per-tick journal key.
 - Optional `billing_account_id` with `budget_amount_usd` (+ `budget_currency`,
@@ -67,24 +69,18 @@ Ordered platform work lives in `ROADMAP.md`.
 
 ## Verification gates
 
-The file-backed `local-dev` stack contains no secure configuration. Keep
-credentials and other secrets out of it; its empty passphrase is only for this
-local verification stack, not production stacks.
-
 ```sh
-uv venv platform/infra/.venv
-uv pip install --python platform/infra/.venv/bin/python -r platform/infra/requirements.txt
-source platform/infra/.venv/bin/activate
-PULUMI_CONFIG_PASSPHRASE='' \
-  pulumi -C platform/infra preview --stack local-dev    # 0 pending changes passes
+platform/infra-tf/gates.sh    # offline: fmt, validate, protections, policy, tflint, trivy
+platform/run.sh drift         # read-only plan; exit 0 = no drift, 2 = drift
 ```
 
 Live apply or job executions need explicit operator approval (per
-`docs/deployment.md`), and Cloud Run / Artifact Registry env edits
-outside Pulumi are banned: `gcloud beta run jobs update --set-env-vars`
-replaces ALL envs and desyncs Pulumi state.
+`docs/deployment.md`). Never change cloud resources outside Terraform:
+`gcloud beta run jobs update --set-env-vars` replaces ALL envs and creates
+drift.
 
-Running the platform is deliberate and off by default. Prefer
-`platform/run.sh {deploy|job}`, which refuses unless `CHRYSOPOEIA_RUN_PLATFORM=1`
-is set, and the Pulumi program itself refuses any real apply without it too.
-Preview (`pulumi preview`) is always allowed and needs neither.
+Running the platform is deliberate and off by default.
+`CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy` runs the gates, saves a
+plan, checks it with conftest, and applies only that saved plan.
+`platform/run.sh {deploy|job|enqueue}` refuses without
+`CHRYSOPOEIA_RUN_PLATFORM=1`; `drift` is read-only and always allowed.

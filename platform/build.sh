@@ -10,7 +10,7 @@
 #   2. stage the wheel into platform/.build/ (docker build context)
 #   3. docker build from platform/Dockerfile, tag harness:latest
 #   4. local offline gate: docker run <image> validate --json
-#   5. docker push; echo the digest for the Pulumi image variable
+#   5. docker push; echo the digest for the Terraform image variable
 set -eu
 
 PROJECT=${GOOGLE_CLOUD_PROJECT:?set GOOGLE_CLOUD_PROJECT}
@@ -45,4 +45,4 @@ docker push "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest"
 
 digest=$(docker inspect --format='{{index .RepoDigests 0}}' \
   "$REGION-docker.pkg.dev/$PROJECT/chrysopoeia/harness:latest")
-echo "PULUMI image pin: $digest"
+echo "image_digest pin (infra-tf/terraform.tfvars): $digest"

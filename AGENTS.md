@@ -17,7 +17,8 @@ This monorepo has four work units:
   logic, paper accounting, CLI, tests, configuration, and offline gates. It
   produces a wheel/image, may publish data-plane events to a configured sink,
   and never provisions or mutates cloud resources.
-- `platform/`: Pulumi deployment and wheel-based container build. It consumes a
+- `platform/`: Terraform deployment (gated plan, policy, apply) and wheel-based
+  container build. It consumes a
   pinned harness image and never imports the harness package.
 - `consumer/`: independent paper-only HTTP consumer, public quote checks, and a
   separate journal. It consumes the Harness-owned schema as data and never

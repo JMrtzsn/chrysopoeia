@@ -1,44 +1,44 @@
 #!/bin/sh
 # Explicit, operator-gated entrypoint for running the deployed platform.
-# Nothing here runs on its own: every action requires CHRYSOPOEIA_RUN_PLATFORM=1,
-# and the Pulumi program refuses to apply without it as well.
+# Mutating actions require CHRYSOPOEIA_RUN_PLATFORM=1.
 #
-#   CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy [pulumi args...]
+#   platform/run.sh drift
+#   CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh deploy [terraform plan args...]
 #   CHRYSOPOEIA_RUN_PLATFORM=1 platform/run.sh job    [gcloud args...]
 #
-# deploy  apply the Pulumi stack (create/update/delete cloud resources)
+# drift   read-only `terraform plan -detailed-exitcode`; exit 2 means drift
+# deploy  offline gates -> saved plan -> conftest policy -> apply that plan only
 # job     execute one on-demand Cloud Run job
 #
-# Preview is always allowed and does not need this entrypoint:
-#   PULUMI_CONFIG_PASSPHRASE='' pulumi -C platform/infra preview --stack local-dev
+# Values live in the operator-local platform/infra-tf/terraform.tfvars.
 set -eu
 
 ACTION=${1:-}
 if [ "$#" -gt 0 ]; then shift; fi
-STACK=${STACK:-local-dev}
 REGION=${REGION:-us-central1}
 OPERATOR=${OPERATOR:-local}
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+TF_DIR="$REPO_ROOT/platform/infra-tf"
+
+if [ "$ACTION" = "drift" ]; then
+  terraform -chdir="$TF_DIR" init -input=false >/dev/null
+  exec terraform -chdir="$TF_DIR" plan -input=false -lock=false -detailed-exitcode "$@"
+fi
 
 if [ "${CHRYSOPOEIA_RUN_PLATFORM:-}" != "1" ]; then
   echo "platform/run.sh: refusing; set CHRYSOPOEIA_RUN_PLATFORM=1 to run the platform" >&2
   exit 2
 fi
 
-REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-
 case "$ACTION" in
   deploy)
-    if [ -f "$REPO_ROOT/platform/infra-tf/IMPORT_BEGAN" ]; then
-      echo "platform/run.sh: refusing; Terraform import has begun (12d) and the" >&2
-      echo "single-writer rule forbids Pulumi applies until cutover (12e). Use" >&2
-      echo "platform/infra-tf/gates.sh + the gated Terraform flow instead." >&2
-      exit 2
-    fi
-    if [ -z "${PULUMI_CONFIG_PASSPHRASE+x}" ]; then
-      echo "platform/run.sh: set PULUMI_CONFIG_PASSPHRASE (empty string for local-dev)" >&2
-      exit 2
-    fi
-    exec pulumi -C "$REPO_ROOT/platform/infra" up --stack "$STACK" --yes "$@"
+    PLAN=$(mktemp -d)/tfplan
+    "$TF_DIR/gates.sh"
+    terraform -chdir="$TF_DIR" init -input=false >/dev/null
+    terraform -chdir="$TF_DIR" plan -input=false -out="$PLAN" "$@"
+    terraform -chdir="$TF_DIR" show -json "$PLAN" > "$PLAN.json"
+    conftest test --namespace terraform.plan -p "$TF_DIR/policy" "$PLAN.json"
+    exec terraform -chdir="$TF_DIR" apply -input=false "$PLAN"
     ;;
   job)
     PROJECT=${GOOGLE_CLOUD_PROJECT:?set GOOGLE_CLOUD_PROJECT}
@@ -75,7 +75,7 @@ case "$ACTION" in
     done
     ;;
   *)
-    echo "usage: platform/run.sh {deploy|job|enqueue} [args...]" >&2
+    echo "usage: platform/run.sh {drift|deploy|job|enqueue} [args...]" >&2
     exit 2
     ;;
 esac

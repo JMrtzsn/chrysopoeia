@@ -399,12 +399,39 @@ runtime resources were replaced or deleted. Recovery steps are in
       Then remove the Pulumi state with `pulumi state delete`/`stack rm`
       (resources stay in place; never `destroy`), delete `infra/`, and
       archive the old state file.
+
+      **Cut over (2026-11-18); repin evidence pending.** `run.sh deploy` now
+      runs `gates.sh`, then a saved `plan -out`, `show -json`, and conftest,
+      and applies only that saved plan, still behind
+      `CHRYSOPOEIA_RUN_PLATFORM=1`. Image pins and other values are
+      Terraform variables in the operator-local `terraform.tfvars`. `AGENTS.md`
+      (root and platform), `docs/deployment.md`, and `build.sh` are updated.
+      Evidence: the first live Terraform apply (pausing both schedules) passed
+      gates and policy; a gated `run.sh deploy` found no changes and applied
+      0/0/0; one `run.sh job --args=validate,--json --wait` execution
+      (`qt8rg`) exited 0. The Pulumi stack export (74 resources) and state
+      directory are archived in
+      `gs://PROJECT_ID-chrs-tfstate-local/archive/pulumi-2026-11-18/`.
+      Then `pulumi stack rm local-dev --force` removed state only, with no
+      resource touched; `infra/`, its Pulumi-only `tests/test_infra.py`,
+      `IMPORT_BEGAN`, and the applied `imports.tf` were deleted, and
+      `run.sh drift` = 0 afterwards. Not yet met: "one bounded image repin
+      through the gated flow". No new image exists while the platform is
+      paused, so the first real repin (Harness Next item 1 or Consumer Next
+      item 1) is the remaining evidence.
     - **12f. Drift check.** Run a scheduled or manual
       `plan -detailed-exitcode`; any non-zero exit is reported as drift.
       CI required checks and apply approval follow once a remote repository
       policy exists.
-    - Cost: ~$0 beyond one GCS state bucket. No model spend. Rollback until
-      12e: Pulumi state is untouched and stays authoritative.
+
+      **Complete (manual, 2026-11-18).** `platform/run.sh drift` runs a
+      read-only `plan -detailed-exitcode -lock=false` with no
+      `CHRYSOPOEIA_RUN_PLATFORM` needed (exit 0 = no drift, 2 = drift, 1 =
+      error). The ghost-diff allowance list is empty, so nothing is ignored.
+      Verified exit 0 after the cutover deletions. Scheduled runs and CI
+      required checks wait for a remote repository policy.
+    - Cost: one GCS state bucket (cents). Pulumi is retired; rollback means
+      restoring a prior state-object version, not switching tools.
 13. **Paused for re-evaluation; resume gate** (2026-11-18). Both Scheduler
     jobs are paused through Terraform (`scan_paused`, `consumer_sweep_paused`).
     Resume each one only after the item that gates it is Complete: scan after
