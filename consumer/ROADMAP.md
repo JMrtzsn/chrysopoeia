@@ -36,17 +36,28 @@ authorize deployment or real orders.
    esports benchmark approval): market metadata checks accept any two distinct
    outcome labels; the first listed outcome token remains the YES side. No
    contract change; 40 offline tests pass.
-1. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
+1. **Settle positions with no usable exit quote (paused-platform blocker,
+   2026-11-18).** Three open paper positions logged about 290
+   `sweep deferred … exit quote is stale or future-dated` errors after their
+   markets stopped quoting, so they never settle and the error alert stays
+   noisy. Scope: once the market end has passed, settle from public
+   resolution metadata, or after a bounded staleness window close the
+   position as `unsettled` with a recorded reason, never a guessed price. Log
+   a deferral once per position instead of every minute. Acceptance: offline
+   tests for the resolved, expired-without-quote, and still-fresh cases, plus
+   one live sweep that clears the three stuck positions. Gates the Platform
+   sweep resume (`../platform/ROADMAP.md` item 13).
+2. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
    through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery
    and replay, and the revision-rollover single-writer ceiling. A model-produced
    plan reaching a local Consumer fill was verified 2026-10-15
    (`../harness/docs/verification.md`); deployed ingress, settlement, dead-letter,
    and rollover remain unverified.
-2. **Polymarket live execution foundation:** verify the official Python SDK and
+3. **Polymarket live execution foundation:** verify the official Python SDK and
    supported EOA/order flow; implement isolated execution, structural limits,
    preflight, reconciliation, and kill switch here. Live mode stays disabled
    until all spec gates pass.
-3. **Bounded live activation:** only after gates pass, run a separately approved
+4. **Bounded live activation:** only after gates pass, run a separately approved
    smallest-possible live order and exit with the dedicated $10 wallet.
 4. ~~**Consumer lifecycle outcome events**~~ (done 2026-10-25): the Consumer
    publishes versioned `consumer_outcome` records for durable fill, rejection,

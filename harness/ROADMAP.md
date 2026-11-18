@@ -96,9 +96,21 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-Harness Next is empty; the current approved cross-unit item is the Observer
-journey health endpoint (operator-approved 2026-11-13), owned and tracked in
-`../observer/ROADMAP.md`.
+1. **Bounded cycle wall-clock (paused-platform blocker, 2026-11-18).** Since
+   2026-11-17 most scheduled scan cycles stall after a model call and are
+   killed at the Cloud Run 900 s task timeout (all 6 on Nov 17, 18:42Z on
+   Nov 18). The trace showed a `function_call` response and then no output for
+   about 14 minutes. Scope: find the stalled call from journal and log
+   evidence; put deterministic per-call timeouts on model, research, and venue
+   calls plus an overall cycle deadline below the task timeout; record a
+   journal outcome when the deadline hits instead of being killed. Acceptance:
+   an offline test where a hanging tool or model stub ends the cycle with a
+   recorded timeout outcome before the deadline, plus a bounded live cycle
+   that finishes under the deadline. Gates the Platform scan resume
+   (`../platform/ROADMAP.md` item 13).
+
+Previously empty; the Observer journey health endpoint (operator-approved
+2026-11-13) is owned and tracked in `../observer/ROADMAP.md`.
 
 ## Older
 

@@ -405,6 +405,16 @@ runtime resources were replaced or deleted. Recovery steps are in
       policy exists.
     - Cost: ~$0 beyond one GCS state bucket. No model spend. Rollback until
       12e: Pulumi state is untouched and stays authoritative.
+13. **Paused for re-evaluation; resume gate** (2026-11-18). Both Scheduler
+    jobs are paused through Terraform (`scan_paused`, `consumer_sweep_paused`).
+    Resume each one only after the item that gates it is Complete: scan after
+    Harness Next item 1 (bounded cycle wall-clock), sweep after Consumer Next
+    item 1 (settle without a usable quote). Before resuming, record real spend: enable the
+    Cloud Billing export to BigQuery (a one-time console setting on the billing
+    account) and query the last 30 days by service, which separates Vertex
+    model cost from Cloud Run, Pub/Sub, and BigQuery. Acceptance: a recorded
+    spend breakdown, then each resume applied separately through the gated
+    plan→policy→apply flow, with one clean scheduled tick or sweep observed.
 
 ## Deferred
 
