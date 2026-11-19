@@ -400,7 +400,8 @@ runtime resources were replaced or deleted. Recovery steps are in
       (resources stay in place; never `destroy`), delete `infra/`, and
       archive the old state file.
 
-      **Cut over (2026-11-18); repin evidence pending.** `run.sh deploy` now
+      **Complete (2026-11-19).** Cut over 2026-11-18; repin evidence added
+      2026-11-19 (see below). `run.sh deploy` now
       runs `gates.sh`, then a saved `plan -out`, `show -json`, and conftest,
       and applies only that saved plan, still behind
       `CHRYSOPOEIA_RUN_PLATFORM=1`. Image pins and other values are
@@ -415,10 +416,18 @@ runtime resources were replaced or deleted. Recovery steps are in
       Then `pulumi stack rm local-dev --force` removed state only, with no
       resource touched; `infra/`, its Pulumi-only `tests/test_infra.py`,
       `IMPORT_BEGAN`, and the applied `imports.tf` were deleted, and
-      `run.sh drift` = 0 afterwards. Not yet met: "one bounded image repin
-      through the gated flow". No new image exists while the platform is
-      paused, so the first real repin (Harness Next item 1 or Consumer Next
-      item 1) is the remaining evidence.
+      `run.sh drift` = 0 afterwards. Repin (2026-11-19): rollback and forward
+      through the gated `run.sh deploy`. The harness job went from
+      `sha256:bdf53208…` back to the previous deployed `sha256:a21949cf…` and
+      then forward again; each was 1 in-place change, 0 add/destroy, conftest
+      5/5, and the live job image was confirmed after each. Then `drift` = 0.
+      BigQuery dataset, `raw_events` (225 rows), and `open_positions` (32 rows)
+      had identical row counts, bytes, and creation times before and after. A
+      plan-only check with the archive disabled (`pubsub_topic=""`) and
+      `-destroy -target` refused to destroy the dataset, `raw_events`, and
+      both buckets. Per the operator rule that BigQuery data is never deleted,
+      `open_positions` now also has `prevent_destroy`, plus a protections-test
+      entry and a policy deny fixture.
     - **12f. Drift check.** Run a scheduled or manual
       `plan -detailed-exitcode`; any non-zero exit is reported as drift.
       CI required checks and apply approval follow once a remote repository

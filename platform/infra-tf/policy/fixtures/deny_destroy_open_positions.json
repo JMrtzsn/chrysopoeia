@@ -1,0 +1,15 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "google_bigquery_table.open_positions[0]",
+      "type": "google_bigquery_table",
+      "name": "open_positions",
+      "change": {
+        "actions": ["delete"],
+        "before": {"table_id": "open_positions"},
+        "after": null
+      }
+    }
+  ]
+}

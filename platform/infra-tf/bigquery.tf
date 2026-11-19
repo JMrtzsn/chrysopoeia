@@ -74,6 +74,12 @@ resource "google_bigquery_table" "open_positions" {
     { name = "settled_at", type = "TIMESTAMP", mode = "NULLABLE" },
     { name = "pnl", type = "FLOAT64", mode = "NULLABLE" },
   ])
+
+  # Operator rule (2026-11-19): no BigQuery data is ever deleted by Terraform,
+  # including this rebuildable projection.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_bigquery_dataset_iam_member" "transfer_data_viewer" {

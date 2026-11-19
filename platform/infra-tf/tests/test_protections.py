@@ -18,6 +18,10 @@ REQUIRED_PROTECTIONS = {
         "prevent_destroy = true",
         "deletion_protection = true",
     ],
+    ("google_bigquery_table", "open_positions"): [
+        "prevent_destroy = true",
+        "deletion_protection = true",
+    ],
 }
 
 

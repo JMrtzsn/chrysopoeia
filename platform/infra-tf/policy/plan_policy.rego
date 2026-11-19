@@ -13,6 +13,7 @@ protected contains id if {
 		"google_storage_bucket.consumer_ledger",
 		"google_bigquery_dataset.event_archive",
 		"google_bigquery_table.raw_events",
+		"google_bigquery_table.open_positions",
 	}
 }
 
