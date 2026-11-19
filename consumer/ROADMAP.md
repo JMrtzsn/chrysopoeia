@@ -36,8 +36,8 @@ authorize deployment or real orders.
    esports benchmark approval): market metadata checks accept any two distinct
    outcome labels; the first listed outcome token remains the YES side. No
    contract change; 40 offline tests pass.
-1. **Settle positions with no usable exit quote (paused-platform blocker,
-   2026-11-18).** Three open paper positions logged about 290
+1. **Settle positions with no usable exit quote** (2026-11-18; needed only
+   if paper trading resumes). Open paper positions logged about 290
    `sweep deferred … exit quote is stale or future-dated` errors after their
    markets stopped quoting, so they never settle and the error alert stays
    noisy. Scope: once the market end has passed, settle from public
@@ -45,7 +45,8 @@ authorize deployment or real orders.
    position as `unsettled` with a recorded reason, never a guessed price. Log
    a deferral once per position instead of every minute. Acceptance: offline
    tests for the resolved, expired-without-quote, and still-fresh cases, plus
-   one live sweep that clears the three stuck positions. Gates the Platform
+   one live sweep that clears the stuck positions (two remain open as of
+   2026-11-19). Gates the Platform
    sweep resume (`../platform/ROADMAP.md` item 13).
 2. **Remaining paper live checks:** a live model-produced `trade_plan_ready`
    through ingress to a Consumer fill, YES/NO settlement, dead-letter delivery

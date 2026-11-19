@@ -96,7 +96,19 @@ The recorded commands and evidence for harness milestones are in
 
 ## Next
 
-1. **Bounded cycle wall-clock (paused-platform blocker, 2026-11-18).** Since
+**Decision (operator, 2026-11-19): the research forecaster is retired as a
+strategy.** Asking a model to read public research and estimate win
+probabilities did not beat the market. Esports-only paper results (Nov 12–18):
+11 settled trades, 5 wins, −$18.03 on $49.98 staked (−36.1%). The model's
+average predicted win chance was 0.625 against an average entry price of
+0.519, but it won 45%. Real model cost over the same period was $18.51 for 62
+turns. Public research is information the market already prices. The code
+stays until item 2 reports; nothing is deleted yet. A model is used only
+where it adds reading capacity the market lacks, never as the probability
+source.
+
+1. **Bounded cycle wall-clock** (deprioritized 2026-11-19: needed only if the
+   research loop is ever revived; the Platform scan stays paused). Since
    2026-11-17 most scheduled scan cycles stall after a model call and are
    killed at the Cloud Run 900 s task timeout (all 6 on Nov 17, 18:42Z on
    Nov 18). The trace showed a `function_call` response and then no output for
@@ -106,8 +118,43 @@ The recorded commands and evidence for harness milestones are in
    journal outcome when the deadline hits instead of being killed. Acceptance:
    an offline test where a hanging tool or model stub ends the cycle with a
    recorded timeout outcome before the deadline, plus a bounded live cycle
-   that finishes under the deadline. Gates the Platform scan resume
-   (`../platform/ROADMAP.md` item 13).
+   that finishes under the deadline.
+2. **Market-structure signal study** (operator-requested 2026-11-19; no
+   trading, no paper fills, no cloud resources). Question: does Polymarket
+   misprice markets in ways a model can find by reading, after fees and
+   spread? Two signal types share one daily scan of public market data:
+   - **Inconsistent related markets.** Within a Polymarket event, mutually
+     exclusive outcomes are found from metadata and their executable prices
+     are checked deterministically (asks summing to less than 1, or bids
+     summing to more than 1, after fees); this part needs no model. Across
+     events, the model proposes implication pairs ("A implies B", for
+     example a nomination and an election) as structured claims; code then
+     checks the price constraint (`P(A) <= P(B)`) on executable books.
+   - **Rules versus price.** The model reads each market's resolution text
+     once, keyed by market ID and a hash of the rules, and extracts the
+     exact condition, deadline, and resolution source as structured fields.
+     It flags a market only when the literal rules and the price disagree,
+     with a cited quote. Prices, edge, and fees are computed by code.
+
+   Each flag is appended to a local study journal with the market,
+   claim, quote, executable price and size at flag time, fee, and expiry.
+   After settlement, a scorer computes hit rate and hypothetical net P&L at
+   the recorded executable prices, alongside model cost per flag.
+   Bounds: public read-only APIs only; per-market model calls cached; at
+   most a fixed number of markets per day; a hard model-cost cap of $1 a day
+   that ends the run when reached; runs locally on demand. External text is
+   untrusted evidence: it never selects tools or changes limits.
+
+   **Kill rule, fixed up front:** after 3 weeks or 100 settled flags,
+   whichever comes later, continue only if mean net return per flag is
+   above 0, the lower bound of a 90% bootstrap interval is also above 0, and
+   total model cost is below the hypothetical net profit. Otherwise stop,
+   record the result here, and retire the forecaster code. Acceptance for
+   building the study: offline tests for the deterministic constraint
+   checks, the claim schema, the cost cap, and the scorer on fixture data;
+   then one bounded live daily scan with recorded cost. A positive result
+   would be a separate, explicitly approved item to paper-trade the
+   signals on the existing Consumer path.
 
 Previously empty; the Observer journey health endpoint (operator-approved
 2026-11-13) is owned and tracked in `../observer/ROADMAP.md`.

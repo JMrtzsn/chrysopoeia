@@ -443,9 +443,11 @@ runtime resources were replaced or deleted. Recovery steps are in
       restoring a prior state-object version, not switching tools.
 13. **Paused for re-evaluation; resume gate** (2026-11-18). Both Scheduler
     jobs are paused through Terraform (`scan_paused`, `consumer_sweep_paused`).
-    Resume each one only after the item that gates it is Complete: scan after
-    Harness Next item 1 (bounded cycle wall-clock), sweep after Consumer Next
-    item 1 (settle without a usable quote). Before resuming, record real spend: enable the
+    Update 2026-11-19: the research forecaster is retired
+    (`../harness/ROADMAP.md` Next), so the scan schedule stays paused
+    indefinitely and is not on a resume path. The Harness market-structure
+    study runs locally and needs no Platform resources. The sweep resumes
+    only if paper trading resumes, after Consumer Next item 1. Before resuming, record real spend: enable the
     Cloud Billing export to BigQuery (a one-time console setting on the billing
     account) and query the last 30 days by service, which separates Vertex
     model cost from Cloud Run, Pub/Sub, and BigQuery. Acceptance: a recorded
