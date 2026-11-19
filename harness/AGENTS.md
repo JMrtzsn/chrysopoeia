@@ -23,14 +23,15 @@ Unapproved future ideas are consolidated in `docs/proposals.md`.
 ## Off-limits
 
 - `platform/**` (GCP deployment shape; needs operator approval to touch)
-- Any provisioning or mutation of cloud resources: no `gcloud`, `pulumi`, or
+- Any provisioning or mutation of cloud resources: no `gcloud`, `terraform`, or
   infrastructure SDK calls. Data-plane publishing to a configured event sink is
   allowed (rule from `../platform/docs/deployment.md`).
 
 ## Contract published to the platform
 
 - Container image built from the harness wheel (`uv build`) — one per code
-  change; the platform consumes the resulting image digest pin via Pulumi.
+  change; the platform consumes the resulting image digest pin via Terraform
+  (`../platform/infra-tf/`).
 - CLI contract: `chrysopoeia <command>` reading `--journal /mnt/journal` and
   `--config` from the env override `CHRYSOPOEIA_CONFIG` or repo default.
   `capture`/`cycle` targets remain verification inputs. Automated `run`
