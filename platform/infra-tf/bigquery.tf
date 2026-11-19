@@ -126,6 +126,7 @@ resource "google_bigquery_data_transfer_config" "open_positions_refresh" {
   data_source_id = "scheduled_query"
   display_name   = "open-positions-refresh"
   schedule       = "every 15 minutes"
+  disabled       = var.projection_refresh_paused
 
   # The live config runs as its owner (the transfer identity, via the
   # operator's serviceAccountUser grant at creation). serviceAccount is unset

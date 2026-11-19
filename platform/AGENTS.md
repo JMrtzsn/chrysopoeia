@@ -53,7 +53,8 @@ Ordered platform work lives in `ROADMAP.md`.
   `runWithOverrides` only); the scheduler needs that identity to satisfy
   `workflows.invoker` plus a scheduler-agent token-creator grant on it.
   `scan_paused` pauses the schedule; `consumer_sweep_paused` pauses the
-  consumer sweep. Workflows executes-create
+  consumer sweep; `projection_refresh_paused` disables the `open_positions`
+  scheduled query. Workflows executes-create
   accepts OAuth2 access tokens only, and its `time.format(sys.now())` returns
   the per-tick journal key.
 - Optional `billing_account_id` with `budget_amount_usd` (+ `budget_currency`,

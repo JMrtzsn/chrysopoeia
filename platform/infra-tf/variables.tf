@@ -62,6 +62,12 @@ variable "consumer_sweep_paused" {
   description = "Pause the consumer settlement sweep; open paper positions stop settling while paused."
 }
 
+variable "projection_refresh_paused" {
+  type        = bool
+  default     = false
+  description = "Pause the scheduled query that rebuilds open_positions; the table keeps its last rows."
+}
+
 variable "context_history_enabled" {
   type    = bool
   default = false
