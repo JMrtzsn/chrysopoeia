@@ -155,6 +155,34 @@ source.
    then one bounded live daily scan with recorded cost. A positive result
    would be a separate, explicitly approved item to paper-trade the
    signals on the existing Consumer path.
+3. **Model comparison and switch** (operator-requested 2026-11-19). Question:
+   was `gemini-3.5-flash` (a fast, low-cost tier) the reason the research
+   forecaster lost, or would a stronger model have done better on the same
+   inputs? Steps:
+   - **Baseline, no model cost:** score every archived esports turn's
+     predicted probability (all 62 turns, Nov 12–18, not just the 11 trades)
+     against the market price at that time and the known result, using the
+     Brier score and log loss.
+   - **Replay:** first confirm the journals kept each turn's full research
+     inputs (market snapshot plus research evidence text). Then rerun the
+     same inputs on 2–3 stronger models, for example a Pro-tier Gemini plus
+     one or two models reached through the existing `adk-registry` and
+     OpenRouter adapters, and score them the same way. **No live search
+     during the replay**: the matches are over, so a fresh search would find
+     the results. Use recorded inputs only.
+   - **Bounds:** at most 3 candidate models, one replay per turn per model, a
+     hard model-cost cap of $10 in total, and offline scoring code covered
+     by fixture tests.
+   - **Decision rule, fixed up front:** switch only if a candidate's Brier
+     score beats both the market and Gemini Flash across the replayed turns,
+     with a 90% bootstrap interval that excludes no improvement over the
+     market. Switching means changing the `[models]` roles in
+     `configs/platform.toml` and `chrysopoeia.toml` to that model, passing
+     the harness gates, and recording the evidence. The research forecaster
+     stays retired unless the switch passes, and even then any trading
+     resumes only as a separate, explicitly approved paper trial. If no
+     candidate beats the market, record that the model was not the cause and
+     close the item. Item 2 does not wait for this item.
 
 Previously empty; the Observer journey health endpoint (operator-approved
 2026-11-13) is owned and tracked in `../observer/ROADMAP.md`.
