@@ -58,7 +58,6 @@ ignore = ["E501", "C901", "B006"]
 known-first-party = ["chrysopoeia"]
 
 [tool.codespell]
-skip = "./docs/reference/*.pdf"
 ignore-words-list = "dota"
 
 [tool.ty.environment]

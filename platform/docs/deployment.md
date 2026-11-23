@@ -243,7 +243,8 @@ to get past a deployment error.
 
 Recreate only the intended runtime resources, not storage. Keep the current
 Terraform state; the backend is the versioned, owner-only GCS bucket
-`PROJECT_ID-chrs-tfstate-local` (object versions are the backup). The
+`PROJECT_ID-chrs-tfstate-local` (object versions are the backup), named in the
+operator-local, git-ignored `platform/infra-tf/backend.hcl`. The
 retired Pulumi state is archived under `archive/pulumi-2026-11-18/` there. Do not erase that state
 as a way of resetting infrastructure. A normal full-stack destroy is blocked
 by protected resources, rather than silently deleting history. Other storage,

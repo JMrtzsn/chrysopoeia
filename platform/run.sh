@@ -10,7 +10,8 @@
 # deploy  offline gates -> saved plan -> conftest policy -> apply that plan only
 # job     execute one on-demand Cloud Run job
 #
-# Values live in the operator-local platform/infra-tf/terraform.tfvars.
+# Values live in the operator-local platform/infra-tf/terraform.tfvars and
+# backend.hcl (state bucket).
 set -eu
 
 ACTION=${1:-}
@@ -21,7 +22,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TF_DIR="$REPO_ROOT/platform/infra-tf"
 
 if [ "$ACTION" = "drift" ]; then
-  terraform -chdir="$TF_DIR" init -input=false >/dev/null
+  terraform -chdir="$TF_DIR" init -input=false -backend-config=backend.hcl >/dev/null
   exec terraform -chdir="$TF_DIR" plan -input=false -lock=false -detailed-exitcode "$@"
 fi
 
@@ -34,7 +35,7 @@ case "$ACTION" in
   deploy)
     PLAN=$(mktemp -d)/tfplan
     "$TF_DIR/gates.sh"
-    terraform -chdir="$TF_DIR" init -input=false >/dev/null
+    terraform -chdir="$TF_DIR" init -input=false -backend-config=backend.hcl >/dev/null
     terraform -chdir="$TF_DIR" plan -input=false -out="$PLAN" "$@"
     terraform -chdir="$TF_DIR" show -json "$PLAN" > "$PLAN.json"
     conftest test --namespace terraform.plan -p "$TF_DIR/policy" "$PLAN.json"

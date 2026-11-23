@@ -126,8 +126,6 @@ pending. No platform resources, keys, or orders are involved.
   safety contract, and acceptance.
 - [Harness architecture and evidence](harness/docs/architecture.md): implemented
   flow, tool boundary, citations, and ownership.
-- External reference papers under `harness/docs/reference/` are background
-  material, not product requirements.
 - [Paper accounting](harness/docs/accounting.md): journal and position contract.
 - [Harness verification](harness/docs/verification.md): live-check policy and
   recorded model/venue runs.
