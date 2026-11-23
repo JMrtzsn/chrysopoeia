@@ -23,8 +23,8 @@ jobs:
       run:
         working-directory: ${{ matrix.unit }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           enable-cache: true
       - run: uv lock --check
@@ -43,12 +43,12 @@ jobs:
       run:
         working-directory: platform/infra-tf
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "~1.15.0"
-      - uses: terraform-linters/setup-tflint@v4
-      - uses: aquasecurity/setup-trivy@v0.2.3
+      - uses: terraform-linters/setup-tflint@v6
+      - uses: aquasecurity/setup-trivy@v0.3.1
       - name: Install conftest
         run: |
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz | tar -xz -C /usr/local/bin conftest
