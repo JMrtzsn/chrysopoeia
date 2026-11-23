@@ -1,37 +1,40 @@
 # Paper consumer
 
-This independent FastAPI service accepts authenticated Pub/Sub push requests at
-`POST /push` and authenticated Scheduler requests at `POST /sweep`. Authentication
-is enforced by Cloud Run IAM. The service validates Harness-owned v1/v2 schemas,
-fetches bounded public metadata/books, independently checks risk and depth, and
-records paper-only outcomes in its own append-only journal.
-The deployed subscription filters for `trade_plan_ready`; ingress also
-terminally acknowledges other Harness record types without journal writes.
+Independent, paper-only FastAPI service. It never signs, orders, or holds
+credentials or models.
 
-When `CHRYSOPOEIA_EVENT_TOPIC` is configured, the service publishes each durable
-Consumer lifecycle record as a `consumer_outcome` v1 event (see
-`../contracts/consumer_outcome.v1.schema.json`). Publication is journal-derived
-and at least once; stable event IDs and journaled acknowledgements allow retry
-after publisher or process failure. The Consumer ledger remains the financial
-authority, and the Pub/Sub topic is only an analytics/event copy.
+- `POST /push` takes authenticated Pub/Sub pushes; `POST /sweep` takes
+  authenticated Scheduler requests (exits/settlement). Cloud Run IAM enforces
+  authentication.
+- It validates the Harness-owned `trade_plan_ready` v1/v2 schemas, reads bounded
+  public Polymarket metadata/books, checks risk and depth itself, and writes
+  paper outcomes to its own append-only journal.
+- The subscription filters for `trade_plan_ready`; other record types are
+  acknowledged without journal writes.
+- Delivery is at-least-once: the same `event_id` never fills twice, and failures
+  after ten attempts go to the dead-letter queue. See the event-driven
+  architecture table in [`../README.md`](../README.md).
+- With `CHRYSOPOEIA_EVENT_TOPIC` set, each durable lifecycle record is published
+  as `consumer_outcome` v1
+  ([schema](../contracts/consumer_outcome.v1.schema.json)), journal-derived and
+  at-least-once with stable event IDs and journaled acknowledgements. The
+  Consumer ledger stays the financial authority; the topic is an analytics copy.
 
-It is an idempotent consumer under at-least-once delivery: redeliveries with
-the same `event_id` never repeat a fill, and failures after ten attempts land in
-the dead-letter queue. See the event-driven architecture table in
-`../README.md`.
+## Configuration
 
-Configuration is through `CONSUMER_JOURNAL`, `CONSUMER_BANKROLL`,
-`CONSUMER_MAXIMUM_STAKE`, `CONSUMER_MAXIMUM_MARKET_EXPOSURE`,
-`CONSUMER_MAXIMUM_TOTAL_EXPOSURE`, `CONSUMER_MAXIMUM_LOSS`,
-`CONSUMER_MINIMUM_EDGE`, `CONSUMER_FEE_RATE`, and the optional
-`CHRYSOPOEIA_EVENT_TOPIC`. Defaults are paper bankroll 1000, stake 10, market 1%,
-total 10%, cumulative loss 100, edge 5%, and 2% paper fees.
-
-No model, credentials, signing, order, or live-execution code exists here.
+| Variable | Default |
+| --- | --- |
+| `CONSUMER_JOURNAL` | — |
+| `CONSUMER_BANKROLL` | 1000 |
+| `CONSUMER_MAXIMUM_STAKE` | 10 |
+| `CONSUMER_MAXIMUM_MARKET_EXPOSURE` | 1% |
+| `CONSUMER_MAXIMUM_TOTAL_EXPOSURE` | 10% |
+| `CONSUMER_MAXIMUM_LOSS` | 100 (cumulative) |
+| `CONSUMER_MINIMUM_EDGE` | 5% |
+| `CONSUMER_FEE_RATE` | 2% |
+| `CHRYSOPOEIA_EVENT_TOPIC` | unset (no publishing) |
 
 ## Run locally
-
-For manual debugging and trying market adapters against real public data:
 
 ```sh
 uv sync
@@ -46,35 +49,34 @@ cd ../harness
 CHRYSOPOEIA_EVENT_SINK=http://127.0.0.1:8080/push \
   uv run chrysopoeia cycle --journal /tmp/harness-journal --snapshot snapshot.json
 
-# Or manually post an existing event from consumer/:
+# Or post an existing event from consumer/:
 cd ../consumer
 uv run python scripts/send_event.py event.json   # POST /push, prints HTTP status
 uv run python scripts/send_event.py --sweep      # POST /sweep (exits/settlement)
 cat /tmp/consumer/ledger.jsonl
 ```
 
-`event.json` is a `trade_plan_ready` v1 (YES-only) or v2 (YES/NO) event
-(`../contracts/trade_plan_ready.v1.schema.json` and `../contracts/trade_plan_ready.v2.schema.json`).
-V2 `probability` is the selected token's win probability, not always P(YES).
-The public adapter verifies that `outcome` agrees with `instrument_id`; it buys
-and later sells that token's actual book. Settlement pays when the held token
-wins (the quote's `resolution=YES` means that token won).
-Its `event_id` must be
-`turn-` + the first 24 hex chars of SHA-256 over compact JSON
-`[snapshot_id, market_id]`; the script checks this and wraps the event in the
-real Pub/Sub push envelope.
-
-- Local runs have no authentication; bind to `127.0.0.1` only.
-- The service makes real public Polymarket Gamma/CLOB reads. Fills are paper only.
-- `204` means a durable fill, terminal rejection, or intentionally ignored
-  non-`trade_plan_ready` event; `503` means retryable failure of the ledger or
-  outbox — a position whose public quote is unreadable is deferred (logged at
-  ERROR severity) and retried on the next sweep without failing the sweep.
+- `event.json` is a `trade_plan_ready`
+  [v1](../contracts/trade_plan_ready.v1.schema.json) (YES-only) or
+  [v2](../contracts/trade_plan_ready.v2.schema.json) (YES/NO) event. In v2,
+  `probability` is the selected token's win probability.
+- `event_id` must be `turn-` plus the first 24 hex chars of SHA-256 over compact
+  JSON `[snapshot_id, market_id]`. The script checks this and wraps the event in
+  a real Pub/Sub push envelope.
+- The adapter checks that `outcome` matches `instrument_id`, then buys and later
+  sells that token's book. Settlement pays when the held token wins (quote
+  `resolution=YES` means that token won).
+- Local runs are unauthenticated; bind to `127.0.0.1` only. Public Gamma/CLOB
+  reads are real; fills are paper.
+- `204`: durable fill, terminal rejection, or ignored non-`trade_plan_ready`
+  event. `503`: retryable ledger or outbox failure. A position with an
+  unreadable quote is logged at ERROR and retried next sweep without failing
+  the sweep.
 
 ## Adding a market provider
 
-A provider implements the `Market` protocol in `paper_consumer/core.py`:
-`load(market_id, token_id, now) -> Quote`. Normalize the venue's response into
-`Quote` (executable book, freshness timestamp, resolution) before any risk check
-sees it, and follow the `PublicMarketTests` pattern for bounded, strict parsing.
-Only Polymarket exists today; `app.py` selects it directly.
+Implement the `Market` protocol in `paper_consumer/core.py`:
+`load(market_id, token_id, now) -> Quote`. Normalize the venue response into
+`Quote` (executable book, freshness timestamp, resolution) before any risk
+check, and follow `PublicMarketTests` for bounded, strict parsing. Only
+Polymarket exists; `app.py` selects it directly.

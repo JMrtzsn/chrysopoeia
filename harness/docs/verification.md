@@ -18,320 +18,133 @@ execution is prohibited. Full policy is in
 
 ## Recorded harness checks
 
-All model runs below used ambient Vertex ADC unless noted. Operator approval was
-obtained for cost or external effects; temporary local files were removed.
-Costs are estimated model cost unless noted.
+Model runs used ambient Vertex ADC unless noted, with operator approval for cost
+or external effects and temporary local files removed. Costs are estimated model
+cost. Rows are condensed; full run details are in git history.
 
-| Date | Command / boundary | Result and bounds |
+| Date | What was verified | Result |
 | --- | --- | --- |
-| 2026-10-30 | Reserved-cost `turn_outcome` v4 live acceptance: bounded public market selection and `capture 6386944`, then one `cycle --snapshot <fresh CS2 capture> --config configs/esports.toml --journal <temporary>` with `CHRYSOPOEIA_EVENT_SINK=pubsub:projects/PROJECT_ID/topics/chrysopoeia-events`; after one fixed 20-second propagation wait, one Observer `query_insights` read of the existing archive | Preflight reserved ceiling was $1.43376 within the separately approved $1.44 bound. Six public market GETs selected and captured the unresolved CS2 Nemiga/Vitality market. One cycle used four model calls and nine research queries, abstained, made no plan or order, and cost $0.180846 actual of $1.43376 reserved. `outcome-d84ded425890ffabae3356a4` / `turn-d84ded425890ffabae3356a4` was schema v4, carried the exact actual/reserved values and context `polymarket:event:cs2-nemi1-vit-2026-10-30` / `polymarket.event` v1, and was outbox-acknowledged. One 90-day/partition-bounded, 100 MiB-capped, 20-second-timeout Observer query returned one matching decision with actual 0.180846 and numeric reserved 1.43376 exactly; no mixed/null fallback occurred. Expected query cost under $0.001; billing unmeasured. No retry, BTC run, deployment, IAM change, or cloud mutation beyond normal event publishing/archive ingestion. Temporary capture, journal, result, and logs were removed; no cloud cleanup was required. Offline acceptance: 386 Harness and 10 Observer tests, lint/type checks, validation/imports, and builds passed. |
-| 2026-10-26 | Esports benchmark pilot: `capture` on CS2/Dota 2 match-winner markets + bounded `cycle` runs (Vertex `gemini-3.5-flash`, research on) with `GOOGLE_CLOUD_PROJECT=PROJECT_ID` and operator ADC; root-caused the missing-trader-output failures and fixed the input-ceiling handling | First esports forecasts journaled: Astralis YES filled @0.58 (p=0.68, 8 grounded queries citing HLTV/Liquipedia form and head-to-head), Alliance/FaZe approved+filled ($0.21040410), Dota 2 Spirit/PARI and BetBoom/LEGION abstained at p=0.5 (one research timeout). Confirmed the missing-output trigger class: grounded research inflates the served prompt server-side, so actual input usage (measured 8413) exceeded the 8192 policy input ceiling → `MODEL_COST_USAGE_INVALID` → no structured proposal. Fixes: (1) the reservation now always uses the policy input ceiling instead of the precomputed `cacheable_contents_token_count`, which under-reserved grounded calls; (2) the esports profile raises `maximum_input_tokens_per_call` to 32768 for research-heavy markets. Regression test added; 383 tests, ruff, ty, and validation pass. Journal idempotency also documented by observation: retrying a failed turn with the same snapshot returns the recorded failure, so retries must recapture. ~10 bounded diagnostic cycles on CS2 plus 4 batch cycles (~$2-3 actual model spend incl. one $0.9471552 failure reservation); no orders; eval pending resolutions. |
-| 2026-10-26 | Offline implementation of liquidity-aware sizing (roadmap item 3): `plan_capacity` in `trading.py` plus enforcement in `check_risk`; no live calls | 381 tests, ruff, ty, and config validation pass. Behavior: the largest stake whose marginal book level still meets the fee-adjusted 0.05 net edge is the edge-aware capacity; stakes above it are rejected with the allowance-vs-capacity comparison and the full-amount quote's deterioration (marginal edge at worst entry, expected net ROI). Amounts beyond observed depth report unavailable, never extrapolated. YES and NO books use the actual selected token's asks; model/research costs stay journaled separately (`model_cost_usd`) and each candidate carries break-even win probability and expected net profit/ROI, never treated as proven returns. Existing risk/fee/expiry controls and reason ordering are unchanged (exposure/depth/max-entry rejections still fire first). No Consumer, schema, platform, or authenticated-execution change. The separately approved bounded public-book verification and an image redeploy remain pending; the deployed image predates this change. |
-| 2026-10-23 | Self-learning rollout steps 1-2: `uv build`, Platform image rebuild/pin/rollout with `[history]`/`[context_learning]` enabled in the bundled platform profile (output ceiling 1024 → 3072), plus `CHRYSOPOEIA_CONTEXT_CATALOG=/mnt/journal/context_profiles.jsonl` on the job so generated profiles persist on the journal bucket; one bounded `run` execution (`chrysopoeia-cycle-local-j7xbh`, fresh journal `run-learning-20261023`) | Offline: 377 Harness tests, ruff, ty, and validation of both profiles pass; forward-evaluation criteria recorded in `docs/architecture.md`. Preview showed 1 job update, 20 unchanged; archive/bucket protections intact. Live: the two-cycle execution exited 0 at its max-cycles cap with $0.12549240 actual model cost (worst-case reservation ~$1.05 against the $1.50 budget), one paper fill. The archived `turn_outcome` v3 pins `polymarket:series:btc-updown-5m / crypto.btcusd.5m.updown v1` (manifest `fdf87a40…`) and carries the deployed BigQuery history aggregate (2 decisions, 0 completed trades) as cited evidence; research stayed disabled (0 queries); deterministic risk rejected $100/$25 stakes before approving $5; reviewer approved. The 20-finalized-outcome gate correctly stayed closed, so no curator/reviewer calls ran and no catalog file was written yet; the journal write to the same mount confirms the catalog's persistence path. Pub/Sub/BigQuery costs negligible; no orders, no new resources, nothing to clean up. |
-| 2026-10-23 | Offline change after the 2026-10-22 live check: bounded thinking for the context-profile agents and a raised per-call output ceiling | Profile agents now run with a 2048-token thinking budget and request `max_output_tokens = 3072`; `[cost].maximum_output_tokens_per_call` rose 1024 → 3072 in `chrysopoeia.toml` and `configs/btc5m.toml` (the platform profile keeps 1024 with learning disabled), and enabling `[context_learning]` with a smaller ceiling now fails configuration validation. Thinking tokens settle against the reserved output cost as before. Conservative per-call reservation rises $0.0236544 → $0.0439296 (cycle ceiling $0.2838528 → $0.5271552 before the research allowance); actual spend is unchanged for non-thinking calls. 376 tests, ruff, ty, and config validation pass. Live rerun the same day confirmed the change: budget pre-check $15 cap vs $0.53 worst-case reservation; one learning-enabled cycle on a synthetic Arsenal-vs-Chelsea-October-26 snapshot abstained at $0.03657720 actual (vs $0.01811700 without thinking) of $0.5271552 reserved; every profile-agent call settled `completed` with output (thoughts+response) of 407–692 tokens, well inside the 3072 ceiling and the 2048 thinking budget; curator and reviewer again created and approved catalog profile v2 (`e76d150d…`), pinned exactly by the cycle's `turn_outcome` v3. Total additional actual model spend ≈ $0.06 across both runs; temp files removed. |
-| 2026-10-22/23 | Bounded live verification of the context-profile pipeline; topic/archive, IAM, Vertex cycle, profile creation, BigQuery query | (1) One schema-valid synthetic `consumer_outcome` v1 (labeled `synthetic-verification-20261022`, excluded from metrics) published to `chrysopoeia-events`; archived row confirmed with matching attributes ~9 s after publish. (2) Pulumi apply with `context_history_enabled=true` created `roles/bigquery.jobUser` (project) and dataset `dataViewer` for the runner and set the job archive env; both verified via IAM/bq reads; the consumer publisher role still requires a future consumer rollout. (3) One BTC 5m cycle (gemini-3.5-flash, research off) produced `turn_outcome` v3 with context scope/profile/version/manifest hash; the outbox published it to the topic and the archive row matched the bundled BTC manifest hash. Actual cost $0.06761865 of $0.2838528 reserved. (4) With `[context_learning].enabled` on a synthetic Arsenal-vs-Chelsea snapshot, curator and reviewer agents created local catalog profile v2 (hash `c392db88…`), and the cycle's v3 outcome pinned exactly that profile. Actual cost $0.01811700. Two real bugs were found and fixed: profile agents hit MAX_TOKENS because thinking was not disabled (952 thought tokens consumed the 1024 output ceiling), and the history query emitted double backticks around the table id (BigQuery 400). Offline regression checks were added for both. Total actual model spend across all runs ≈ $0.10; Pub/Sub and BigQuery costs negligible. Credentials: operator's own authenticated gcloud account via its standard credential file; the ingka ADC account lacked project rights and OpenRouter had no credits (both failed closed, no waivers). No orders; temporary journals/configs/snapshots removed; synthetic rows retained as labeled evidence. |
-| 2026-10-22 | Offline Harness checks for the outcome-driven context-profile loop: market-scope routing, bundled profiles, the local JSONL profile catalog, curator/reviewer agents with cost accounting, the 20-finalized-plan activation gate, and profile-scoped tool allowlists | 374 Harness tests, ruff, ty, and config validation passed. No live model, BigQuery query, or order ran; `[context_learning]` stays disabled by default and needs bounded live verification before any enabled use. |
-| 2026-10-21 | Offline Harness/Consumer/Platform checks for context-tagged `turn_outcome` v3, Consumer `consumer_outcome` v1 delivery/replay, and the bounded BigQuery query; Pulumi preview | Harness 365 tests, Consumer 38 tests, Platform 12 tests, lint/type checks, and Harness config validation passed. Pulumi preview reported 19 unchanged. No BigQuery query, IAM apply, image publish, or job execution was run; history remains disabled by default and needs bounded live verification before enablement. |
-| 2026-09-15 | `uv run chrysopoeia discover --limit 1`; `uv run chrysopoeia capture 559651 --output <local file>`; public Gamma/CLOB | Validated metadata, depth, fee, and resolution rules. At most 3 Gamma pages/75 records; five-second timeout and 256 KiB response cap. No model cost. |
-| 2026-09-15 | `uv run chrysopoeia cycle --snapshot <captured market 559651> --config <temp config> --journal <temp dir>`; repeat same command; Vertex | First run abstained after one trader call (~$0.00226); repeat made no model call and added no journal records. |
-| 2026-09-15 | About 13 one-cycle runs with seeded snapshot and local evidence bundle; Vertex paper workflow | Observed abstain → review → edge/exposure rejection → fill (24,000 shares at VWAP $0.005, $2.40 fee) → same-market preemption. About $0.03; paper effects only. |
-| 2026-09-15 | `load_market_resolution("20")`; `chrysopoeia settle --journal <temp dir> --market <market id>`; public Gamma | Market 20 normalized to `resolved_no` and settled deterministically; unresolved/ambiguous markets refused. Three bounded Gamma reads; no model cost. |
-| 2026-09-15 | `chrysopoeia mark --journal <temp dir>`; public Gamma/CLOB | Open position marked at $0.038; failed capture wrote no mark. One successful capture; no model cost. |
-| 2026-09-27 | `uv run chrysopoeia discover --limit 5 --config <temp>`; `uv run chrysopoeia capture 559651 --config <temp> --output <tmp>`; `uv run chrysopoeia cycle --snapshot <tmp> --config <temp>`; OpenRouter via ADK registry/LiteLlm | One trader call, abstained; estimated $0.004805 against $0.06144 reserved ceiling. `OPENROUTER_API_KEY` came only from the shell environment. |
-| 2026-09-30 | `uv run chrysopoeia cycle --snapshot <capture> --config <temp config> --journal <temp dir>`; identical repeat after seeding an unfinished turn | Recovery abandoned the prior turn before model calls; current cycle abstained after one trader call (~$0.0022); repeat added no records. |
-| 2026-09-30 | `uv run chrysopoeia run --journal <temp dir> --config <temp config> --bankroll 1000 --maximum-loss 100 --target-win-rate 0.6 --window-minutes 5 --max-cycles 2 --cost-budget 0.1 --interval-seconds 5 --stop-file <temp>` | Two selected markets, two abstentions, two admitted/finished turns, ~$0.004459 model cost. Stop-file halted resume before calls; changed session target was refused. |
-| 2026-10-05 | Bounded Python check: `discover_markets(limit=1)`, `load_market_snapshot`, then paper `evaluate_exits` with a seeded local position; public Polymarket Gamma/CLOB | Selected market 559651; one time-triggered full paper close used captured executable bids. This validated the in-process paper simulator, not an event consumer or live execution path. Five public GETs total; each capped at 5 s and 256 KiB. No model calls or orders; estimated cost $0; temporary journal removed. |
-| 2026-10-06 | Bounded Vertex smoke using `gemini-flash-latest` at `us-central1` | Reached Vertex but returned 404 for the unsupported model/location pair. Superseded by the successful `gemini-3.5-flash` smoke at the harness-configured `us` endpoint below. |
-| 2026-10-06 | Intermediate bounded Vertex paper-cycle diagnostic using `gemini-3.5-flash` at `us` | Failed/inconclusive: terminated with `TypeError` after five bounded public GETs and before producing a cycle summary; no event was returned and no order was submitted. Model cost is unknown because no cost ledger was returned. The later two bounded runs completed and are recorded separately below. |
-| 2026-10-06 | Two bounded Vertex paper-cycle smokes using `gemini-3.5-flash` at the harness-configured `us` endpoint | One no-target cycle called `find_markets` and `get_market`, then abstained: four model calls, actual estimated cost $0.00679470, one public GET, no event or orders, and about 52 s. One draft-seeded cycle called `check_trade_plan` and returned `rejected` with no event: three model calls, actual estimated cost $0.02125530, five public GETs, no orders, and about 23 s. Each run stayed within its approved temporary five-call cap; the combined six public GETs stayed within the approved limit of 15, with each GET capped at 5 s and 256 KiB. This verifies tool integration and fail-closed behavior, not an accepted live or paper fill. |
-| 2026-10-07 | First approved attempt of the bounded Python workflow using `discover_markets(limit=1)`, one setup `load_market_snapshot`, a synthetic $1 hold-to-resolution `trade_plan_ready`, a temporary open journal, and actual CLI `consume`; public Polymarket Gamma/CLOB | Failed closed on `Polymarket adapter book is stale`; no fill, model call, or order. 5–7 public GETs were made; the exact count was not emitted. Each GET was capped at 5 s and 256 KiB. Estimated cost $0; temporary files removed. The successful retry is recorded below. |
-| 2026-10-07 | One bounded Python workflow using `discover_markets(limit=1)`, one setup `load_market_snapshot`, a synthetic $1 hold-to-resolution `trade_plan_ready`, a temporary open journal, and actual CLI `consume`; public Polymarket Gamma/CLOB | Filled from a fresh quote and preserved distinct original-plan and fresh-quote snapshot IDs. An identical duplicate CLI consume made no write and no fetch. Exactly seven public GETs: three discovery, two setup, and two consume; each capped at 5 s and 256 KiB. Estimated cost $0; synthetic plan, no model calls or orders; temporary files removed. |
-| 2026-10-08 | In-memory `uv run python -` calling `run_paper_cycle_state` and `summarize_cycle`; OpenRouter route `openrouter/openai/gpt-4.1-mini` with explicit rates of $0.40/M input and $1.60/M output | Three model calls; the trader called `check_trade_plan` and the cycle returned `approved`. Actual estimated cost was $0.0017388 against a $0.024576 reserved maximum and $0.03 daily cap. Each call was bounded to 8,192 input and 1,024 output tokens, with at most five calls. Zero Polymarket GETs were made against a hard cap of 13, each limited to 5 s and 256 KiB. The snapshot and draft were synthetic and in-memory; no journal, order, or temporary artifact was created. `OPENROUTER_API_KEY` was supplied only through the ambient environment and was never logged. |
-| 2026-10-08 | Inline Python with `platform/infra/.venv/bin/python` called Platform `drain()` against one temporary Pub/Sub topic and active subscription using ambient ADC; Harness CLI `outbox-pending`/`outbox-ack` | One synthetic valid trade-plan event was published once with confirmation; one matching message was pulled and acknowledged. The temporary subscription and topic were deleted after the check. Total duration was 22.87 s. Estimated incremental Pub/Sub cost was ~$0 within monthly free usage; billing was not measured. No model, market, Cloud Run, order, IAM, API-enablement, or `pulumi up` operation occurred. |
-| 2026-10-12 | Local direct publishing: real `run_journal_turn` on market 665374 with only the model step stubbed to a valid plan; `CHRYSOPOEIA_EVENT_SINK=http://127.0.0.1:8080/push` into a locally running Consumer | Harness journal recorded `outbox_enqueued` → `outbox_acknowledged` → `fill_recorded`; zero events pending. The Consumer received one push (HTTP 204) and recorded `filled` from its own fresh quote. Four public Gamma/CLOB GETs, no model calls or orders, no Pub/Sub; temporary journal and ledger removed. Three earlier real-model attempts that day failed closed before publishing and found the dropped `--draft`/`--context` bug, a wrong default GCP project, and the overlong reviewer reason; up to $0.28 model cost and seven GETs. |
-| 2026-10-12 | `GOOGLE_CLOUD_PROJECT=PROJECT_ID CHRYSOPOEIA_EVENT_SINK=http://127.0.0.1:8080/push chrysopoeia cycle --market 665374 --journal <temp> --draft <trade draft>`; Vertex `gemini-3.5-flash` | Same draft that previously crashed on an overlong reviewer reason now completed: exit 0 in 24 s, status `rejected` (`review_rejected`), turn finished `rejected`. Actual estimated cost $0.0459. No event, so nothing was published and the local Consumer received no push. Two public GETs; no orders; temporary files removed. |
-| 2026-10-12 | Harness `events.publish()` with `pubsub:projects/<project>/topics/<temporary topic>` using ambient ADC; temporary topic and subscription | Publish confirmed; exactly one message pulled; payload equal to the canonical event and `event_id` attribute matched; acknowledged. Topic and subscription deleted. 14.5 s; estimated cost ~$0. No model, market, Cloud Run, or order calls. The deployed job's image, entrypoint, and sink env remain to be verified at the next deploy. |
-| 2026-10-12 | Real Vertex cycle for market 665374 in project `PROJECT_ID`; local HTTP sink into the local Consumer | The trader proposed a NO thesis at probability 0.02 versus YES 0.18; deterministic plan checking returned `plan_check_rejected`, so the reviewer was not called and `review` was null. `proposal.rationale` was present. Journal order was `session_opened`, `turn_admitted`, `turn_outcome_recorded`, `outbox_enqueued`, `outbox_acknowledged`, `turn_finished`; outcome event `outcome-c5e9f0b1c5cd198d904669c1` reached the Consumer, which returned HTTP 204 and made no ledger write. Actual estimated model cost was $0.0591 of $0.2839 reserved. This verifies the live outcome/ignore path, not a model-produced `trade_plan_ready` fill. |
-| 2026-10-14 | Plan-check, `plan_inputs`, and discovery iterations using `chrysopoeia run --max-cycles 6` with OpenRouter `openai/gpt-4.1-mini` through the ADK registry, a temporary config, and a local HTTP sink into the local Consumer | Before `plan_inputs`, 0/25 checks passed and 18 had shape errors. After the fixes, 5/5 turns completed and were rejected only because `minimum net edge of 0.05 not met`; each six-turn run cost about $0.03–$0.05. Every `turn_outcome` delivery received HTTP 204 and caused no Consumer ledger write. Live `discover` confirmed discovery ordered by `volume24hr` within 30 days, returning Man City, Fed October, US–Iran/Yemen ceasefire, and Balance of Power markets. Temporary local files were removed. |
-| 2026-10-14 | `chrysopoeia run --max-cycles 4 --cost-budget 2.00`; Vertex Google Search context with `gemini-3.5-flash` in project `PROJECT_ID` at `us`; OpenRouter `openai/gpt-4.1-mini` trader/reviewer; local HTTP sink into the local Consumer | All four turns reported research status `ok`: query counts were 7, 6, 5, and 3, producing 8, 7, 1, and 6 evidence records. The trader cited research evidence; all turns abstained because minimum net edge was not met. Recorded cost was $0.3448, including $0.014 per grounded query; the grounding cost is likely within Vertex's 5,000-query monthly free tier. The Consumer returned HTTP 204 four times. An earlier probe exceeded the output ceiling with thinking; disabling thinking and applying a 60 s timeout fixed it. Excerpts are Gemini grounding-support text rather than verbatim page text, and URLs are Vertex grounding redirect URIs. No `trade_plan_ready` event or Consumer fill was observed. |
-| 2026-10-14 | Deployed Cloud Run job `chrysopoeia-cycle-local` running `chrysopoeia run --max-cycles 1` (image `sha256:0089b841…`), Vertex `gemini-3.5-flash` at `us`, `CHRYSOPOEIA_EVENT_SINK=pubsub:projects/PROJECT_ID/topics/chrysopoeia-events` | Fixed the plan-check tool schema by typing `check_trade_plan`'s `plan` parameter as `ProposalOutput`, so the checked-in Vertex model receives field structure; before the fix every `check_trade_plan` call failed with `plan schema error: citations: Input should be a valid list`, so the trader could never pass a check. After the fix one turn produced an accepted plan: `plan_checks` showed real deterministic reasons (then `passed`), review approved, `trade_plan_ready` and `turn_outcome` were enqueued and acknowledged from the container, and a paper fill was recorded (market 2589812, 1.817 shares at 0.55). Actual estimated model cost $0.1209393; 3 grounded research queries and public market reads only. Two earlier attempts failed closed on transient Vertex `503 UNAVAILABLE` before any turn outcome; one reached the 15 m task timeout. Bounded to one cycle; no orders. |
-| 2026-10-15 | `OPENROUTER_API_KEY` sourced from the local `.router_key` (names only inspected; value never printed) and mapped into the environment; `chrysopoeia run --config configs/openrouter.toml --max-cycles 1 --cost-budget 0.60 --interval-seconds 0` with a temporary local journal and no event sink | Made the model provider BYOK for every role: removed the Gemini-only context validation and the forced Vertex context model, and gated the Google Search tool on a Gemini context model. All four roles ran on `openrouter/openai/gpt-4.1-mini` with no GCP calls. Research recorded `unavailable` (`research model does not support grounding`, 0 queries) as designed; the trader returned a structured plan, `check_trade_plan` gave a real deterministic reason (`minimum net edge of 0.05 not met`), and the turn abstained. Actual estimated cost $0.0031220 against a $0.4789824 reserved ceiling; one public market capture; no orders; temporary journal removed. A first attempt with `--cost-budget 0.10` stopped at `cost_budget` before any cycle because the reserved ceiling still includes the 30-query grounding allowance when research cannot run. |
-| 2026-10-15 | Local end-to-end paper chain: independent consumer `uv run uvicorn paper_consumer.app:app --host 127.0.0.1 --port 8080` with a temporary `CONSUMER_JOURNAL`; `CHRYSOPOEIA_EVENT_SINK=http://127.0.0.1:8080/push chrysopoeia cycle --config configs/openrouter.toml --snapshot <capture> --draft <draft> --journal <dir>` | Fixed the capture snapshot identity: it hashed `bids`, which `serialize_market_snapshot` and the record keys omit, so `load_capture_snapshot` could never reproduce the stored id and every `cycle --snapshot` failed `invalid snapshot`; the identity now covers only the persisted fields. A seeded draft produced an accepted plan on `openrouter/openai/gpt-4.1-mini`: `plan_checks` passed, review approved, and `trade_plan_ready` (`turn-e6bc9b2d…`) plus `turn_outcome` were published through the sink and acknowledged. The independent consumer recorded a paper fill in its own ledger (market 2589812, 12.0 shares at 0.75, stake 9.0, fee 0.18). No GCP calls; no orders. Estimated model cost ~$0.006 (0.0037208 accepted + 0.0025568 prior attempt); temporary journal and consumer ledger under a temp dir. |
-| 2026-10-15 | Local `chrysopoeia run --config configs/openrouter.toml --max-cycles 1 --cost-budget 0.50 --interval-seconds 0` with `OPENROUTER_API_KEY` from `.router_key` (value never printed) and no event sink | Added a BYOK research provider: OpenRouter web search (Exa-backed, `plugins:[{id:"web"}]`) selected when the context model is an OpenRouter model; hits normalize into snapshot-bound external `EvidenceRecord`s, results are bounded and non-https/duplicate/malformed citations dropped, the research model call is reserved and settled in the cost ledger, and `research_allowance` now reserves only the active provider. One cycle reported `research: ok` with 5 cited external sources (fedratecalc.com, axios.com, thebostonreport.com) that the trader cited; it abstained (the proposal exceeded the per-market exposure limit). Actual estimated cost $0.0306796 against a $0.0789824 reserved ceiling; no GCP calls; no orders. |
-| 2026-10-15 | Direct local calls to the trader's `analyze_stock_history` and `analyze_crypto_history` tools with a canonical snapshot in ADK state; no model call, platform, keys, or event sink | Yahoo Finance public chart fetched 30 AAPL daily bars; CCXT fetched 30 BTC/USD daily bars from Coinbase public OHLCV. Both returned bounded deterministic indicators (means/returns, SMA/EMA, RSI, stochastic %K/%D, ATR) and registered snapshot-bound evidence IDs for citation. Two public requests; no orders; no GCP. Stooq was not used because its endpoint returned a JavaScript verification page to the non-browser client. |
-| 2026-10-16 | Direct trader-tool call to `analyze_polymarket_history` on `btc-updown-5m-1792212300`, plus `chrysopoeia polymarket-eval --journal <empty-local-journal> --event-url https://polymarket.com/event/btc-updown-5m-1792212300 --limit 5` | The tool fetched 10 resolved siblings from Gamma series `btc-up-or-down-5m` (`10684`), reported 40% Up, and registered snapshot-bound evidence. The evaluator loaded five resolved siblings (60% Up); their CLOB Up-price baseline Brier at each window start was 0.247025. No agent forecasts are in the local journal yet, so agent Brier is null. The supplied `1792212300` market itself is active/unresolved. All reads were public, local, and paper-only; no model or platform calls. |
-| 2026-10-16 | Local `load_market_snapshot` on the live `btc-updown-5m-<current window>` market (no model, platform, or keys) | Before the fix every Up/Down market was rejected (`requires YES and NO outcomes`), so BTC 5m forecasts could never be recorded. After accepting Up/Down (Up = YES side) a second defect surfaced: capture time was taken before the network fetch, so a fresh book stamped milliseconds later was rejected as `stale`/after `captured_at`. With a 5 s skew allowance and `captured_at` raised to the book time, market 5727085 ("Bitcoin Up or Down - October 16, 7:05AM-7:10AM ET") captured with Up ask 0.79 and 21 levels. Public reads only. |
-| 2026-10-16 | Local Vertex `gemini-3.5-flash` `chrysopoeia cycle --market https://polymarket.com/event/btc-updown-5m-<live window>` on 9 consecutive BTC 5m windows, temporary local journal, no event sink or platform | Exposed and fixed: (1) every financial/Polymarket-history tool call failed in real runs because ADK passes `State`, not a `MutableMapping`, so the tools returned "cycle context is unavailable" (unit tests used a dict); (2) model-chosen bar counts below 14 were rejected (now clamped); (3) CCXT Coinbase intermittently timed out loading its product catalogue (timeout raised to 20 s, trader pointed at Bitstamp); (4) abstentions recorded placeholder P(Up)=0.0 (trader now gives a genuine estimate; evaluator excludes 0/1 abstention placeholders); (5) checking an abstain plan returned a misleading "does not match" error. After the fixes the trader called `analyze_crypto_history(bitstamp, BTC/USD, 1m)` and produced reasoned estimates: P(Up)=0.45 vs Up ask 0.40 (edge below the 0.05 net minimum, abstained) and P(Up)=0.15 vs Up ask 0.68 (strong edge for Down, but YES-only so abstained). No bet was possible on these windows. One window hit a transient Vertex 503. ~$1.2 model spend; public reads only; no orders. |
+| 2026-10-30 | `turn_outcome` v4 reserved-cost acceptance: CS2 capture, one cycle publishing to Pub/Sub, one Observer query | Pass. Abstained; $0.180846 actual of $1.43376 reserved; archive and Observer returned the exact actual/reserved values. 386 Harness + 10 Observer tests passed. |
+| 2026-10-26 | Esports pilot: CS2/Dota 2 capture and cycles with research | Pass after fix. Grounded research pushed input past the 8192 ceiling (`MODEL_COST_USAGE_INVALID`); reservation now uses the policy input ceiling and esports raises it to 32768. Retries must recapture (journal idempotency). ~$2–3; no orders. |
+| 2026-10-26 | Liquidity-aware sizing (`plan_capacity`, `check_risk`), offline | Pass (381 tests). Public-book live check and image redeploy pending. |
+| 2026-10-23 | Self-learning rollout steps 1–2: image with `[history]`/`[context_learning]`, one two-cycle deployed run | Pass. $0.1255 actual, one paper fill; history aggregate cited; 20-outcome learning gate correctly stayed closed. |
+| 2026-10-23 | Bounded thinking (2048) and 3072 output ceiling for context-profile agents | Pass. Learning cycle abstained at $0.0366 actual; curator/reviewer created a profile pinned by `turn_outcome` v3. 376 tests. |
+| 2026-10-22/23 | Context-profile pipeline live: archive publish, history IAM, BTC cycle, profile creation | Pass after fixes (profile agents hit MAX_TOKENS from thinking; history query double backticks). ~$0.10; synthetic rows retained as labeled evidence. |
+| 2026-10-22 | Context-profile loop, offline | Pass (374 tests). `[context_learning]` disabled by default pending live check. |
+| 2026-10-21 | `turn_outcome` v3, `consumer_outcome` v1, bounded BigQuery query, offline | Pass (Harness 365, Consumer 38, Platform 12 tests). |
+| 2026-09-15 | `discover` and `capture` on public Gamma/CLOB | Pass. ≤3 pages/75 records, 5 s / 256 KiB caps; no model cost. |
+| 2026-09-15 | `cycle` on a captured market, then identical repeat | Pass. Abstained (~$0.0023); repeat made no call or records. |
+| 2026-09-15 | ~13 seeded one-cycle paper runs | Pass. Abstain, review, rejection, fill, and preemption paths observed; ~$0.03. |
+| 2026-09-15 | `settle` from public resolution | Pass. Market 20 settled `resolved_no`; ambiguous markets refused. |
+| 2026-09-15 | `mark` on an open position | Pass. Failed capture wrote no mark. |
+| 2026-09-27 | OpenRouter via ADK registry: `discover`, `capture`, `cycle` | Pass. Abstained, $0.0048. |
+| 2026-09-30 | Recovery of an unfinished turn, then repeat | Pass. Prior turn abandoned before model calls; ~$0.0022. |
+| 2026-09-30 | Two-cycle `run` with stop file | Pass. Two abstentions (~$0.0045); stop file and changed target refused. |
+| 2026-10-05 | Paper `evaluate_exits` on a public snapshot | Pass. Time-triggered close from captured bids; $0. |
+| 2026-10-06 | Vertex smoke with `gemini-flash-latest` at `us-central1` | Fail (404, unsupported pair); superseded below. |
+| 2026-10-06 | Vertex `gemini-3.5-flash` diagnostic cycle | Fail/inconclusive (`TypeError`); no order. |
+| 2026-10-06 | Two Vertex `gemini-3.5-flash` tool-integration cycles | Pass. Abstain and fail-closed `rejected`; ~$0.028. |
+| 2026-10-07 | Synthetic plan through CLI `consume` | Fail closed (stale book); retried below. |
+| 2026-10-07 | Same `consume` workflow retry | Pass. Filled from fresh quote; duplicate consume made no write. $0. |
+| 2026-10-08 | OpenRouter `gpt-4.1-mini` in-memory cycle | Pass. Approved; $0.0017. |
+| 2026-10-08 | Platform `drain()` against a temporary Pub/Sub topic | Pass. One publish/ack; temporary resources deleted; ~$0. |
+| 2026-10-12 | Direct HTTP publishing into a local Consumer | Pass. Outbox acked; Consumer filled from its own quote. Earlier attempts found `--draft`/`--context`, project, and reviewer-reason bugs (≤$0.28). |
+| 2026-10-12 | Vertex cycle with the previously crashing draft | Pass. Rejected by review; $0.046. |
+| 2026-10-12 | `events.publish()` to a temporary Pub/Sub topic | Pass. Payload and `event_id` matched; resources deleted; ~$0. |
+| 2026-10-12 | Vertex cycle, outcome into local Consumer | Pass. Plan-check rejection; Consumer ignored outcome (204). $0.059. |
+| 2026-10-14 | `plan_inputs` and discovery fixes, OpenRouter runs | Pass. 5/5 turns reached real edge checks; discovery ordered by 24h volume. ~$0.03–0.05/run. |
+| 2026-10-14 | Vertex Google Search research, four turns | Pass. Research `ok`, evidence cited; all abstained. $0.34. |
+| 2026-10-14 | Deployed job after plan-check schema fix | Pass. Accepted plan, events acked, paper fill; $0.12. Two earlier attempts hit transient Vertex 503. |
+| 2026-10-15 | BYOK OpenRouter for all roles | Pass. Research `unavailable` as designed; abstained; $0.0031. |
+| 2026-10-15 | Local end-to-end paper chain into independent Consumer (snapshot identity fix) | Pass. Accepted plan published; Consumer filled in its own ledger; ~$0.006. |
+| 2026-10-15 | OpenRouter web-search research provider | Pass. 5 cited sources; abstained; $0.031. |
+| 2026-10-15 | `analyze_stock_history` / `analyze_crypto_history` tools | Pass. Yahoo and CCXT bars returned bounded indicators. |
+| 2026-10-16 | `analyze_polymarket_history` and `polymarket-eval` on BTC 5m | Pass. Baseline Brier 0.247; no agent forecasts yet. |
+| 2026-10-16 | Up/Down market capture | Pass after fixes (Up/Down acceptance, 5 s capture skew). |
+| 2026-10-16 | Nine BTC 5m Vertex cycles | Pass after five tool fixes (ADK `State`, bar clamp, CCXT timeout, abstention probability, abstain check). Abstained; ~$1.2. |
 
 ## Two-sided paper verification (2026-10-17)
 
-- Local live capture loaded distinct Up and Down token books for a BTC 5m
-  window (Up ask 0.876, Down ask 0.122). These are real independent books, not
-  complemented quotes.
-- Two local Vertex cycle attempts returned no structured proposal and failed
-  closed with no fills. A third local production cycle completed, called the
-  CCXT crypto-history tool, and abstained with P(Up)=0.50. Recorded estimated
-  cost for the completed turn was $0.17163075; the failed attempts' actual model
-  spend was unavailable. No platform operations or real orders were run.
-- Independently verified the external v2 boundary with a deliberately synthetic
-  NO plan (not a model forecast): Harness captured market 5774405 and emitted a
-  v2 NO event; the Consumer subprocess validated it, fetched fresh venue data,
-  and recorded a $1 paper fill at Down price 0.49 for token
-  `110989905685615221413447094250795581003563021459676813405234267222963102655254`.
-  Temporary consumer journal was removed. This is contract/fill verification,
-  not evidence of a profitable strategy or an agent-selected bet.
-- Offline checks cover NO proposal → plan check → independent review → v2
-  event, dual-book capture/reload, real NO depth/edge/exit quotes, token mismatch
-  rejection, NO-winning settlement/replay, and retained v1 YES compatibility.
+- Live capture loaded independent Up and Down books for a BTC 5m window.
+- Two cycles failed closed with no proposal; a third abstained at P(Up)=0.50
+  ($0.17).
+- A deliberately synthetic NO plan produced a v2 event; the Consumer validated
+  it and recorded a $1 paper fill at Down 0.49. This verifies contract and fill,
+  not strategy.
+- Offline checks cover the NO path, dual-book capture, NO quotes, token mismatch
+  rejection, NO settlement/replay, and v1 YES compatibility.
 
 Deployment checks are recorded in [`../../platform/docs/deployment.md`](../../platform/docs/deployment.md).
 
 ## Agent-selected BTC paper bet (2026-10-17)
 
-After commit `b5dfb91`, ran at most three local Vertex cycles, stopping at the
-first fill. The first cycle returned no structured proposal and recorded a
-failed turn. The second produced a reviewed YES/Up plan for
-`btc-updown-5m-1792241700` (market `5775008`, 12:55–13:00 UTC): P(Up)=0.75,
-stake $5, maximum entry 0.65. Two oversized attempts were rejected by policy
-before the trader revised to a passing plan. The independent reviewer approved.
-The in-process paper journal recorded 7.8125 Up shares at 0.64, entry fee $0.10,
-total cost $5.10. This is an actual agent-selected paper fill, not a seeded draft.
-The completed cycle's estimated model cost was $0.0807708. The journal books a
-$0.7038528 conservative reservation for the failed first cycle; its actual
-provider spend was unavailable. No event sink, platform operations, or real
-orders were used. Initial public checks reported pending resolution. A later
-Gamma check returned `resolved_yes`; the local journal was settled and replayed
-with zero open positions and one winning trade. Settlement proceeds after the
-paper simulator's settlement fee were $7.65625, yielding realized paper P&L of
-$2.55625 (+50.1% on the $5.10 entry cost), before model costs. The journal books
-$0.78462360 in total model costs, including the conservative failed-turn
-reservation; this is not a confirmed provider bill. This single winning trade
-verifies the local paper lifecycle, not strategy profitability.
-Journal: `/var/folders/z8/cpj4kjks381d6vkbf5wdff5h0000gp/T/opencode/btc-paper-bets-z7m6pw9w`.
-
-Next local task: collect a bounded set of forward BTC 5m forecasts and score
-them with `polymarket-eval`, reporting Brier, market baseline, coverage, model
-failures, and paper P&L separately. Keep platform execution explicit and off.
+Within three bounded local cycles, the second produced a reviewer-approved
+YES/Up plan (P(Up)=0.75, $5 stake) after policy rejected two oversized attempts.
+The paper journal filled 7.8125 shares at 0.64 ($5.10 total). The market
+resolved YES; realized paper P&L was $2.55625 before model costs. Booked model
+costs were $0.7846, including a conservative failed-turn reservation. This
+verifies the local paper lifecycle, not profitability.
 
 ## Collection preparation (2026-10-18)
 
-Operator approved the raw-event Platform archive and local series-selection
-capability, explicitly excluding the 20-window run or any forecasting session.
-Platform deployment and one synthetic publish/query passed; evidence and
-retention/IAM boundaries are in
+The operator approved the Platform raw-event archive and series selection, but
+not a forecasting session. Archive evidence is in
 [`../../platform/docs/deployment.md#event-archive`](../../platform/docs/deployment.md#event-archive).
-
-`uv run python -` called `discover_markets(series="btc-updown-5m", now=<UTC>)`
-once and asserted the result matched the current 300-second clock window.
-At `2026-10-18T06:58:37.265645+00:00`, one public Gamma GET returned market
-`5798498`, URL `https://polymarket.com/event/btc-updown-5m-1792306500`, closing
-at 07:00 UTC. One GET bounded to 5 s / 256 KiB, zero model calls, estimated
-cost $0, no journal, paper fill, order, or temporary artifact.
-
-Offline checks: `uv sync --all-groups --all-extras`, all 338 Harness unit tests,
-`uv run ruff check .`, `uv run ty check .`,
-`uv run chrysopoeia validate --json`, and agent import passed. Eight Platform
-contract tests passed. Cadence tests advance a fake clock and verify that a
-failed capture waits for the next boundary. CLI tests cover the default 300 s
-series cadence and rejection of incompatible intervals. A real-model
-`run --series` session remains unverified by explicit operator choice; do not
-claim the forward benchmark is complete. See [collection usage](collection.md).
+One public GET confirmed series discovery returns the current 300-second BTC
+window. Offline: 338 Harness and 8 Platform tests passed. A real-model series
+session remains unverified; see [collection usage](collection.md).
 
 ## Config-only operating settings (2026-10-18)
 
-The operator approved removing operating-setting flags and migrating the
-deployed job to a bundled two-cycle config, including one bounded two-cycle
-paper verification. This does not authorize the BTC benchmark. The earlier
-`--series` CLI syntax is historical: current selection is `[venue].series` in
-`configs/btc5m.toml`. Other historical commands above retain their original syntax.
+Operating-setting flags were removed; selection is `[venue].series` in the
+bundled TOML (older commands above keep their original syntax). Offline gates
+passed (341 tests, `uv build`). `configs/platform.toml` bounds the deployed job
+to two cycles, a $1.50 session ceiling, $5 daily model budget, $100 paper loss
+halt, 900-second task timeout, and no retries.
 
-Offline gates passed: `uv sync --all-groups --all-extras`, all 341 Harness
-tests, `uv run ruff check .`, `uv run ty check .`,
-`uv run chrysopoeia validate --json`, agent import, and `uv build`. All four
-bundled TOML profiles loaded. Tests cover removed flags, strict config bounds,
-profile routing into the loop/cycle, zero budget stopping before external work,
-and rejecting external exposure in the journal-owned run loop. Ten Platform
-contract tests cover the bundled config and setting-free job arguments.
-
-The Platform verification uses `configs/platform.toml`: at most two cycles,
-$1.50 conservative session cost ceiling, $5 daily model budget, $100 paper loss
-halt, a 60-minute configured session window bounded externally by the existing
-900-second job task timeout, and no task retries. Expected actual completed-cycle
-cost is about $0.35; provider billing is not measured. The separate BTC profile
-is only validated offline, not executed.
-
-The built amd64 image also passed both default/platform `validate --json`
-checks and rejected the removed `--max-cycles` flag with exit 2 before model
-work. Registry upload exceeded the initial 120-second build-command timeout
-and a separate 600-second push timeout; no job update was applied during these
-attempts. The migration's deployed boundary is not verified until the image
-pin, job update, and bounded execution evidence are recorded below.
-
-After the final large layer uploaded, the manifest request returned EOF; one
-manifest retry succeeded without rebuilding. Image
-`sha256:d6c13fc6fcababcae0c62066513b0d55c447af0fb86f460c5176d6589a286840`
-was pinned through Pulumi. Only the job image, config environment variable,
-and arguments changed; 18 other resources remained unchanged, including the
-protected/retained archive. Post-apply preview reported 19 unchanged.
-
-One approved invocation of `platform/run.sh job
---args=run,--journal=/mnt/journal/config-only-20261018-01 --wait` created execution
-`chrysopoeia-cycle-local-nr6tj`, which exited successfully with
-`stop_reason=max_cycles` and `cycles_run=2`. The first turn filled a $1 paper
-plan on market `5315588` at 0.14 (7.142857 shares, $0.02 fee, $1.02 total cost).
-Its estimated model cost was $0.17610935. The second turn failed and booked the
-conservative $0.7038528 reservation; actual provider spend is unknown. Total
-booked model cost was $0.87996215, below the $1.50 session ceiling. The report
-showed realized P&L $0 and marked unrealized P&L -$0.11, before model costs.
-No win rate or settled profitability claim is supported.
-
-The journal recorded two admitted/finished turns, one fill, and two outbox
-acknowledgements. A single date-filtered BigQuery query capped at 100 MiB
-confirmed one copy each of `outcome-4c831aa9a771c397bb8ba4e1` (`turn_outcome`)
-and `turn-4c831aa9a771c397bb8ba4e1` (`trade_plan_ready`), with matching attributes;
-the original synthetic archive row remained present. The failed turn did not
-produce an outcome event. Query/storage billing was not measured; incremental
-verification cost beyond model work is expected negligible.
-
-The authoritative journal is retained at
-`gs://PROJECT_ID-chrs-journals-local/config-only-20261018-01/chrysopoeia.jsonl`.
-It contains one open paper position; the finished job is not monitoring it.
-No real orders, Consumer deployment, scheduler, or BTC benchmark were run.
-This verifies deployed config loading, caps, paper behavior, and event archival;
-it does not verify consistent model success or the separate BTC profile's live
-forecast quality.
+One deployed two-cycle run exited at `max_cycles`: one $1 paper fill and one
+failed turn, $0.880 booked (under $1.50). Both events reached BigQuery. The
+journal is retained at
+`gs://PROJECT_ID-chrs-journals-local/config-only-20261018-01/chrysopoeia.jsonl`
+with one unmonitored open position. This does not verify consistent model
+success or BTC forecast quality.
 
 ## BTC-only enforcement and blocked benchmark (2026-10-18)
 
-Operator hard requirement: during development BTC 5m Up/Down is the only
-automated venue market. `[venue].series` is now required and restricted to
-`btc-updown-5m`; the CLI discovery/run path and the trader's discovery tool are
-bound to it. `uv run chrysopoeia discover` returned exactly the current window
-(market `5818403`, `Bitcoin Up or Down - October 18, 9:50AM-9:55AM ET`), one
-public GET, no model calls.
-
-Attempts under the required binding exposed a pre-existing trader failure:
-
-| Run | Windows | Outcome | Booked cost |
-| --- | --- | --- | --- |
-| Deployed job `chrysopoeia-cycle-local-jj49n` (2-cycle smoke) | `5818529`, `5818549` | both turns failed, no proposal | $1.4077056 (2 × reservation) |
-| Local `btc5m` run `~/chrysopoeia-journals/btc5m-20261018T1405` | `5818582` | one turn failed, no proposal; stopped cleanly (`stop_reason=stopped`) | $0.7038528 |
-
-All three failed with `pydantic ValidationError ... ProposalOutput ... input_value=None`
-raised at the downstream workflow node, i.e. the trader agent ended without a
-structured proposal. No `turn_outcome` or `trade_plan_ready` events were
-produced, so nothing from these turns reached the archive. Actual provider spend
-is unknown because a failed turn books its full conservative reservation.
-
-A contributing deployment defect was found and fixed: the image installed the
-wheel without the lockfile, resolving ADK 2.12.0/pydantic 2.14.1 versus the
-verified lock at ADK 2.8.0/pydantic 2.13.4. `platform/build.sh` now exports the
-frozen lock and installs it with `--no-deps`; the rebuilt image reports the
-locked versions and validates both profiles. The job was repinned and one
-`validate --json` execution (`chrysopoeia-cycle-local-7jccr`) succeeded. The
-local failure above used the verified lock, so drift is not the sole cause.
-
-The 20-window forward benchmark is therefore **blocked**: further windows would
-spend the ceiling without producing forecasts. Fix the trader's missing-output
-path (for example, drop redundant discovery/capture tools from the
-already-captured cycle or add one bounded retry), verify with two windows, then
-rerun the benchmark with a fresh journal. No Brier/coverage/P&L evidence exists
-for this sample.
+`[venue].series` was required and restricted to `btc-updown-5m`. One deployed
+two-cycle smoke and one local run all failed with `ProposalOutput=None` (no
+structured proposal, $2.11 booked as reservations). Image dependency drift was
+found and fixed (the image now installs the frozen lock), but the local failure
+used the verified lock, so drift was not the sole cause. The 20-window benchmark
+was blocked pending a fix; no Brier/coverage/P&L evidence exists for it.
 
 ## Missing trader output diagnostics (2026-10-19)
 
-Operator approved diagnostics only, not a new model run, retry, budget change,
-or tool change. A failed turn can now carry an optional `failure` object on
-its existing `turn_finished` journal record: `error_code`, `message`, and
-`model_calls`. The count is the cycle's cost-ledger reservations, including
-research/reviewer calls when present, not confirmed provider requests or billing.
-Denied calls that never reserve are not counted.
+A failed turn can carry an optional `failure` object on `turn_finished`:
+`error_code`, `message`, and `model_calls` (cost-ledger reservations, not
+provider requests). Only recognized Harness codes and allowlisted reasons are
+recorded; otherwise `TRADER_OUTPUT_MISSING`. Prompts, provider bodies, and model
+text are never copied. Existing journals replay unchanged; failure costs and
+no-retry behavior are unchanged.
 
-Only recognized Harness cost error codes and allowlisted deterministic reasons
-are recorded. Unknown provider codes/messages or missing output produce
-`TRADER_OUTPUT_MISSING` with cause unavailable; prompts, provider bodies, and
-model text are not copied. This remains a local diagnostic, not a forecast or
-published outcome. Existing journals replay without requiring the optional field.
-Failure costs, admission, execution policy, cancellation, and no-retry behavior
-are unchanged.
-
-Offline fake-model checks exhaust a one-call ceiling through the real ADK loop,
-reproduce `ProposalOutput=None`, and assert that replayable failed-turn evidence
-contains `MODEL_COST_POLICY_DENIED`, the ceiling reason, and one reserved call.
-Separate checks cover empty trader output and rejection of arbitrary provider
-text.
-
-One approved local diagnostic cycle ran at 2026-10-19T08:56Z on the default
-BTC profile (`max_cycles=1`, no event sink): market capture, Vertex calls, and
-the full paper decision completed, the turn **abstained** (not failed), and
-$0.21271855 actual estimated model cost was booked under the $5 session budget.
-No `failure` field was recorded because the turn did not fail. One public
-window, no orders, no event sink, no platform change; the temporary journal is
-retained at `~/chrysopoeia-journals/diag-20261019T085634`.
-
-This shows the missing-output failure is intermittent, not deterministic, and
-the paid path still works. The new failure branch remains live-unverified
-because no failure occurred; the 2026-10-18 cause is still unknown. All 343
-offline unit tests, Ruff, ty, config validation, agent import, dependency sync,
-and `git diff --check` passed. Do not treat one abstention as forecast-quality
-or benchmark evidence; no Brier/coverage/P&L sample exists.
+Offline fake-model checks reproduce `ProposalOutput=None` and assert the
+recorded failure. One live diagnostic cycle abstained ($0.213), so the failure
+is intermittent and the failure branch remains live-unverified (343 tests).
 
 ## Research switch and cost reduction (2026-10-19)
 
-Operator approved an optional validated `[research] enabled` setting (default
-`true`) and disabling it in `configs/btc5m.toml` and `configs/platform.toml`.
-The BTC trader keeps the 1-minute OHLCV analysis tool; only the pre-trader
-grounded/web research step is skipped, and its cost allowance leaves the
-reservation.
-
-One bounded local cycle ran at 2026-10-19T09:04Z from a temporary copy of the
-BTC profile capped at one cycle and a $1.50 budget: the turn abstained,
-`research` recorded `unavailable` / `research disabled` with `query_count=0`,
-and actual estimated model cost was **$0.04432065** against the $0.2838528
-reserved ceiling and $1.50 budget. Two plan checks ran. The comparable
-research-enabled cycle on 2026-10-19 cost $0.21271855, so measured cost fell
-about 79%. One public window, no orders, no event sink, no platform change;
-journal retained at `~/chrysopoeia-journals/nosearch-20261019T090437`.
-
-Recorded grounding cost was 11 queries × $0.014 = $0.154 of that $0.2127
-(about 72%), which motivated the switch. Vertex's monthly free grounding tier
-may make actual billing lower; the per-query figure is our recorded estimate,
-not a confirmed invoice. Offline coverage: 344 unit tests, Ruff, ty, config
-validation, and agent import passed. No benchmark or Brier evidence is claimed.
-
-The deployed job was then rebuilt, repinned (`sha256:13eac92e…`), deployed, and
-verified with a no-model `validate --json` execution
-(`chrysopoeia-cycle-local-mdptj`, exit 0). Its output confirms
-`research={'enabled': False}`, `series='btc-updown-5m'`, `max_cycles=2`, and a
-$1.50 session ceiling, so the deployed profile now matches the switch. The same
-build moved the dependency install into its own Docker layer so ordinary code or
-TOML changes should push only small layers; that speedup is unmeasured until the
-next such build, and no model cycle ran during this rollout.
+`[research] enabled` (default `true`) is disabled in `configs/btc5m.toml` and
+`configs/platform.toml`; the trader keeps its OHLCV tool. One bounded cycle with
+research off abstained at $0.0443 versus $0.2127 with research on (about 79%
+lower; grounding was about 72% of that cost). The deployed job was repinned and
+a no-model `validate --json` confirmed `research={'enabled': False}`.
 
 ## BTC window baseline and forecast offset (2026-10-19)
 
-Operator approved two trader improvements. First, a deterministic baseline
-evidence record per BTC cycle: window open, latest public last price, delta in
-bps, seconds remaining, recent 1-minute volatility, and a normal-approximation
-P(Up), attached snapshot-bound as `BTC 5m deterministic window baseline`. It is
-measured evidence, never an instruction, and policy still decides. Second,
-`[venue].forecast_offset_seconds` (BTC profiles: 120) makes the loop wait until
-a window has elapsed that long before forecasting, instead of forecasting at the
-boundary when almost nothing is known.
-
-Offline: window math, monotonicity/clamping, insufficient-history rejection,
-optional ticker/history failure, discovery offset and the 30-second
-close guard, loop sleep target, config validation, and cycle evidence wiring are
-covered. 354 unit tests, Ruff, ty, config validation, and agent import pass.
-
-Two bounded local cycles verified the live boundary (research off, 120s offset,
-one cycle each, no event sink). The first cost $0.02586375 and exposed a
-stale-price bug: `last` came from the newest closed 1-minute candle, equal to the
-window open, so delta was 0.0 and P(Up) 0.500. The fix reads the public last
-price and the window-start candle's open. The second cycle cost $0.05032995 and
-attached `window_open=81919.94 last=81926.60 delta_bps=+0.8
-seconds_remaining=93 minute_vol=0.000590 baseline_p_up=0.544`; the trader
-returned a plan at p=0.75. Because the session started after the offset, it
-forecast 93 seconds from close — the offset is a minimum elapsed time, not an
-exact schedule. No orders, no benchmark, no Brier sample, and no platform change;
-no multi-window run has been scored since the fix.
+Each BTC cycle attaches a deterministic baseline evidence record (window open,
+last price, delta bps, seconds remaining, 1-minute volatility, normal-approx
+P(Up)); it is evidence, never instruction. `[venue].forecast_offset_seconds`
+(120 in BTC profiles) is the minimum elapsed window time before forecasting,
+not an exact schedule. Offline coverage passed (354 tests). Two live cycles
+($0.026, $0.050) found and fixed a stale-price bug; the second attached a
+correct baseline. No multi-window run has been scored since.

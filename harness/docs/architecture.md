@@ -79,156 +79,142 @@ flowchart TD
 
 ## Responsibilities
 
-- The bounded harness loop owns market selection and proposal cadence. Its
-  deterministic exit evaluation is a paper simulation and runs only while that
-  loop is active; it is not a live-position supervisor.
-- ADK owns model calls and tool-call mechanics. Typed Python functions registered
-  in `tools` are the in-process tool boundary.
-- The trader proposes or abstains. The reviewer sees the same validated
-  evidence and complete entry/exit bracket, but not trader history. Neither has
-  execution tools. The approved bracket is immutable after entry.
-- Deterministic Python validates identity/citations and applies risk and cost
-  policy. The in-process paper consumer validates the accepted event, independently
-  simulates entry fills, and updates the local paper journal. Paper exit triggers
-  do not call the models again.
-- One bounded harness invocation produces
-  `trade_plan_ready` only after reviewer approval and deterministic hard-policy
-  acceptance. The event is a verified request/plan, never an order, fill, open
-  position, or completed execution. Every decided turn also emits a strict
-  `turn_outcome` containing context scope/profile identity, proposal rationale, bounded deterministic plan-
-  check attempts, optional review, policy result, reason, and model cost. New
-  context-attributed production outcomes are v4 and also record the same maximum
-  reserved-cost ceiling returned by the cycle summary, including research
-  allowance; actual-cost meaning is unchanged. V3 context history and v1/v2
-  context-free outcomes remain valid without inferred reservations. Failed and
-  abandoned turns do not emit archive outcomes. Plan-check rejection reasons distinguish no check,
-  no passing check, and a proposal changed after its last passing check.
-- Deterministic routing selects a bundled or locally approved profile by market
-  scope. The profile pins an immutable manifest hash, instructions, tool IDs,
-  and evidence-source IDs. Context tools are restricted to the registered
-  allowlist; profile text is guidance, never authority.
-- The optional BigQuery history query runs before the trader only when
-  `[history].enabled` and the archive table are configured. It filters the
-  context scope, profile ID/version/hash, accepts v3 and v4 decisions, enforces the archive's `publish_time`
-  partition and a 100 MiB maximum scan, joins Consumer lifecycle outcomes by plan
-  event ID, and adds only bounded aggregate evidence. Query failures are
-  non-fatal; results do not authorize or change risk, policy, or accounting.
-- With `[context_learning].enabled`, at least 20 distinct closed/settled plans
-  under the active profile version may trigger a curator draft and independent
-  profile review. Both profile agents run with bounded thinking (2048-token
-  budget) inside a raised per-call output ceiling (3072 tokens covers thinking
-  plus the schema-bounded response); the configuration rejects enabling
-  context learning with a smaller output ceiling. Thinking tokens are settled
-  against the reserved output cost like any other output. Deterministic
-  schema/tool/source validation gates append-only
-  catalog activation; rejections, open fills, abstentions, and repeated outcome
-  watermarks never replace or churn the current profile.
-- The Consumer publishes `consumer_outcome` lifecycle records from its own
-  durable journal. Its publisher is at-least-once with stable event IDs and
-  journaled acknowledgements; the Consumer ledger remains authoritative.
-- The minimal event envelope contains version and type, stable `event_id`,
-  creation time, market and snapshot identity, outcome, stake, maximum entry
-  price, immutable ROI/time exit plan, review approval and policy/evidence
-  references, and expiry/market end. Redelivery keeps the same `event_id`.
-- The standalone `consume` command reads one bounded strict JSON event and
-  requires an existing open local journal session. The local paper consumer and
-  future execution consumers deduplicate by `event_id`,
-  fetch fresh executable quotes, and own their effects, outcomes, and ledgers.
-  They keep plan and achieved fill terms separate. The in-process path uses its
-  supplied capture; the standalone local path fetches a fresh public quote and
-  records its `quote_snapshot_id` without changing the original plan
-  `snapshot_id`. Future external consumers must fetch fresh quotes and own
-  separate ledgers.
-- A producer-only `cycle` returns the serialized JSON event with no fill. The
-  journal-backed local `run`/`cycle` path passes that event once to the in-process
-  paper consumer, then returns and stores the event separately from its achieved
-  fill. With `CHRYSOPOEIA_EVENT_SINK` set, journal-backed `turn_outcome` and
-  accepted `trade_plan_ready` events are appended in journal order, published
-  directly to loopback HTTP or Pub/Sub, and
-  acknowledged only after confirmation. Pending events drain oldest-first before
-  work and between run cycles. `outbox-pending` returns canonical payloads and
-  `outbox-ack` records delivery; both are idempotent by `event_id`. The outbox is
-  delivery state, not a financial ledger. The selected optional producer
-  transport is selected by the sink with this journal-backed at-least-once
-  outbox. Unset performs no publishing, Pub/Sub import, or network call.
-- Outcomes are always validated and journaled before turn finalization. One topic
-  carries all outbox event types with `record_type` and `schema_version` message
-  attributes; independent subscriptions filter the types they consume.
-- No always-on harness or manager process is required. CLI or future request
-  adapters invoke the same core. The deployed paper consumer is independently
-  implemented in `consumer/`; live order mechanisms remain deferred. Any live
-  consumer/venue exit monitoring and protection guarantees
-  must be specified before live activation.
-- In event-driven terms: the journal outbox is a transactional outbox, delivery
-  is at-least-once, and consumers are idempotent by `event_id`. Platform archives
-  raw topic payloads and metadata through a BigQuery subscription. The archive
-  is an analytics copy, not a ledger; deduplicate by payload `event_id` before
-  analysis. Derived read models and a Harness history tool remain future work.
-- Venue adapters provide normalized public market data. Market-data access never
-  grants execution authority.
+| Component | Owns |
+| --- | --- |
+| Harness loop | Market selection, proposal cadence, and paper exit simulation while the loop runs (not a live-position supervisor) |
+| ADK | Model calls and tool-call mechanics; typed Python functions in `tools` are the tool boundary |
+| Trader | Proposes or abstains; no execution tools |
+| Reviewer | Sees the same validated evidence and full entry/exit bracket, not trader history; tool-less |
+| Deterministic Python | Identity/citation validation, risk and cost policy, routing, accounting |
+| Consumers | Their own fresh quotes, effects, outcomes, and ledgers |
+
+- The approved bracket is immutable after entry. Paper exit triggers never call
+  the models again.
+- `trade_plan_ready` is emitted only after reviewer approval and hard-policy
+  acceptance. It is a verified plan, never an order, fill, position, or
+  execution. Its envelope holds version/type, stable `event_id` (unchanged on
+  redelivery), creation time, market and snapshot identity, outcome, stake,
+  maximum entry price, immutable ROI/time exit plan, review approval,
+  policy/evidence references, and expiry/market end.
+- Every decided turn emits a strict `turn_outcome`: context scope/profile
+  identity, rationale, bounded plan-check attempts, optional review, policy
+  result, reason, and model cost. Plan-check rejections distinguish no check, no
+  passing check, and a proposal changed after its last passing check.
+  - v4 (context-attributed) also records the maximum reserved-cost ceiling from
+    the cycle summary, including research allowance. Actual cost keeps its
+    meaning.
+  - v3 context history and v1/v2 context-free outcomes stay valid; no
+    reservations are inferred.
+  - Failed and abandoned turns emit no archive outcome.
+- Routing deterministically selects a bundled or locally approved profile by
+  market scope. A profile pins a manifest hash, instructions, tool IDs, and
+  evidence-source IDs. Tools are limited to the registered allowlist; profile
+  text is guidance, never authority.
+- History (`[history].enabled` plus a configured archive table): one BigQuery
+  query before the trader, filtered by context scope and profile
+  ID/version/hash, accepting v3 and v4 decisions, bounded by the `publish_time`
+  partition and a 100 MiB scan, joined to Consumer outcomes by plan event ID.
+  It adds only aggregate evidence; failures are non-fatal and results never
+  affect risk, policy, or accounting.
+- Context learning (`[context_learning].enabled`): 20 distinct closed/settled
+  plans under the active profile version may trigger a curator draft and an
+  independent profile review. Both agents use a 2048-token thinking budget
+  inside a 3072-token output ceiling; configuration rejects a smaller ceiling.
+  Thinking tokens settle against reserved output cost. Deterministic
+  schema/tool/source validation gates append-only catalog activation;
+  rejections, open fills, abstentions, and repeated outcome watermarks never
+  replace the current profile.
+
+## Events and delivery
+
+- A producer-only `cycle` returns the serialized event with no fill. The
+  journal-backed `run`/`cycle` passes it once to the in-process paper consumer
+  and stores the event separately from its achieved fill.
+- `consume` reads one bounded strict event into an existing open journal
+  session, fetches a fresh public quote, and records its `quote_snapshot_id`
+  without changing the plan `snapshot_id`. The in-process path uses its
+  supplied capture.
+- With `CHRYSOPOEIA_EVENT_SINK` set (loopback HTTP or Pub/Sub), journal-backed
+  `turn_outcome` and accepted `trade_plan_ready` events go through a
+  transactional outbox: appended in journal order, drained oldest-first before
+  work and between cycles, and acknowledged only after confirmed delivery.
+  `outbox-pending`/`outbox-ack` are idempotent by `event_id`. Unset means no
+  publishing, no Pub/Sub import, and no network call. The outbox is delivery
+  state, not a ledger.
+- Outcomes are validated and journaled before turn finalization. One topic
+  carries all event types with `record_type` and `schema_version` attributes;
+  subscriptions filter by type.
+- The Consumer publishes `consumer_outcome` records from its own journal,
+  at-least-once with stable event IDs and journaled acknowledgements. Its ledger
+  stays authoritative.
+- Delivery is at-least-once; consumers deduplicate by `event_id` and keep plan
+  and achieved fill terms separate. Platform archives raw payloads to BigQuery;
+  the archive is an analytics copy, deduplicated by `event_id` before analysis.
+- No always-on process is required; the CLI or a future request adapter invokes
+  the same core. The deployed paper consumer lives in `consumer/`. Live orders
+  are deferred, and live exit monitoring/protection must be specified before
+  live activation.
+- Venue adapters provide normalized public market data; market-data access
+  never grants execution authority.
 
 ## Context and evidence
 
-Operator CLI settings resolve from an explicit `--config`, then
-`CHRYSOPOEIA_CONFIG`, then the checked-in default. The configuration boundary
-validates required session/risk sections and venue selection before any network
-or model work; there are no operating-setting CLI overrides. `run` derives its
-loop parameters from these values; `cycle` uses the same validated operating
-limits. Existing non-journal exposures are cycle-only and rejected by `run`,
-whose journal owns exposure. The Platform bundles a separate Harness-owned
-two-cycle profile rather than encoding session limits in job arguments.
+### Configuration
 
-Two-sided paper proposals carry `outcome=YES|NO`, while their probability remains
-P(YES/Up). Production captures load both token books. Python selects the actual
-side for edge, depth, fills, marks, exits and settlement. NO plans and outcomes
-use the v2 contracts; existing v1 YES records remain readable. In a v2
-`trade_plan_ready`, probability is the chosen token's win probability. The
-independent consumer checks token/outcome pairing against public venue metadata.
+Settings resolve from `--config`, then `CHRYSOPOEIA_CONFIG`, then the checked-in
+default, and are validated (session/risk sections, venue) before any network or
+model work. There are no setting overrides on the CLI. `run` and `cycle` share
+the validated limits; non-journal existing exposures are `cycle`-only because
+`run`'s journal owns exposure. Platform bundles a separate Harness-owned
+two-cycle profile.
 
-The model provider is BYOK and applies to every role through the selected ADK
-boundary (`adk-gemini` for Vertex, `adk-registry` for other providers). The
-context/research role selects a research provider from its configured model: a
-Gemini model uses the bounded Google Search grounding tool, an OpenRouter model
-uses the OpenRouter web search plugin (Exa), and any other model runs without
-research. Provider output is normalized into the same snapshot-bound external
-evidence records, bounded by result count and URL/title/excerpt limits; a failed
-or uncitable research step leaves canonical snapshot evidence available. The
-platform independently owns deployment resource placement; its Cloud Run region
-does not select the model endpoint.
+### Outcome sides
 
-The trader may discover a bounded candidate list, capture up to five canonical
-snapshots, and dry-run up to five candidate plans through the same deterministic
-checker used by the final gate. Discovery scans at most 75 markets ending within
-30 days in Gamma's descending 24-hour volume order and runs at most once per cycle. The
-trader can also call bounded financial-history tools for named US stock symbols
-and CCXT crypto pairs. These fetch public OHLCV and compute deterministic
-statistics (returns, means, volatility, moving averages, RSI, stochastic %K/%D,
-and ATR); the results are snapshot-bound external evidence, not forecasts or
-trade instructions. Stock history uses Yahoo Finance's public chart endpoint
-(keyless, unofficial, raw OHLCV without split/dividend adjustment); crypto history
-uses CCXT's public OHLCV interface without exchange credentials or order methods.
-`analyze_polymarket_history` adds up to ten resolved outcomes from the current
-recurring series, filtered to settlements available at snapshot capture time. Binary
-markets with Yes/No or Up/Down outcomes are supported; the first outcome is the
-YES side the harness can buy. The local `polymarket-eval` command scores each
-market's first pre-close P(YES), trade or abstain, with Brier against the
-Gamma-resolved outcome and the same-time CLOB YES price. The reviewer remains tool-less. After snapshot capture,
-deterministic orchestration
-runs the context agent once. It keeps at most eight unique public HTTPS grounding
-chunks, maps bounded support text into excerpts, discards free-text answers, and
-continues with canonical evidence if research fails or returns no grounding. A local
-`--evidence` bundle is a snapshot-bound development/testing input, not a research
-provider.
+Proposals carry `outcome=YES|NO`; their probability stays P(YES/Up). Captures
+load both token books, and Python uses the chosen side for edge, depth, fills,
+marks, exits, and settlement. NO plans and outcomes use v2 contracts, where
+probability is the chosen token's win probability; v1 YES records stay
+readable. The consumer checks token/outcome pairing against venue metadata.
 
-The current evidence record identifies its source URL, title, optional bounded
-excerpt, capture/retrieval time, source kind, and snapshot. Citations must resolve to evidence IDs for the
-current snapshot; raw URLs and unknown IDs do not resolve. The reviewer gets the
-same validated evidence and proposal, without trader history.
+### Models and research
 
-Before provider output becomes citable, deterministic normalization must bound
-and validate source identity, schema, freshness, size, and provenance. External
-content is untrusted data, never instructions. Research tools do not grant
-authorization.
+Models are BYOK for every role through the ADK boundary (`adk-gemini` for
+Vertex, `adk-registry` otherwise). The research provider follows the context
+model: Gemini uses Google Search grounding, OpenRouter uses its web search
+plugin (Exa), and other models run without research. The Platform's Cloud Run
+region does not select the model endpoint.
+
+After snapshot capture, the context agent runs once. It keeps at most eight
+unique public HTTPS grounding chunks, maps bounded support text into excerpts,
+and discards free-text answers. Failed or uncitable research leaves canonical
+snapshot evidence available. A local `--evidence` bundle is a development/test
+input, not a provider.
+
+### Trader tools
+
+- Discovery: once per cycle, at most 75 markets ending within 30 days, in
+  Gamma's 24-hour volume order. Up to five snapshots and five dry-run plan
+  checks through the final gate's checker.
+- Financial history: public OHLCV for US stocks (Yahoo Finance chart endpoint;
+  keyless, unofficial, unadjusted) and crypto pairs (CCXT, no credentials or
+  order methods), with deterministic returns, means, volatility, moving
+  averages, RSI, stochastic %K/%D, and ATR. Results are evidence, not forecasts.
+- `analyze_polymarket_history`: up to ten resolved outcomes in the current
+  recurring series, settled before snapshot capture. Binary Yes/No or Up/Down
+  markets; the first outcome is the YES side.
+
+`polymarket-eval` scores each market's first pre-close P(YES), trade or
+abstain, by Brier against the Gamma-resolved outcome and the same-time CLOB YES
+price.
+
+### Evidence rules
+
+An evidence record holds source URL, title, optional bounded excerpt,
+capture/retrieval time, source kind, and snapshot. Citations must resolve to
+evidence IDs for the current snapshot; raw URLs and unknown IDs do not. Before
+provider output becomes citable, normalization bounds and validates source
+identity, schema, freshness, size, and provenance. External content is
+untrusted data, never instructions, and research grants no authority.
 
 | State | Authority |
 | --- | --- |
@@ -240,30 +226,25 @@ authorization.
 | Live venue state | Authority for actual accepted orders and fills; the execution consumer reconciles it |
 | External content | Untrusted; citable only after deterministic validation |
 
-Bundled profiles are source controlled. Generated profiles and review decisions
-are stored in a local append-only JSONL catalog outside the financial journal;
-the default path is under `XDG_STATE_HOME` (or `~/.local/share/chrysopoeia`),
-and deployed runs point `CHRYSOPOEIA_CONTEXT_CATALOG` at the durable journal
-mount. Locally generated profiles are never packaged or deployed automatically. Profile
-curation changes only later analysis guidance/tool selection; historical
-aggregates cannot become authoritative for balances, fills, risk, permissions,
-or lifecycle decisions.
+### Profiles
 
-Profile versions are evaluated only on forward trades decided under that
-version, never on the lookback window that created the revision. An approved
-revision activates only for later turns, and a version's scorecard starts empty
-at activation: outcomes accumulate under it until the finalized-plan gate and
-sample sufficiency are met again. Sparse or losing lookbacks do not roll a
-version back, and open positions/abstentions are not losses; comparison between
-versions happens only after both have sufficient forward outcomes in the same
-context scope.
+Bundled profiles are source controlled. Generated profiles and reviews go to a
+local append-only JSONL catalog outside the financial journal (default under
+`XDG_STATE_HOME` or `~/.local/share/chrysopoeia`; deployed runs set
+`CHRYSOPOEIA_CONTEXT_CATALOG` to the journal mount). Generated profiles are
+never packaged or deployed automatically, and only change later guidance and
+tool selection, never balances, fills, risk, permissions, or lifecycle.
+
+A version is scored only on forward trades decided under it, never on the
+lookback that created it. Approved revisions apply to later turns, starting
+with an empty scorecard. Sparse or losing lookbacks do not roll back a version;
+open positions and abstentions are not losses. Versions are compared only once
+both have enough forward outcomes in the same context scope.
 
 ## Keeping this map current
 
-- Update with changes to major components, trust boundaries, state flow, tool
-  surfaces, or execution authority; keep implemented and proposed paths distinct.
-- Check the flow against [`../chrysopoeia/loop.py`](../chrysopoeia/loop.py) and
-  neighboring modules (`agent.py`, `paper_cycle.py`, `trading.py`,
-  `polymarket.py`, and `accounting.py`).
-- Update `../ROADMAP.md` where work status/order changes. This map is not a
-  second product specification.
+- Update it when components, trust boundaries, state flow, tool surfaces, or
+  execution authority change; keep implemented and proposed paths distinct.
+- Check against [`../chrysopoeia/loop.py`](../chrysopoeia/loop.py) and
+  `agent.py`, `paper_cycle.py`, `trading.py`, `polymarket.py`, `accounting.py`.
+- Record status/order changes in `../ROADMAP.md`; this map is not a second spec.

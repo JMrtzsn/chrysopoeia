@@ -1,165 +1,55 @@
 # Chrysopoeia
 
-Chrysopoeia is a trading-agent harness for finding and paper-trading public
-markets under operator-set session limits. The operator sets limits, not market
-picks or trade ideas. The current product selects Polymarket markets and runs
-bounded decision cycles; citable research tools are planned. Authenticated
-execution is not implemented.
+An LLM trading-agent harness that forecasts public
+[Polymarket](https://polymarket.com) markets and paper-trades them under
+operator-set limits. A trader agent proposes or abstains, a separate reviewer
+agent checks the proposal, and deterministic Python owns risk, cost, fills, and
+accounting. **Paper only:** there is no authenticated execution.
 
-## Current product
+Current automation forecasts CS2 and Dota 2 match-winner markets. The platform
+profile paper-trades them; the other bundled profiles are scored-only, so
+forecasts are recorded and scored but policy blocks every fill.
 
-- A bounded local loop discovers public Polymarket markets, captures data,
-  proposes or abstains, reviews proposals, applies deterministic risk/cost
-  gates, and currently records in-process paper fills and outcomes.
-- The journal records paper sessions, turns, positions, marks, exits, settlements,
-  and model cost. `cycle` returns a reviewed and policy-accepted
-  `trade_plan_ready` JSON event; `run` consumes it in-process, while `consume`
-  consumes an existing event into the local paper journal using a fresh quote.
-  Direct event delivery through the journal outbox is optional and disabled by
-  default. `CHRYSOPOEIA_EVENT_SINK` sends `trade_plan_ready` and `turn_outcome`
-  through one loopback HTTP endpoint or Pub/Sub topic; subscriptions filter by
-  record type.
-- Google Search grounding and financial-analysis results are normalized into
-  citable snapshot-bound evidence. Paper exits are simulated by the bounded local
-  loop. The independent paper-only Pub/Sub consumer owns separate
-  entry/exit simulation and accounting. No always-on harness is required.
-- The checked-in Vertex default is `gemini-3.5-flash` at the `us` model endpoint,
-  priced at $1.65 input and $9.90 text output per million tokens. The model
-  endpoint is separate from the Cloud Run resource region.
-- The model provider is BYOK and applies to every role. Set
-  `models.adapter = "adk-registry"` with provider model IDs (OpenRouter, Ollama,
-  OpenAI, ...) and matching explicit prices; see the bundled
-  [`configs/openrouter.toml`](harness/configs/openrouter.toml), selected with
-  `--config` or `CHRYSOPOEIA_CONFIG`. Research is BYOK and selected by the
-  `context` model: a Google model uses Google Search grounding; an OpenRouter
-  model uses OpenRouter web search (Exa) with the same `OPENROUTER_API_KEY`;
-  other models run without research, and the cycle proceeds on canonical
-  snapshot evidence. Supply a provider API key only through its standard
-  environment variable (e.g. `OPENROUTER_API_KEY`); never put it in config.
-  Locally the ignored `.router_key` holds that credential as `NAME=value`, and
-  live runs extract only the value into the environment. The checked-in default
-  remains Vertex and does not auto-select another provider merely because its key
-  exists.
-- The trader has bounded, read-only financial-history tools: `analyze_stock_history`
-  fetches daily US-equity candles; `analyze_crypto_history` fetches public OHLCV
-  through CCXT (e.g. `coinbase`, `BTC/USD`, `1d`). Both return deterministic
-  measurements including means/returns, volatility, SMA/EMA, RSI, stochastic
-  %K/%D, and ATR as cited evidence. Stock history uses the keyless but unofficial
-  Yahoo Finance chart endpoint and raw OHLCV (no split/dividend adjustment);
-  crypto calls use public exchange endpoints only, with no exchange credentials
-  or order methods. `analyze_polymarket_history` returns up to ten previously
-  resolved windows from the current repeating Polymarket series, bounded to the
-  snapshot time. These tools analyze instruments/markets; they do not add
-  stock/crypto execution venues (Polymarket remains the only venue).
+## Layout
 
-## Start locally
+| Folder | Role |
+| --- | --- |
+| [`harness/`](harness/) | Agent loop (Google ADK), market capture, risk policy, paper journal, CLI |
+| [`consumer/`](consumer/README.md) | Independent paper-only consumer of `trade_plan_ready` events with its own ledger |
+| [`observer/`](observer/README.md) | Read-only insights over the BigQuery event archive |
+| [`platform/`](platform/docs/deployment.md) | Terraform for Cloud Run, Pub/Sub, BigQuery, and scheduling on GCP |
+| [`contracts/`](contracts/) | Versioned JSON schemas shared between units as data |
 
-Paper plans can buy either outcome: `YES` = Yes/Up, `NO` = No/Down. The trader's
-`probability` always means P(Yes/Up); the emitted NO v2 trade plan converts it to
-the selected token's win probability. Capture obtains both real order books;
-NO liquidity is never synthesized as `1 - YES price`. Existing v1 YES events
-remain supported. This is buying outcome tokens, not short selling.
+Units communicate only via events (one Pub/Sub topic with an outbox and
+idempotent consumers) and never import each other's code.
 
-Run from `harness/`; requires Python 3.10+ and `uv`.
+## Quickstart
+
+Requires Python 3.10+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```sh
+cd harness
 uv sync --all-groups --all-extras
 uv run chrysopoeia validate --json
-uv run adk run chrysopoeia
+uv run chrysopoeia --help
 ```
 
-Required tests and lint/type checks are listed in `harness/AGENTS.md`.
-Vertex model calls use the ambient Google project. If your default gcloud/ADC
-project is not the Chrysopoeia project, set `GOOGLE_CLOUD_PROJECT` for local
-model runs.
-For CLI syntax, run `uv run chrysopoeia --help` or a subcommand's `--help`.
-The main operator flow is `discover` → `capture` → `cycle`; `run` starts a
-bounded journal-backed session. `book`, `mark`, and `settle` inspect or update
-the paper journal. No cycle guarantees a trade.
+The main flow is `discover` → `capture` → `cycle`; `run` starts a bounded,
+journal-backed session, and `polymarket-eval` computes Brier scores once markets
+resolve.
 
-Operating settings are config-only: `[session]` sets capital, loss, cycle/time,
-cost, cadence, and scored-only limits; `[risk]` sets exposure limits and
-optional existing exposures for standalone `cycle`; `[venue]` must set
-`markets = "esports-match-winner"`. Unknown/missing settings fail validation. Old
-operating flags such as `--max-cycles`, `--bankroll`, `--interval-seconds`, and
-discovery `--limit` are rejected. Invocation inputs (`--config`, `--journal`,
-targets, input/output files, `--stop-file`, `--json`) remain flags. The default
-profile allows one `run` cycle; `configs/platform.toml` allows two with a $3
-session cost ceiling. `[session].cost_budget` limits the journal-backed `run`
-session; `cycle` uses the configured operating/daily cost limits, not run's
-cycle/deadline controls. Existing journals still enforce persisted
-capital/target/window compatibility on resume. Use a new journal for a new
-session.
+Models default to Vertex AI Gemini (uses your ambient Google project; set
+`GOOGLE_CLOUD_PROJECT` if needed). To use another provider, see
+[`configs/openrouter.toml`](harness/configs/openrouter.toml) and supply the key
+only via its standard environment variable, such as `OPENROUTER_API_KEY`. All
+operating limits live in TOML config, not flags. Model calls cost money, so set
+the session cost limits before live runs.
 
-Automated runs forecast CS2 and Dota 2 match-winner markets, scored-only: the
-forecast is recorded and published, but deterministic policy blocks every plan,
-so no paper fill or Consumer fill happens. `run` refuses a profile without
-`[session] scored_only = true`. BTC 5m automation is retired. Explicit
-`capture`/`cycle` targets remain available for verification. See the
-[collection instructions](harness/docs/collection.md). Do not start paid
-sessions without approved bounds.
+## Docs
 
-`[research] enabled` (optional, default `true`) controls the pre-trader
-web-research step. The bundled profiles enable it; grounded research inflates
-prompts, so they raise `maximum_input_tokens_per_call` to 32768, which reserves
-up to about $1.43 per cycle.
-
-To score forecasts after their markets resolve (any binary Yes/No or Up/Down
-Polymarket market; Up is treated as the YES side):
-
-```sh
-uv run chrysopoeia polymarket-eval --journal /path/to/journal
-# only one recurring series, e.g. the BTC 5m benchmark:
-uv run chrysopoeia polymarket-eval --journal /path/to/journal \
-  --series-url https://polymarket.com/event/btc-updown-5m-1792212300
-```
-
-The metric is the Brier score of the agent's first pre-close P(YES) per market,
-including abstentions, against Gamma's resolved outcome; it is compared with the
-CLOB YES price at the same forecast time. Lower is better (0.25 = always 50/50).
-Trades and trade coverage are reported separately. Open markets are counted as
-pending. No platform resources, keys, or orders are involved.
-
-## Documentation map
-
-- [Product specification](.agents-cli-spec.md): authoritative product scope,
-  safety contract, and acceptance.
-- [Harness architecture and evidence](harness/docs/architecture.md): implemented
-  flow, tool boundary, citations, and ownership.
-- [Paper accounting](harness/docs/accounting.md): journal and position contract.
-- [Harness verification](harness/docs/verification.md): live-check policy and
-  recorded model/venue runs.
-- [Platform deployment](platform/docs/deployment.md): Cloud Run shape, policy,
-  and platform verification record.
-- [Paper consumer](consumer/README.md): independent push/sweep and ledger contract.
-- [Insight observer](observer/README.md): read-only, pull-based BigQuery aggregates.
-- [Harness roadmap](harness/ROADMAP.md), [platform roadmap](platform/ROADMAP.md),
-  and [observer roadmap](observer/ROADMAP.md): independent work queues.
-- [Harness proposals](harness/docs/proposals.md): unapproved feature proposals.
-
-## Event-driven architecture
-
-The system is event-driven: each unit owns its state and publishes what happened.
-Current and planned (see roadmaps) patterns:
-
-| Pattern | Here |
-| --- | --- |
-| Domain events / event notification | One topic carries `trade_plan_ready`, context-tagged `turn_outcome` v3/v4, and optional Consumer `consumer_outcome` lifecycle events; subscriptions filter by `record_type` |
-| Transactional outbox | Harness and Consumer journals retain events until confirmed delivery |
-| At-least-once delivery + idempotent consumer | Pub/Sub retries; consumers deduplicate by stable `event_id` |
-| Dead-letter queue | Consumer subscription dead-letters after ten attempts |
-| CQRS read model / projections | Raw Pub/Sub-to-BigQuery archive is deployed; bounded context-history reads are optional and live verification is pending |
-| Decision (outcome) logging | `turn_outcome` v4 records the reservation ceiling (including research allowance) without changing actual-cost semantics; legacy v1/v2/v3 remain readable and failed turns remain excluded |
-| Retrieval-augmented context / closed learning loop | Bounded prior outcomes can be added as untrusted evidence; automatic profile creation/revision remains future work |
-
-This is not event sourcing: each unit's own ledger stays authoritative; analytics
-copies are never used for balances, risk, or lifecycle decisions.
-
-## Repository boundaries
-
-`harness/` owns the producer and versioned event schema. `consumer/` validates
-that schema as data and owns paper effects in a separate ledger. `observer/`
-reads bounded BigQuery archive aggregates without importing either package or
-retaining a ledger/projection. `platform/` owns conditional GCP resources and
-consumes pinned image digests; it imports none of the packages. See each
-folder's `AGENTS.md` for work-unit rules.
+- [Product specification](.agents-cli-spec.md): scope and safety contract
+- [Architecture](harness/docs/architecture.md) and [paper accounting](harness/docs/accounting.md)
+- [Collection](harness/docs/collection.md) and [verification](harness/docs/verification.md)
+- [Deployment](platform/docs/deployment.md)
+- Roadmaps: [harness](harness/ROADMAP.md), [platform](platform/ROADMAP.md),
+  [observer](observer/ROADMAP.md), [consumer](consumer/ROADMAP.md)

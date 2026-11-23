@@ -1,88 +1,74 @@
 # Paper accounting
 
-**Status:** Implemented for the local, single-operator paper harness. The
-product spec defines scope; `../chrysopoeia/accounting.py` and its tests define
-record validation and replay behavior.
+Implemented for the local, single-operator paper harness.
+`../chrysopoeia/accounting.py` and its tests define record validation and
+replay.
 
 ## Authority
 
-For paper mode, `chrysopoeia.jsonl` is the authoritative financial record. Each
-append is a versioned event; the book is derived by replay. Invalid or corrupt
-records fail closed. Agents do not read or mutate the journal. The future
-`trade_plan_ready` event is a verified plan/request, not a position or fill. The
-local paper journal stores that approved plan separately from its achieved fill.
-The journal-backed local path consumes that event once and records its achieved
-fill. The independent paper consumer and future execution consumers own separate
-ledgers and reconcile their effects.
-
-The journal records session configuration, admitted/finished turns, paper
-fills, marks, closes, settlements, loss halts, session closure, and model cost. It is
-local to the operator-selected directory; there is no multi-user or distributed
-ledger.
-
-Decided-turn outcomes include up to five plan-check attempts with deterministic
-reasons and the validated submitted plan, or `null` when its schema was invalid.
-The v1 contract was amended before any external consumer persisted it; journal
-replay treats older v1 outcomes without `plan_checks` as an empty list.
+- `chrysopoeia.jsonl` is the authoritative paper record. Each append is a
+  versioned event; the book is derived by replay. Invalid or corrupt records
+  fail closed. Agents never read or write the journal.
+- It records session configuration, admitted/finished turns, fills, marks,
+  closes, settlements, loss halts, session closure, and model cost, in an
+  operator-selected local directory. There is no multi-user or distributed
+  ledger.
+- `trade_plan_ready` is a plan, not a fill. The journal-backed path consumes it
+  once and stores the plan separately from the achieved fill. Independent and
+  future execution consumers keep their own ledgers.
+- Decided-turn outcomes hold up to five plan-check attempts with deterministic
+  reasons and the validated submitted plan (`null` if its schema was invalid).
+  Replay treats v1 outcomes without `plan_checks` as an empty list.
 
 ## Positions and outcomes
 
-- A fill opens one selected-outcome position per market (YES/Up or NO/Down).
-  The journal stores the selected outcome and instrument in the approved plan.
-  V1 plans remain YES-only; NO buys produce v2 plans. It records the original plan
-  `snapshot_id`, the separate fresh `quote_snapshot_id`, time, actual fill terms,
-  and the entry-approved exit plan. Proposed identity and limits remain intact
-  and separate from achieved fill provenance and terms. Older journal fills
-  without `quote_snapshot_id` remain valid.
-- Public venue captures supply bid-depth, fee-adjusted liquidation marks for
-  unrealized P&L; a failed or insufficient-depth capture adds no mark.
-- Only an unambiguous venue resolution settles a position. If the held outcome
-  wins, it pays shares less the fee; otherwise total cost is lost. Legacy fills
-  without a plan are YES positions. Unresolved or ambiguous markets are not settled.
-- The paper simulator can close the entire position against fresh executable
-  bids when an approved take-profit, stop-loss, or time trigger fires. If depth
-  cannot close all shares, it stays open for the next loop iteration. Close P&L
-  includes exit fees and counts toward the paper cumulative-loss halt. Partial
-  paper closes are not implemented.
-- Paper entry fills and exits are currently simulated in-process. Exits run only
-  while `chrysopoeia run` is active. A stop is a trigger,
-  not a guaranteed execution price. This bounded loop must not be treated as a
-  live-position monitor.
+- A fill opens one position per market on the selected outcome (YES/Up or
+  NO/Down); v1 plans are YES-only, NO buys use v2. The journal keeps the plan
+  `snapshot_id`, the fresh `quote_snapshot_id`, time, actual fill terms, and the
+  approved exit plan, separate from the proposed terms. Older fills without
+  `quote_snapshot_id` and legacy fills without a plan (YES) stay valid.
+- Marks are bid-depth, fee-adjusted liquidation values from public captures; a
+  failed or too-shallow capture adds no mark.
+- Settlement needs an unambiguous venue resolution. A winning held outcome pays
+  shares less fees; otherwise the total cost is lost.
+- On a take-profit, stop-loss, or time trigger, the simulator closes the whole
+  position against fresh executable bids. Insufficient depth leaves it open for
+  the next iteration. Close P&L includes exit fees and counts toward the loss
+  halt.
+- Exits run only while `chrysopoeia run` is active. A stop is a trigger, not a
+  guaranteed price, and this loop is not a live-position monitor.
 
 ## Turns and sessions
 
-Turn IDs are deterministic from snapshot and market identity. Repeated
-admission is a no-op. Recovery marks an unfinished turn `filled` when its fill
-was journaled, otherwise `abandoned`; it never repeats model work. A market with
-an open position cannot be admitted for another trade.
+Turn IDs derive from snapshot and market identity; re-admission is a no-op.
+Recovery marks an unfinished turn `filled` if its fill was journaled, otherwise
+`abandoned`, and never repeats model work. A market with an open position cannot
+be admitted again.
 
-The bounded `run` session persists bankroll, loss limit, target win rate, and
-window. It stops at the configured deadline, cycle/cost limit, stop request, or
-loss halt, and reports completed-trade win rate and net P&L. The target does not
-weaken risk limits or force trades.
+A `run` session persists bankroll, loss limit, target win rate, and window. It
+stops at the deadline, cycle/cost limit, stop request, or loss halt, and reports
+completed-trade win rate and net P&L. The target never weakens risk limits or
+forces trades.
 
 ## Commands
 
-- `chrysopoeia book --journal DIR` replays and displays the book.
-- `chrysopoeia mark --journal DIR` captures prices for open positions.
-- `chrysopoeia settle --journal DIR --market MARKET` settles from venue
-  resolution.
-- `chrysopoeia cycle --journal DIR ...` admits one turn and records its outcome.
-- `chrysopoeia consume --event EVENT.json --journal DIR` consumes one strict,
-  bounded `trade_plan_ready` file into an existing open session. It deduplicates
-  completed event IDs before public I/O, obtains a fresh public Polymarket quote,
-  and records either one paper fill or a deterministic rejection. Quote failures
-  occur before admission, leave no fill, and are retryable.
-- `chrysopoeia run --journal DIR ...` owns a bounded multi-cycle session.
-- `outbox-pending` and `outbox-ack` remain available for manual delivery
-  recovery. Setting `CHRYSOPOEIA_EVENT_SINK` enables oldest-first direct delivery
-  of accepted plans and decided-turn outcomes through one topic. It requires the
-  journal for event-producing commands; subscribers filter by the published
-  `record_type` attribute.
+| Command | Effect |
+| --- | --- |
+| `chrysopoeia book --journal DIR` | Replay and display the book |
+| `chrysopoeia mark --journal DIR` | Capture prices for open positions |
+| `chrysopoeia settle --journal DIR --market MARKET` | Settle from venue resolution |
+| `chrysopoeia cycle --journal DIR ...` | Admit one turn and record its outcome |
+| `chrysopoeia run --journal DIR ...` | Run a bounded multi-cycle session |
+| `chrysopoeia consume --event EVENT.json --journal DIR` | Consume one strict `trade_plan_ready` into an open session |
+| `outbox-pending`, `outbox-ack` | Manual delivery recovery |
 
-Authenticated execution, non-YES positions, plan changes after entry, and
-partial paper exits are not part of the current accounting contract. Event
-publishing is optional through the Harness event sink; subscriptions and
-external consumer ledgers are not implemented here. The local development consumer
-preserves this bracket behavior in the current journal; future external
-consumers do not share it.
+`consume` skips completed event IDs before any I/O, fetches a fresh public
+Polymarket quote, and records one fill or a deterministic rejection. Quote
+failures happen before admission, leave no fill, and are retryable.
+
+`CHRYSOPOEIA_EVENT_SINK` enables oldest-first delivery of accepted plans and
+decided-turn outcomes to one topic; event-producing commands then require a
+journal, and subscribers filter on `record_type`.
+
+Not in scope: authenticated execution, plan changes after entry, partial exits,
+and subscriptions or external consumer ledgers.

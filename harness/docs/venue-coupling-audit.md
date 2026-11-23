@@ -1,8 +1,7 @@
 # Venue-coupling audit
 
-Read-only audit (harness roadmap Next item 1, operator-approved 2026-11-13). No
-code changes. Every place the venue leaks past an adapter, with file:line
-evidence and a change-cost tier:
+Where Polymarket leaks past the adapter, with file:line evidence (at audit
+time) and a change-cost tier:
 
 - **Config-only** — a new market family inside Polymarket.
 - **Adapter-only** — a second venue adapter, no contract or core change.
@@ -16,14 +15,12 @@ evidence and a change-cost tier:
 - `harness/chrysopoeia/trading.py:16-39` — the Polymarket event-URL validator is
   defined in the core `trading.py`, not the adapter.
 - `trading.py:217` — `MarketSnapshot.__post_init__` calls it on every rich
-  snapshot, so **no non-Polymarket venue can construct a `MarketSnapshot`
-  without editing core code**. This is the single hardest coupling: a second
-  venue cannot reuse the canonical snapshot type as-is.
+  snapshot, so **no other venue can construct a `MarketSnapshot` without
+  editing core code**. This is the hardest coupling.
 - Callers beyond the adapter: `context.py:6,34`, `context_profiles.py:13,262`.
-- Change cost: rename/move to a venue-supplied validator injected at the
-  snapshot/adapter boundary. Mechanical, but every snapshot path, its tests,
-  and the schema semantics of `snapshot.source_url` (currently "must be a
-  polymarket.com event URL") are affected.
+- Fix: inject a venue-supplied validator at the snapshot/adapter boundary.
+  Mechanical, but touches every snapshot path, its tests, and the
+  `snapshot.source_url` semantics ("must be a polymarket.com event URL").
 
 ### C2. YES-first outcome semantics baked into the core snapshot (cross-unit)
 
@@ -35,9 +32,8 @@ evidence and a change-cost tier:
 - `consumer/paper_consumer/market.py:120` — `selected_outcome = "YES" if
   token_index == 0 else "NO"`, and `:138` resolves against the same first-token
   convention.
-- Change cost: a venue whose outcome labels/ordering don't match the
-  YES-first convention needs either adapter-side relabeling (cheap, lossy) or
-  a new schema version with venue-neutral outcome identity (cross-unit).
+- Fix: adapter-side relabeling (cheap, lossy) or a new schema version with
+  venue-neutral outcome identity (cross-unit).
 
 ### C3. Context identity is Polymarket-shaped and persisted in archived events (cross-unit)
 
@@ -49,19 +45,18 @@ evidence and a change-cost tier:
   `polymarket:event:` scope prefix and `polymarket.event` profile id.
 - The values are durable data: `contracts/turn_outcome.v3/v4.schema.json:127-154`
   persist `context.scope_key`/`profile_id`, and the Observer groups insights by
-  them (`observer` v1 aggregates are profile-scoped). A second venue would
-  produce `polymarket:*`-like keys or fail routing; learned contexts cannot
-  transfer across venues today (per-venue namespaces — already recorded as
-  deferred roadmap work requiring a coordinated schema tag).
-- Change cost: any namespace change is a new schema version plus Observer-side
-  grouping compatibility. Deferred until a second venue is approved.
+  them. A second venue would produce `polymarket:*`-like keys or fail routing,
+  and learned contexts cannot transfer across venues (per-venue namespaces are
+  deferred roadmap work needing a coordinated schema tag).
+- Fix: a new schema version plus Observer grouping compatibility. Deferred
+  until a second venue is approved.
 
 ### C4. `market_id` pattern encodes Polymarket numeric IDs (cross-unit)
 
 - `contracts/trade_plan_ready.v1/v2.schema.json:14` — `market_id` pattern
   `^[1-9][0-9]{0,99}$` matches Polymarket's numeric Gamma IDs specifically.
   A venue with alphanumeric market IDs cannot emit a v1/v2 plan.
-- Change cost: new schema version only when a second venue exists.
+- Fix: a new schema version, only once a second venue exists.
 
 ### B1. Adapter call sites are wired directly into core flows (adapter-only)
 
@@ -77,9 +72,8 @@ Every importer of `chrysopoeia.polymarket` outside the adapter:
 - `polymarket_evaluation.py:9-14,111,123` — Polymarket-specific scoring by
   definition (CLOB baseline vs Brier); acceptable permanently.
 
-Change cost: a second venue means these call sites go through a config-selected
-adapter object instead of direct imports. Mechanical but wide; per the design
-rules, the abstraction waits for the second concrete use case.
+Fix: route these through a config-selected adapter object. Mechanical but
+wide; the abstraction waits for a second concrete venue.
 
 ### B2. Consumer adapter (adapter-only)
 
@@ -89,8 +83,7 @@ rules, the abstraction waits for the second concrete use case.
   and staleness (`:153-166`), `polymarket-` quote identity prefix (`:169`).
 - `consumer/paper_consumer/app.py:19,122` — hardwires `Polymarket()` into the
   app; `:88` filters on `trade_plan_ready` (venue-neutral).
-- Change cost: implement another `Market` and select it in `app.py`.
-  Acceptable.
+- Fix: implement another `Market` and select it in `app.py`.
 
 ### A1. Closed config enumerations (config-only)
 
@@ -114,16 +107,10 @@ rules, the abstraction waits for the second concrete use case.
   lead, volume24hr ordering, `gameStartTime` read.
 - All adapter-internal by design. Acceptable.
 
-## Acceptable to keep as-is
+## Verdict
 
-The adapter itself, the esports slug/question grammar, `polymarket_evaluation`
-(CLOB baseline scoring), the closed config gates, and the consumer's
-`Polymarket` class. One venue, one implementation, no speculative abstraction.
-
-## Not acceptable to keep if a second venue is approved
-
-C1 (core URL validation inside `MarketSnapshot`), C2 (YES-first outcome
-semantics in core + contract), C3 (context namespace in archived events), C4
-(`market_id` pattern in `trade_plan_ready`). Each is cross-unit and needs
-coordinated operator approval before any fix; C3 additionally touches the
-Observer's grouping keys.
+- Keep as-is: the adapter, esports slug/question grammar,
+  `polymarket_evaluation`, the closed config gates, and the consumer's
+  `Polymarket` class. One venue, one implementation.
+- Must fix before a second venue: C1–C4. Each is cross-unit and needs
+  coordinated operator approval; C3 also touches Observer grouping keys.
