@@ -24,7 +24,7 @@ cost. Rows are condensed; full run details are in git history.
 
 | Date | What was verified | Result |
 | --- | --- | --- |
-| 2026-10-30 | `turn_outcome` v4 reserved-cost acceptance: CS2 capture, one cycle publishing to Pub/Sub, one Observer query | Pass. Abstained; $0.180846 actual of $1.43376 reserved; archive and Observer returned the exact actual/reserved values. 386 Harness + 10 Observer tests passed. |
+| 2026-11-25 | Model-comparison baseline: `polymarket_evaluation.evaluate_journal` over 69 Nov 12–18 esports journals copied read-only from GCS; public Gamma/CLOB reads only | Pass, no edge. 24 resolved markets: Flash Brier 0.268 vs market 0.251; 90% CI of improvement [−0.041, +0.006]. ~50 public GETs, no model calls, ~$0. Item closed. | `turn_outcome` v4 reserved-cost acceptance: CS2 capture, one cycle publishing to Pub/Sub, one Observer query | Pass. Abstained; $0.180846 actual of $1.43376 reserved; archive and Observer returned the exact actual/reserved values. 386 Harness + 10 Observer tests passed. |
 | 2026-10-26 | Esports pilot: CS2/Dota 2 capture and cycles with research | Pass after fix. Grounded research pushed input past the 8192 ceiling (`MODEL_COST_USAGE_INVALID`); reservation now uses the policy input ceiling and esports raises it to 32768. Retries must recapture (journal idempotency). ~$2–3; no orders. |
 | 2026-10-26 | Liquidity-aware sizing (`plan_capacity`, `check_risk`), offline | Pass (381 tests). Public-book live check and image redeploy pending. |
 | 2026-10-23 | Self-learning rollout steps 1–2: image with `[history]`/`[context_learning]`, one two-cycle deployed run | Pass. $0.1255 actual, one paper fill; history aggregate cited; 20-outcome learning gate correctly stayed closed. |

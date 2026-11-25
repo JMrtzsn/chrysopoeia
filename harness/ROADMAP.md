@@ -21,6 +21,13 @@ information the market already prices. The code stays until item 2 reports. A
 model is used only where it adds reading capacity the market lacks, never as
 the probability source.
 
+Model comparison closed 2026-11-25 with the zero-cost baseline only; no model
+replays. Across 62 turns on 24 resolved markets (first forecast per market),
+Flash scored Brier 0.268 against 0.251 for the same-time market price (log loss
+0.727 vs 0.691). Improvement over the market was −0.017, 90% bootstrap interval
+[−0.041, +0.006]; forecasts sat a mean 5.6 points from the market price. No
+evidence of edge, so no model switch.
+
 1. **Bounded cycle wall-clock** (deprioritized 2026-11-19: needed only if the
    research loop is revived). Since 2026-11-17 most scheduled cycles stall
    after a model `function_call` and are killed at the Cloud Run 900 s task
@@ -57,21 +64,6 @@ the probability source.
    Acceptance: offline tests for constraint checks, claim schema, cost cap, and
    scorer on fixtures; then one bounded live daily scan with recorded cost. A
    positive result needs a separate approved item to paper-trade the signals.
-3. **Model comparison and switch** (operator-requested 2026-11-19). Question:
-   did `gemini-3.5-flash` cause the forecaster's loss?
-   - **Baseline (no model cost):** score all 62 archived esports turns
-     (Nov 12–18) against same-time market price and result (Brier, log loss).
-   - **Replay:** confirm journals kept full research inputs, then rerun them
-     on 2–3 stronger models via existing adapters. No live search; recorded
-     inputs only.
-   - **Bounds:** at most 3 candidates, one replay per turn per model, $10
-     total cap, fixture-tested offline scoring.
-   - **Decision rule:** switch the `[models]` roles in `configs/platform.toml`
-     and `chrysopoeia.toml` only if a candidate beats both the market and
-     Flash on Brier with a 90% bootstrap interval excluding no improvement
-     over the market. Trading resumes only as a separately approved paper
-     trial. If none beats the market, record that and close. Item 2 does not
-     wait for this item.
 
 The Observer journey health work is tracked in `../observer/ROADMAP.md`.
 
