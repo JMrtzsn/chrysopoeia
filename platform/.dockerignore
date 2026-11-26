@@ -4,7 +4,6 @@ __pycache__
 .git
 artifacts
 docs
-/ROADMAP.md
 AGENTS.md
 .githooks
 infra

@@ -8,7 +8,7 @@ exits, settlements, HTTP service, tests, project, and container. It never import
 ## Owned
 
 - `paper_consumer/`, `tests/`, `scripts/`, `pyproject.toml`, `uv.lock`
-- `Dockerfile`, `build.sh`, `README.md`, `ROADMAP.md`
+- `Dockerfile`, `build.sh`, `README.md`
 
 The shared schemas at `../contracts/trade_plan_ready.v*.schema.json` are owned by
 Harness and consumed as data. V1 remains YES-only; v2 permits YES/NO token buys.

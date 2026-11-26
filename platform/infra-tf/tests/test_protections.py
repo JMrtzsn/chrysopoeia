@@ -1,6 +1,6 @@
-"""Offline guard for roadmap item 12b: fails if any protected resource loses
+"""Offline guard for storage protections: fails if any protected resource loses
 its destroy protection. Pure stdlib; parses resource blocks by brace counting
-and asserts the protections item 12b pins.
+and asserts the pinned protections.
 """
 
 import sys
@@ -76,8 +76,7 @@ class ProtectionTests(unittest.TestCase):
                 self.assertIn(
                     snippet,
                     block,
-                    f"{source}: {key} lost protection `{snippet}` "
-                    "(roadmap item 12b)",
+                    f"{source}: {key} lost protection `{snippet}`",
                 )
 
 

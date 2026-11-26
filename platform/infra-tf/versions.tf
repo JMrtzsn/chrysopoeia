@@ -1,4 +1,4 @@
-# Pinned toolchain (roadmap item 12a). Upgrades are deliberate, never casual.
+# Pinned toolchain. Upgrades are deliberate, never casual.
 terraform {
   required_version = "~> 1.15.0"
 

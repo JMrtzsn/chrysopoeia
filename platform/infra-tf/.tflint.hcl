@@ -4,7 +4,7 @@ plugin "terraform" {
   enabled = true
 }
 
-# The per-concern file layout (roadmap item 12a) replaces a main.tf
+# The per-concern file layout replaces a main.tf
 # entrypoint by design; this is a single root, not a reusable module.
 rule "terraform_standard_module_structure" {
   enabled = false

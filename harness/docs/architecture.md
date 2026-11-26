@@ -247,4 +247,4 @@ both have enough forward outcomes in the same context scope.
   execution authority change; keep implemented and proposed paths distinct.
 - Check against [`../chrysopoeia/loop.py`](../chrysopoeia/loop.py) and
   `agent.py`, `paper_cycle.py`, `trading.py`, `polymarket.py`, `accounting.py`.
-- Record status/order changes in `../ROADMAP.md`; this map is not a second spec.
+- This map is not a second spec.

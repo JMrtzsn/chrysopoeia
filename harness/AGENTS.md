@@ -5,10 +5,8 @@ runtime adapter live here. The harness owns the `trade_plan_ready` event contrac
 shared schema data under `../contracts/`, and producer. Local `consume` remains a
 development consumer only. The deployed paper consumer in `../consumer/` owns
 its effects and ledger; deployment adapters live in sibling `platform/`.
-Ordered harness work lives in `ROADMAP.md`.
 The current and proposed harness architecture map lives in
 `docs/architecture.md`; update it when a major boundary or flow changes.
-Unapproved future ideas are consolidated in `docs/proposals.md`.
 
 ## Owned
 

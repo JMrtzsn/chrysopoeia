@@ -1,5 +1,5 @@
 #!/bin/sh
-# Offline gates for the infra-tf root (roadmap item 12a): no cloud access.
+# Offline gates for the infra-tf root: no cloud access.
 # fmt (style) -> validate (schema) -> tflint (correctness) -> trivy (security).
 set -eu
 cd "$(dirname "$0")"

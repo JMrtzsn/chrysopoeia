@@ -261,7 +261,7 @@ No storage teardown is part of verification.
 ## Change and verification boundary
 
 Plan and apply only through `platform/run.sh`; see
-[`../AGENTS.md`](../AGENTS.md) and [`../ROADMAP.md`](../ROADMAP.md). Live applies,
+[`../AGENTS.md`](../AGENTS.md). Live applies,
 image publication, and job executions require approval and bounded verification
 per [`../../harness/docs/verification.md`](../../harness/docs/verification.md).
 Running the platform is explicit and off by default:
@@ -282,53 +282,3 @@ latency but increase invocation cost.
 Do not change cloud resources outside Terraform:
 `gcloud beta run jobs update --set-env-vars` replaces the full environment and
 creates drift.
-
-## Recorded platform checks
-
-Rows are condensed; full run details are in git history.
-
-| Date | What was verified | Result |
-| --- | --- | --- |
-| 2026-11-19 | `projection_refresh_paused` applied via gated deploy | Pass. Transfer config disabled; `open_positions` intact; no drift. Nothing scheduled runs. |
-| 2026-11-19 | Terraform rollback/forward of the job image; plan-only destroy checks | Pass. 1 in-place change each; protected storage refused destruction; BigQuery unchanged. `open_positions` gained `prevent_destroy`. |
-| 2026-11-18 | Terraform cutover (12e) and drift check (12f) | Pass. 0/0/0 apply, `validate` job exit 0, Pulumi state archived and stack removed, drift exit 0. |
-| 2026-11-18 | Scan schedule and Consumer sweep paused (first live Terraform apply) | Pass. Both Scheduler jobs `PAUSED`, no drift. Reason: scan cycles hanging to timeout and sweep errors from stale exit quotes on 3 open positions, which stay unsettled while paused. Resume by setting both to `false` and redeploying. |
-| 2026-11-16 | Terraform import (12d) into the new state bucket | Pass. Plan showed no changes; 71 objects in state; gates passed. |
-| 2026-11-15 | Consumer per-position sweep isolation rollout with quiescing | Pass. An unreadable quote now defers one position (logged ERROR) instead of failing the sweep; sweeps 204. |
-| 2026-11-14 | `open_positions` projection, scheduled query, Observer rollout | Pass after fixes (customer-managed transfer runner SA plus token-creator; Observer image must be pushed before pinning; a mis-set `image_digest` was restored). Health 200 authenticated, 403 unauthenticated. |
-| 2026-11-13 | Observer journey-health rollout | Pass. `/v1/health` 200 `healthy` authenticated, 403 unauthenticated; no model spend. |
-| 2026-11-09/10 | Scheduled esports scanning (8b): workflow, scheduler, IAM | Pass after auth fixes (OAuth access token, executions API). Two ticks produced distinct per-tick journals; schedule then paused. Billing budget deferred at the time. |
-| 2026-11-07 | Full rollout with private Observer | Pass. 5 Observer resources created; validate job exit 0; `/v1/insights` 200 authenticated, 403 unauthenticated. `/healthz` is reserved by Cloud Run, so the route became `/health`. No model spend. |
-| 2026-10-25 | Job-trigger Cloud Tasks queue and 80-execution campaign | Pass. Pilot of 2 completed with fresh journals; campaign bound $120 worst case, ~$8–10 expected. |
-| 2026-10-25 | Consumer rollout with synthetic plan events | Pass. Rejected, filled, and settled outcomes archived as `consumer_outcome` v1; harness runs abstained ($0.217). Transient sweep 503s self-recovered. |
-| 2026-10-22 | `context_history_enabled` IAM and env | Pass. Grants verified; query path unverified until the next image. |
-| 2026-10-19 | Dependency layer split; repin; `validate` job | Pass. Locked versions; no model calls. |
-| 2026-10-18 | Frozen-lock image install; repin; `validate` job | Pass. Fixed drift to ADK 2.12.0/pydantic 2.14.1. |
-| 2026-10-18 | Two-cycle BTC smoke | Fail. Both turns `ProposalOutput=None`; $1.41 booked. See Harness verification. |
-| 2026-10-18 | Config-only job update; two-cycle run | Pass. One fill, one failed turn, $0.880 booked; both events in BigQuery. |
-| 2026-10-18 | Archive protection/retention update | Pass. Metadata-only; archived row unchanged; ~$0. |
-| 2026-10-18 | Event archive deploy; one synthetic publish and one 100 MiB-capped query | Pass. Row arrived with exact payload and attributes; ~$0. |
-| 2026-09-18 | Initial Cloud Run job with bounded `cycle` and `book` | Pass. Vertex reached via runner identity; under $0.02. |
-| 2026-09-27 | Redeploy after a discarded VM experiment | Pass. `cycle` idempotent, `book` succeeded; journal bucket retained. |
-| 2026-10-08 | `drain()` against a temporary Pub/Sub topic | Pass. One publish/ack; temporary resources deleted; ~$0. |
-| 2026-10-10 | Temporary Consumer stack with synthetic events | Pass after three fixes (`User-Agent`, push envelope fields, book truncation). Fill and sweep close verified; all temporary resources deleted; ~$0. Settlement, dead-letter, and concurrent writers not exercised. |
-| 2026-10-12 | Pub/Sub `record_type` filter on a temporary topic | Pass. Filtered subscription received only `trade_plan_ready`; resources deleted. |
-| 2026-10-14 | Job retargeted to `run`; two-cycle execution | Pass. Both abstained, $0.331; grounding and direct publishing worked. |
-| 2026-10-14 | Plan-check schema fix in the deployed job | Pass on third attempt (two transient Vertex 503s). Accepted plan published and paper fill recorded. |
-
-## Deferred services
-
-No service below is required for the current deployment. Add one only after a
-measured need and explicit approval.
-
-| Need | Candidate | Boundary |
-| --- | --- | --- |
-| Shared authoritative records | Cloud SQL | Session storage is not the financial ledger |
-| Document retrieval | Vertex AI RAG Engine | Provenance-linked evidence only |
-| Long-term lessons | Vertex AI Memory Bank | Never authoritative for balances, risk, or lifecycle |
-| Managed agent runtime | Vertex AI Agent Engine | Alternative runtime/deployment boundary |
-| Independent consumer runtime | Pub/Sub-triggered Cloud Run | Implemented as the optional paper Consumer; live execution consumers remain future work |
-| Secrets | Secret Manager | Credentials never enter prompts or session state |
-
-Any authenticated execution remains prohibited under
-[`../../.agents-cli-spec.md`](../../.agents-cli-spec.md).

@@ -4,7 +4,6 @@ GCP deployment: container image build/publish, Terraform base (bucket, runner
 identity, Artifact Registry, on-demand Cloud Run job), digest pinning, and the
 optional independent consumer service/subscription/scheduler. Sibling work units
 own application behavior; Harness owns event contracts.
-Ordered platform work lives in `ROADMAP.md`.
 
 ## Owned
 

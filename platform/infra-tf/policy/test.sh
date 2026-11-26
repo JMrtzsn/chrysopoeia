@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fixture tests for the plan policy (roadmap item 12c): every deny_*.json
+# Fixture tests for the plan policy: every deny_*.json
 # fixture must produce at least one denial, every allow_*.json must pass clean.
 # Usage: policy/test.sh  (run from the infra-tf root)
 set -eu

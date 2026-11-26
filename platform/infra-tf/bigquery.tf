@@ -117,8 +117,7 @@ resource "google_bigquery_dataset_iam_member" "runner_data_viewer" {
 
 # Atomic full rebuild: replaying the archive re-derives every row, so the
 # projection stays a pure read model rather than incrementally accreted state.
-# The `params.query` string formatting is a known provider-quirk diff
-# (roadmap 12d ghost-diff allowance list).
+# The `params.query` string formatting is a known provider-quirk diff.
 resource "google_bigquery_data_transfer_config" "open_positions_refresh" {
   count          = local.feature_topic ? 1 : 0
   project        = var.project_id

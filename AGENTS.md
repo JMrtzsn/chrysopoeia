@@ -6,8 +6,6 @@
 - `README.md`: orientation and local quickstart.
 - `harness/docs/`, `platform/docs/`, and `observer/README.md`: work-unit
   documentation. Keep it aligned with the spec and implementation.
-- `harness/ROADMAP.md`, `platform/ROADMAP.md`, and `observer/ROADMAP.md`:
-  approved work order for each independent work unit.
 
 ## Ownership
 

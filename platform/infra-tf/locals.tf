@@ -54,7 +54,7 @@ locals {
   transfer_agent_member  = "serviceAccount:service-${local.project_number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
   scheduler_agent_member = "serviceAccount:service-${local.project_number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
 
-  # Consumer sweep scheduler name matches the Pulumi auto-named live resource
-  # (roadmap 12d imports it by ID); changing it would recreate the job.
+  # Consumer sweep scheduler name matches the imported, originally auto-named
+  # live resource; changing it would recreate the job.
   consumer_sweep_job_name = "consumer-sweep-916f9e1"
 }

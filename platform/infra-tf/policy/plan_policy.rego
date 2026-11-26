@@ -1,6 +1,6 @@
 package terraform.plan
 
-# Operator policy for plan gating (roadmap item 12c). Input is the JSON output
+# Operator policy for plan gating. Input is the JSON output
 # of `terraform show -json tfplan`. Runs offline against fixtures in
 # policy/fixtures; against a real saved plan at apply time from 12e on.
 import rego.v1
